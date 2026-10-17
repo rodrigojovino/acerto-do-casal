@@ -109,7 +109,7 @@ O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o p
 
 ## Fases
 
-1. [ ] Fundação: scaffold, Firebase, domínio + testes, build no GitHub Actions, prova de conceito da SEFAZ
+1. [x] Fundação: scaffold, Firebase, domínio + testes, build no GitHub Actions, prova de conceito da SEFAZ
 2. [ ] Acesso: login Google e vínculo do casal por código
 3. [ ] Núcleo do acerto: lançamento, painel com saldo, offline
 4. [ ] Comprovantes e aprovação
