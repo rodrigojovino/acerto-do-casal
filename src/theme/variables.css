@@ -1,2 +1,51 @@
-/* For information on how to create your own theme, please refer to:
-http://ionicframework.com/docs/theming/ */
+/* Visual de referência do escopo (wireframes):
+   fundo cinza-claro, texto quase preto, azul de destaque, Manrope,
+   botões com cantos de 12 a 14px. Tema só claro por enquanto. */
+
+:root {
+  --app-bg: #f6f6f4;
+  --app-surface: #ffffff;
+  --app-text: #1c1c1a;
+  --app-muted: #5f5f5a;
+  --app-border: #deddd8;
+  --app-subtle: #eeede9;
+  --app-accent: #2457c5;
+  --app-accent-dark: #1a3f94;
+  --app-danger: #a3271d;
+  --app-danger-bg: #fbe9e7;
+  --app-radius-control: 12px;
+  --app-radius-button: 14px;
+  --app-radius-card: 18px;
+
+  --ion-font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+  --ion-background-color: var(--app-bg);
+  --ion-background-color-rgb: 246, 246, 244;
+  --ion-text-color: var(--app-text);
+  --ion-text-color-rgb: 28, 28, 26;
+  --ion-toolbar-background: var(--app-bg);
+  --ion-toolbar-color: var(--app-text);
+  --ion-border-color: var(--app-border);
+
+  --ion-color-primary: #2457c5;
+  --ion-color-primary-rgb: 36, 87, 197;
+  --ion-color-primary-contrast: #ffffff;
+  --ion-color-primary-contrast-rgb: 255, 255, 255;
+  --ion-color-primary-shade: #1a3f94;
+  --ion-color-primary-tint: #3a68cb;
+
+  --ion-color-dark: #1c1c1a;
+  --ion-color-dark-rgb: 28, 28, 26;
+  --ion-color-dark-contrast: #ffffff;
+  --ion-color-dark-contrast-rgb: 255, 255, 255;
+  --ion-color-dark-shade: #191917;
+  --ion-color-dark-tint: #333331;
+}
+
+ion-button {
+  --border-radius: var(--app-radius-button);
+  --box-shadow: none;
+  min-height: 48px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}

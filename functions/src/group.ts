@@ -119,6 +119,9 @@ type JoinOutcome =
  * Entra no grupo pelo código. Valida existência, validade, dono do código e o
  * limite de 2 membros, tudo na mesma transação. Códigos errados contam para o
  * limite de tentativas, gravado na mesma transação antes de responder o erro.
+ *
+ * Se os dois criaram grupo, quem digita o código do outro sai do próprio grupo,
+ * que ainda está vazio (só ele), e ele é apagado. Grupo com 2 membros nunca é desfeito.
  */
 export const joinGroup = onCall(async (request): Promise<{ groupId: string }> => {
   const uid = requireUid(request);
@@ -147,9 +150,17 @@ export const joinGroup = onCall(async (request): Promise<{ groupId: string }> =>
       return { ok: false, error };
     };
 
+    // Grupo atual de quem chama: só pode ser abandonado se ainda estiver sozinho nele.
     const membership = await tx.get(membershipRef(uid));
+    let soloGroup: { ref: DocumentReference; inviteCode: string | null } | null = null;
     if (membership.exists) {
-      return { ok: false, error: new HttpsError('already-exists', 'Você já faz parte de um grupo.') };
+      const ownRef = db.doc(`groups/${membership.get('groupId') as string}`);
+      const own = await tx.get(ownRef);
+      const ownMembers = (own.get('members') as string[] | undefined) ?? [];
+      if (own.exists && (ownMembers.length !== 1 || ownMembers[0] !== uid)) {
+        return { ok: false, error: new HttpsError('already-exists', 'Você já faz parte de um grupo.') };
+      }
+      soloGroup = { ref: ownRef, inviteCode: (own.get('inviteCode') as string | null | undefined) ?? null };
     }
     if (!code) {
       return fail(new HttpsError('invalid-argument', 'Código inválido. Confira e digite de novo.'));
@@ -176,6 +187,10 @@ export const joinGroup = onCall(async (request): Promise<{ groupId: string }> =>
       return { ok: false, error: new HttpsError('failed-precondition', 'Este grupo já está completo.') };
     }
 
+    if (soloGroup) {
+      tx.delete(soloGroup.ref);
+      if (soloGroup.inviteCode) tx.delete(inviteRef(soloGroup.inviteCode));
+    }
     tx.update(groupRef, {
       members: [...members, uid],
       [`memberNames.${uid}`]: name,
@@ -183,7 +198,9 @@ export const joinGroup = onCall(async (request): Promise<{ groupId: string }> =>
       inviteExpiresAt: null,
     });
     tx.delete(inviteRef(code));
-    tx.create(membershipRef(uid), { groupId: groupRef.id });
+    // Com grupo sozinho o vínculo já existe e é trocado; sem grupo, create garante unicidade.
+    if (soloGroup) tx.set(membershipRef(uid), { groupId: groupRef.id });
+    else tx.create(membershipRef(uid), { groupId: groupRef.id });
     tx.delete(attemptsRef(uid));
     return { ok: true, groupId: groupRef.id };
   });

@@ -141,20 +141,28 @@ describe('joinGroup', () => {
   });
 
   it('quem gerou o código não entra no próprio grupo', async () => {
-    const c = await signInAs('caio', 'Pessoa C');
-    const own = await c.call<InviteResult>('createGroup');
-    await expectError(c.call('joinGroup', { code: own.code }), 'already-exists');
-    // Mesmo sem vínculo (caso de dado inconsistente), o próprio código é recusado.
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`memberships/${c.uid}`).delete();
-    });
-    await expectError(c.call('joinGroup', { code: own.code }), 'failed-precondition', /próprio código/);
+    await expectError(a.call('joinGroup', { code: invite.code }), 'failed-precondition', /próprio código/);
+    expect((await readDoc(`groups/${invite.groupId}`))?.members).toEqual([a.uid]);
   });
 
-  it('quem já tem grupo não entra em outro', async () => {
+  it('se os dois criaram grupo, quem digita o código do outro troca de grupo', async () => {
+    const own = await b.call<InviteResult>('createGroup');
+    await expect(b.call('joinGroup', { code: invite.code })).resolves.toEqual({ groupId: invite.groupId });
+
+    expect((await readDoc(`groups/${invite.groupId}`))?.members).toEqual([a.uid, b.uid]);
+    expect(await readDoc(`memberships/${b.uid}`)).toEqual({ groupId: invite.groupId });
+    // O grupo vazio de B e o convite dele somem.
+    expect(await readDoc(`groups/${own.groupId}`)).toBeUndefined();
+    expect(await readDoc(`invites/${raw(own.code)}`)).toBeUndefined();
+  });
+
+  it('quem está num grupo completo não entra em outro', async () => {
+    await b.call('joinGroup', { code: invite.code });
     const c = await signInAs('caio', 'Pessoa C');
-    await c.call('createGroup');
-    await expectError(c.call('joinGroup', { code: invite.code }), 'already-exists');
+    const other = await c.call<InviteResult>('createGroup');
+    await expectError(b.call('joinGroup', { code: other.code }), 'already-exists');
+    expect((await readDoc(`groups/${invite.groupId}`))?.members).toEqual([a.uid, b.uid]);
+    expect(await readDoc(`memberships/${b.uid}`)).toEqual({ groupId: invite.groupId });
   });
 
   it('código inexistente ou mal formatado é recusado', async () => {
