@@ -5,21 +5,36 @@ import { sessionReady, status, type SessionStatus } from '@/services/session';
 import EntradaPage from '../views/EntradaPage.vue';
 import VinculoPage from '../views/VinculoPage.vue';
 import PainelPage from '../views/PainelPage.vue';
+import EmBrevePage from '../views/EmBrevePage.vue';
+import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 
 const routes: Array<RouteRecordRaw> = [
   { path: '/', redirect: '/painel' },
   { path: '/entrar', name: 'entrar', component: EntradaPage },
   { path: '/vinculo', name: 'vinculo', component: VinculoPage },
   { path: '/painel', name: 'painel', component: PainelPage },
+  { path: '/pendencias', name: 'pendencias', component: EmBrevePage },
+  { path: '/historico', name: 'historico', component: EmBrevePage },
+  { path: '/ajustes', name: 'ajustes', component: EmBrevePage },
+  { path: '/gasto/novo', name: 'gasto-novo', component: ExpenseFormPage },
+  { path: '/gasto/:id/editar', name: 'gasto-editar', component: ExpenseFormPage },
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
 
-/** Única tela permitida para cada estado da sessão. */
-const routeFor: Record<SessionStatus, string> = {
+/** Tela inicial de cada estado da sessão. */
+const homeFor: Record<SessionStatus, string> = {
   signedOut: 'entrar',
   noGroup: 'vinculo',
   waitingPartner: 'vinculo',
   linked: 'painel',
+};
+
+/** Telas permitidas em cada estado; o app inteiro só para o casal vinculado. */
+const allowed: Record<SessionStatus, ReadonlySet<string>> = {
+  signedOut: new Set(['entrar']),
+  noGroup: new Set(['vinculo']),
+  waitingPartner: new Set(['vinculo']),
+  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto-editar']),
 };
 
 const router = createRouter({
@@ -27,12 +42,13 @@ const router = createRouter({
   routes,
 });
 
-// Guarda de rota: espera saber quem está logado e qual o grupo, e leva
-// para a tela do estado atual.
+// Guarda de rota: espera saber quem está logado e qual o grupo, e só deixa
+// abrir as telas do estado atual.
 router.beforeEach(async (to) => {
   await sessionReady();
-  const target = routeFor[status.value];
-  if (to.name !== target) return { name: target, replace: true };
+  if (!allowed[status.value].has(String(to.name))) {
+    return { name: homeFor[status.value], replace: true };
+  }
   return true;
 });
 
@@ -40,8 +56,8 @@ router.beforeEach(async (to) => {
 // navega sozinho.
 watch(status, async (next) => {
   await sessionReady();
-  if (router.currentRoute.value.name !== routeFor[next]) {
-    await router.replace({ name: routeFor[next] });
+  if (!allowed[next].has(String(router.currentRoute.value.name))) {
+    await router.replace({ name: homeFor[next] });
   }
 });
 

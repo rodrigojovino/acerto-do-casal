@@ -113,3 +113,20 @@ export function sessionReady(): Promise<void> {
   if (loaded.value) return Promise.resolve();
   return new Promise((resolve) => readyWaiters.push(resolve));
 }
+
+/** Primeiro nome de um membro, para os textos da tela ("Bia te deve…"). */
+export function firstNameOf(uid: string | null | undefined): string {
+  if (!uid) return '';
+  if (uid === currentUser.value?.uid) return 'Você';
+  const full = currentGroup.value?.memberNames[uid] ?? '';
+  return full.trim().split(/\s+/)[0] || 'A outra pessoa';
+}
+
+/** UID da outra pessoa do casal. */
+export const partnerUid = computed(() => {
+  const uid = currentUser.value?.uid;
+  return currentGroup.value?.members.find((m) => m !== uid) ?? null;
+});
+
+/** Primeiro nome da outra pessoa do casal. */
+export const partnerFirstName = computed(() => firstNameOf(partnerUid.value));

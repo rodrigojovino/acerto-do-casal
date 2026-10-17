@@ -30,6 +30,7 @@ import '@fontsource/manrope/800.css';
 
 /* Theme variables */
 import './theme/variables.css';
+import './theme/app.css';
 
 const app = createApp(App)
   .use(IonicVue)

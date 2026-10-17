@@ -1,0 +1,229 @@
+/* Peças compartilhadas pelas telas do app (mesmo visual dos wireframes). */
+
+.screen {
+  box-sizing: border-box;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: none;
+  color: var(--app-text);
+  border-radius: var(--app-radius-control);
+  cursor: pointer;
+}
+
+.card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-muted);
+}
+
+.input {
+  height: 44px;
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: var(--app-radius-control);
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--app-text);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--app-danger);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.btn {
+  height: 52px;
+  padding: 0 18px;
+  border-radius: var(--app-radius-button);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.btn.primary {
+  border: 0;
+  background: var(--app-accent);
+  color: #fff;
+}
+
+.btn.primary:active {
+  background: var(--app-accent-dark);
+}
+
+.btn.outline {
+  border: 1px solid var(--app-text);
+  background: var(--app-surface);
+  color: var(--app-text);
+}
+
+.btn.danger {
+  border: 1px solid var(--app-danger);
+  background: var(--app-surface);
+  color: var(--app-danger);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.link {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-accent);
+  cursor: pointer;
+}
+
+.btn:focus-visible,
+.input:focus-visible,
+.link:focus-visible,
+.icon-btn:focus-visible,
+.segmented button:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-muted);
+}
+
+.field-error {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-danger);
+}
+
+.alert-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-control);
+  background: var(--app-danger-bg);
+  color: var(--app-danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Seletor de duas opções (Eu / outro) */
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  background: var(--app-subtle);
+  padding: 4px;
+  border-radius: var(--app-radius-control);
+}
+
+.segmented button {
+  height: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--app-surface);
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+/* Cartão escuro de destaque (prévia e saldo) */
+.dark-card {
+  background: var(--app-text);
+  color: #fff;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.dark-card .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dark-card .muted {
+  color: #c9c8c2;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

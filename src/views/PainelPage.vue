@@ -15,11 +15,15 @@
         <p class="placeholder">O painel do mês, com saldo e gastos, chega na próxima fase.</p>
       </main>
     </ion-content>
+    <ion-footer class="ion-no-border">
+      <AppTabBar active="painel" />
+    </ion-footer>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonPage } from '@ionic/vue';
+import { IonContent, IonFooter, IonPage } from '@ionic/vue';
+import AppTabBar from '@/components/AppTabBar.vue';
 import { computed } from 'vue';
 import { signOut } from '@/services/auth';
 import { group, partnerName, user } from '@/services/session';
