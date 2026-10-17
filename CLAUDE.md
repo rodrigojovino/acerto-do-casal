@@ -32,6 +32,10 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - **Dinheiro sempre em centavos inteiros** (`number`, nunca float de reais). Formatação só na exibição (`Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })`).
 - Datas como string `YYYY-MM-DD`; mês de competência como `YYYY-MM`. Fuso `America/Sao_Paulo`.
 - Toda regra de cálculo vive em `src/domain/` como funções puras, com testes. Componentes não calculam saldo.
+- Divisão na tela × banco: o banco guarda `payerSharePct` (parte de quem pagou); a tela mostra "eu / outro". Converter só com `splitForViewer` e `payerSharePctFromViewer` (`src/domain/split.ts`), que invertem quando o pagador é o outro. Texto de dívida por gasto só com `debtView` (`src/services/expenseView.ts`).
+- Textos com o primeiro nome da outra pessoa ("Bia te deve", "Você deve para Bia"); nada de "Ela/Ele" nem crase que suponha gênero.
+- Gravações no Firestore não são aguardadas na tela (offline, a promessa só termina ao sincronizar): usar `trackWrite` (`src/services/sync.ts`) e seguir. Nada de transação no app.
+- Ionic mantém vivas as telas visitadas: cada tela fixa sua rota (`useRoute().name`, `params`) na criação. Ler a rota de forma reativa faz a tela reagir às rotas das outras e já quebrou a navegação.
 
 ## Repositório público: segurança
 
@@ -87,6 +91,12 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 Lançar, editar, anexar foto, aprovar e recusar funcionam offline. A consulta à SEFAZ de um QR lido offline acontece quando a conexão volta.
 
+### Datas e navegação
+
+- Data de um gasto: do mês de criação do grupo até o fim do mês seguinte ao atual (São Paulo). As regras validam o limite superior em UTC, o que as deixa no máximo um mês mais permissivas na virada, nunca mais restritivas.
+- Navegação do Painel: do mês de criação do grupo até o mês seguinte ao atual.
+- Competência: `resolveCompetence` (`src/domain/calendar.ts`): o mês da data; se fechado, o mês aberto atual; se também fechado, o próximo aberto.
+
 ### Vínculo do casal
 
 - Só pelas Functions callable `createGroup`, `renewInvite` e `joinGroup` (`functions/src/group.ts`), cada uma numa transação. O app nunca cria nem altera `members`.
@@ -135,7 +145,12 @@ groups/{groupId}/recurring/{recurringId}
 
 Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
 
-Regras atuais: as subcoleções do grupo estão liberadas para membros de forma genérica; cada coleção (meses, gastos, recorrentes) ganha regras próprias na fase em que for implementada.
+Regras atuais (`firestore.rules`, testadas em `tests/emulators/`):
+- `expenses`: só membros leem. Criação com todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status: 'pending_approval'` e `receipt: { type: 'none' }` (até a Fase 4). Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, competência coerente com a data e nunca em mês fechado.
+- Só quem lançou edita ou exclui, e nunca em mês fechado (origem e destino). A edição não muda o status, exceto `returned` → `pending_approval`.
+- `months`: só leitura para membros (fechamento por Function na Fase 6). Mês sem documento = aberto.
+- Subcoleções sem regra própria (ex.: `recurring` até a Fase 5) ficam fechadas.
+- `src/services/expenseData.ts` monta o documento como o app grava; os testes de regras usam as mesmas funções.
 
 ## Risco conhecido: NFC-e
 
