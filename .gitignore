@@ -34,6 +34,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Dados reais locais (ex.: URLs de NFC-e para a prova de conceito)
+*.local.txt
+*.local.json
+
 # Variáveis de ambiente locais
 .env
 .env.*
