@@ -1,5 +1,11 @@
+import { Capacitor } from '@capacitor/core';
 import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth } from 'firebase/auth';
+import {
+  connectAuthEmulator,
+  getAuth,
+  indexedDBLocalPersistence,
+  initializeAuth,
+} from 'firebase/auth';
 import {
   connectFirestoreEmulator,
   initializeFirestore,
@@ -23,7 +29,11 @@ export const FIREBASE_REGION = 'southamerica-east1';
 
 export const app = initializeApp(firebaseConfig);
 
-export const auth = getAuth(app);
+// Na WebView do Capacitor, o getAuth padrão carrega o resolvedor de popup/redirect
+// e pode travar; no aparelho a sessão fica só no IndexedDB.
+export const auth = Capacitor.isNativePlatform()
+  ? initializeAuth(app, { persistence: indexedDBLocalPersistence })
+  : getAuth(app);
 
 // Cache local persistente (IndexedDB) para o app funcionar offline.
 export const db = initializeFirestore(app, {
