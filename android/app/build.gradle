@@ -3,6 +3,12 @@ apply plugin: 'com.android.application'
 // Assinatura e versão vêm de variáveis de ambiente (GitHub Actions). Ver docs/release.md.
 // Sem ANDROID_KEYSTORE_PATH, o build release sai sem assinatura.
 def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+if (releaseKeystorePath) {
+    def missing = ["ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD"].findAll { !System.getenv(it) }
+    if (missing) {
+        throw new GradleException("ANDROID_KEYSTORE_PATH definido, mas faltam: ${missing.join(', ')}")
+    }
+}
 
 android {
     namespace = "io.github.rodrigojovino.acerto"
@@ -11,8 +17,10 @@ android {
         applicationId "io.github.rodrigojovino.acerto"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode (System.getenv("VERSION_CODE") ?: "1").toInteger()
-        versionName System.getenv("VERSION_NAME") ?: "0.0.1"
+        // Atribuição explícita: "versionCode (expr).toInteger()" o Groovy lê como
+        // versionCode(expr).toInteger(), passando String e quebrando com "Value is null".
+        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInteger()
+        versionName = System.getenv("VERSION_NAME") ?: "0.0.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

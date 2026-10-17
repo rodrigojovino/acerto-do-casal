@@ -58,12 +58,17 @@ Em **Settings > Secrets and variables > Actions**:
 | --- | --- |
 | `ANDROID_KEYSTORE_BASE64` | conteúdo copiado no passo 3 |
 | `ANDROID_KEYSTORE_PASSWORD` | senha da keystore |
-| `ANDROID_KEY_ALIAS` | `acerto` |
 | `ANDROID_KEY_PASSWORD` | senha da chave (igual à da keystore no formato PKCS12) |
 
 ### Variables (aba "Variables")
 
-A config web do Firebase é pública, então vai em Variables, não em Secrets. Os mesmos nomes do `.env.example`:
+O alias não é segredo. Como Secret, o GitHub mascararia toda ocorrência de "acerto" nos logs (inclusive em "acerto-do-casal"), por isso ele fica em Variables.
+
+| Nome | Valor |
+| --- | --- |
+| `ANDROID_KEY_ALIAS` | `acerto` |
+
+A config web do Firebase é pública, então também vai em Variables, não em Secrets. Os mesmos nomes do `.env.example`:
 
 | Nome |
 | --- |
