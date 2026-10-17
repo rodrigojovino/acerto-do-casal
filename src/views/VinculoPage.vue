@@ -159,7 +159,7 @@ async function sair(): Promise<void> {
   box-sizing: border-box;
   max-width: 480px;
   margin: 0 auto;
-  padding: calc(32px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
+  padding: calc(32px + var(--app-safe-top)) 20px calc(28px + var(--app-safe-bottom));
   display: flex;
   flex-direction: column;
   gap: 16px;

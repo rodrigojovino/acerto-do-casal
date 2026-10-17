@@ -28,8 +28,12 @@ defineProps<{ active: 'painel' | 'pendencias' | 'historico' | 'ajustes' }>();
 
 <style scoped>
 .tabbar {
+  /* Altura da barra + área da navegação do Android (3 botões ou gestos). */
+  box-sizing: content-box;
   height: 68px;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--app-safe-bottom);
+  padding-left: var(--app-safe-left);
+  padding-right: var(--app-safe-right);
   background: var(--app-surface);
   border-top: 1px solid var(--app-border);
   display: grid;

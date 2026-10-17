@@ -4,10 +4,15 @@
   box-sizing: border-box;
   max-width: 480px;
   margin: 0 auto;
-  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 24px;
+  padding: calc(16px + var(--app-safe-top)) calc(20px + var(--app-safe-right)) 24px calc(20px + var(--app-safe-left));
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Telas sem a barra inferior: o fim do conteúdo precisa sair de trás da navegação do Android. */
+.screen.no-tabbar {
+  padding-bottom: calc(24px + var(--app-safe-bottom));
 }
 
 .page-head {
