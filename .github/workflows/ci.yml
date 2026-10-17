@@ -1,0 +1,89 @@
+name: CI
+
+# Testes (domínio, regras e Functions nos emuladores) e checagem de que o APK compila.
+# O APK de debug serve só para isso; testes no aparelho usam o APK de release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+      - run: npm --prefix functions ci
+
+      - name: Conferir cópia única do Firebase SDK
+        # Duas cópias de @firebase/app quebram o app em tempo de execução
+        # ("Component auth has not been registered yet").
+        run: |
+          count=$(find node_modules -path '*/@firebase/app/package.json' | wc -l)
+          if [ "$count" -ne 1 ]; then
+            find node_modules -path '*/@firebase/app/package.json'
+            echo "::error::Há $count cópias de @firebase/app. Rode npm dedupe."
+            exit 1
+          fi
+
+      - name: Testes de domínio
+        run: npm test
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('package-lock.json') }}
+
+      - name: Testes de regras e Functions (emuladores)
+        run: npm run test:emulators
+
+  android-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build web
+        run: npm run build
+
+      - name: Sincronizar Capacitor
+        run: npx cap sync android
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Compilar APK de debug
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon

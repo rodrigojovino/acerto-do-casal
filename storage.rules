@@ -1,11 +1,21 @@
 rules_version = '2';
 
-// Regras definitivas de acesso por membro chegam no próximo passo da Fase 2.
-// Até lá, nada é acessível pelo app.
+// Comprovantes: só membros do grupo, só JPEG (comprimido no aparelho), até 5 MB.
+// A lista de membros vem do Firestore.
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read, write: if false;
+
+    function isMember(groupId) {
+      return request.auth != null
+        && request.auth.uid in firestore.get(/databases/(default)/documents/groups/$(groupId)).data.members;
+    }
+
+    match /groups/{groupId}/receipts/{fileName} {
+      allow read, delete: if isMember(groupId);
+      allow create, update: if isMember(groupId)
+        && fileName.matches('[A-Za-z0-9_-]{1,64}[.]jpg')
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.size < 5 * 1024 * 1024;
     }
   }
 }

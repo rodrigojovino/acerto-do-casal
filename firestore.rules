@@ -1,11 +1,52 @@
 rules_version = '2';
 
-// Regras definitivas de acesso por membro chegam no próximo passo da Fase 2.
-// Até lá, nada é acessível pelo app.
+// Acesso só para os membros do grupo. Grupo, convite e vínculo são criados
+// e alterados apenas pelas Cloud Functions (Admin SDK, que ignora estas regras).
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+
+    function signedIn() {
+      return request.auth != null;
     }
+
+    function isMember(groupId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
+    // Vínculo usuário → grupo: cada um lê só o próprio.
+    match /memberships/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create, delete: if false;
+
+      // Membro altera só a divisão padrão e o próprio nome.
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['defaultSplitPct', 'memberNames'])
+        && request.resource.data.defaultSplitPct is int
+        && request.resource.data.defaultSplitPct >= 0
+        && request.resource.data.defaultSplitPct <= 100
+        && request.resource.data.memberNames.diff(resource.data.memberNames).affectedKeys()
+             .hasOnly([request.auth.uid])
+        && request.resource.data.memberNames[request.auth.uid] is string
+        && request.resource.data.memberNames[request.auth.uid].size() >= 1
+        && request.resource.data.memberNames[request.auth.uid].size() <= 60;
+
+      // Dados do casal (meses, gastos, recorrentes): só membros.
+      // As regras de cada coleção são detalhadas nas próximas fases.
+      // Atenção: `{document=**}` sozinho também casa com o próprio grupo (zero
+      // segmentos) e liberaria alterar members; por isso `{collection}` antes.
+      match /{collection}/{document=**} {
+        allow read, write: if isMember(groupId);
+      }
+    }
+
+    // invites, joinAttempts e qualquer outra coleção: só as Functions.
   }
 }

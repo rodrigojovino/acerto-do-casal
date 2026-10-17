@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "functions:build": "npm --prefix functions run build",
-    "emulators": "npm run functions:build && firebase emulators:start"
+    "emulators": "npm run functions:build && firebase emulators:start",
+    "test:emulators": "npm run functions:build && firebase emulators:exec --project demo-acerto --only auth,firestore,functions,storage \"vitest run -c vitest.emulators.config.ts\""
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.5.2",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.3",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@vitejs/plugin-legacy": "^8.0.0",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/eslint-config-typescript": "^12.0.0",
