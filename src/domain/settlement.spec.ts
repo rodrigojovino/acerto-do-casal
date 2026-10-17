@@ -4,6 +4,8 @@ import {
   countsInBalance,
   expenseDebt,
   monthBalance,
+  paidByMember,
+  pendingSummary,
   splitInstallments,
   type Members,
   type SettlementExpense,
@@ -202,5 +204,42 @@ describe('splitInstallments', () => {
     expect(() => splitInstallments({ ...valid, personalCents: 2000 })).toThrow(RangeError);
     expect(() => splitInstallments({ ...valid, totalCents: 10.5 })).toThrow(RangeError);
     expect(() => splitInstallments({ ...valid, firstCompetence: '10/2026' })).toThrow(RangeError);
+  });
+});
+
+describe('paidByMember', () => {
+  it('soma o total pago por cada um, com a parte pessoal', () => {
+    const expenses = [
+      expense({ totalCents: 20000, personalCents: 5000, payerUid: A }),
+      expense({ totalCents: 30000, payerUid: B }),
+      expense({ totalCents: 12000, payerUid: A }),
+    ];
+    expect(paidByMember(expenses, members)).toEqual({ [A]: 32000, [B]: 30000 });
+  });
+
+  it('ignora awaiting_confirmation e começa em zero', () => {
+    expect(paidByMember([], members)).toEqual({ [A]: 0, [B]: 0 });
+    expect(paidByMember([expense({ totalCents: 500, status: 'awaiting_confirmation' })], members)).toEqual({
+      [A]: 0,
+      [B]: 0,
+    });
+  });
+
+  it('rejeita pagador de fora do grupo', () => {
+    expect(() => paidByMember([expense({ totalCents: 1, payerUid: 'uid-x' })], members)).toThrow(RangeError);
+  });
+});
+
+describe('pendingSummary', () => {
+  it('conta pendências do ponto de vista de quem olha', () => {
+    const list = [
+      { status: 'pending_approval' as const, createdBy: A },
+      { status: 'pending_approval' as const, createdBy: B },
+      { status: 'returned' as const, createdBy: A },
+      { status: 'confirmed' as const, createdBy: B },
+      { status: 'awaiting_confirmation' as const, createdBy: A },
+    ];
+    expect(pendingSummary(list, A)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 1 });
+    expect(pendingSummary(list, B)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 0 });
   });
 });

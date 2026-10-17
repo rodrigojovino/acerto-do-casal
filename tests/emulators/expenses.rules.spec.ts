@@ -6,6 +6,7 @@ import {
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { expenseUpdateData, newExpenseData, type ExpenseInput } from '../../src/services/expenseData';
 import { createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
@@ -233,5 +234,34 @@ describe('exclusão', () => {
 
   it('não exclui gasto de mês fechado', async () => {
     await assertFails(db(A).doc(path('a-fechado')).delete());
+  });
+});
+
+// Os documentos exatamente como o app grava (src/services/expenseData.ts).
+describe('documentos montados pelo app', () => {
+  const input: ExpenseInput = {
+    description: '  Farmácia  ',
+    totalCents: 8000,
+    personalCents: 0,
+    payerUid: B,
+    payerSharePct: 50,
+    date: `${CURRENT}-14`,
+  };
+
+  it('o gasto novo do app passa nas regras', async () => {
+    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, serverTime())));
+  });
+
+  it('a edição do app passa nas regras, inclusive devolvido corrigido', async () => {
+    const changed = { ...input, totalCents: 9000 };
+    await assertSucceeds(
+      db(A).doc(path('a-atual')).update(expenseUpdateData(changed, 'pending_approval', CURRENT, serverTime())),
+    );
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-atual')).update({ status: 'returned' });
+    });
+    await assertSucceeds(
+      db(A).doc(path('a-atual')).update(expenseUpdateData(changed, 'returned', CURRENT, serverTime())),
+    );
   });
 });

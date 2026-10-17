@@ -177,3 +177,48 @@ export function splitInstallments(input: InstallmentInput): Installment[] {
   }
   return installments;
 }
+
+/**
+ * Quanto cada membro pagou no mês (total dos gastos, com a parte pessoal).
+ * Usa o mesmo filtro do saldo: gastos aguardando confirmação ficam fora.
+ */
+export function paidByMember(
+  expenses: readonly SettlementExpense[],
+  members: Members,
+): Record<string, Cents> {
+  const paid: Record<string, Cents> = { [members[0]]: 0, [members[1]]: 0 };
+  for (const expense of expenses) {
+    if (!countsInBalance(expense.status)) continue;
+    assertCents(expense.totalCents, 'totalCents');
+    otherMember(members, expense.payerUid);
+    paid[expense.payerUid] += expense.totalCents;
+  }
+  return paid;
+}
+
+export interface PendingSummary {
+  /** Gastos pendentes ou devolvidos (contam no saldo, destacados). */
+  open: number;
+  /** Pendentes lançados pelo outro: aguardam a aprovação de quem olha. */
+  awaitingMyApproval: number;
+  /** Devolvidos a quem olha para corrigir. */
+  returnedToMe: number;
+}
+
+/** Contagem do aviso de pendências do Painel, do ponto de vista de quem olha. */
+export function pendingSummary(
+  expenses: readonly Pick<SettlementExpense & { createdBy: string }, 'status' | 'createdBy'>[],
+  viewerUid: string,
+): PendingSummary {
+  const summary: PendingSummary = { open: 0, awaitingMyApproval: 0, returnedToMe: 0 };
+  for (const { status, createdBy } of expenses) {
+    if (status === 'pending_approval') {
+      summary.open++;
+      if (createdBy !== viewerUid) summary.awaitingMyApproval++;
+    } else if (status === 'returned') {
+      summary.open++;
+      if (createdBy === viewerUid) summary.returnedToMe++;
+    }
+  }
+  return summary;
+}

@@ -11,6 +11,8 @@ export interface Group {
   /** Código sem hífen (`K7Q4M2`) enquanto o grupo espera o segundo membro. */
   inviteCode: string | null;
   inviteExpiresAt: Timestamp | null;
+  /** Define o primeiro mês navegável. */
+  createdAt: Timestamp | null;
 }
 
 /**
