@@ -8,10 +8,23 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 
 - Ionic + Vue 3 + TypeScript (strict), Vite
 - Capacitor (Android). appId: `io.github.rodrigojovino.acerto` · appName: `Acerto do Casal` · Android mínimo 8.0 (API 26)
-- Firebase, região `southamerica-east1`: Authentication (Google), Firestore com cache offline (`persistentLocalCache`), Cloud Storage, Cloud Functions, Cloud Messaging, Hosting (versão web)
+- Firebase, projeto `acerto-do-casal`: Authentication (Google), Firestore com cache offline (`persistentLocalCache`), Cloud Storage, Cloud Functions, Cloud Messaging, Hosting (versão web, https://acerto-do-casal.web.app)
+  - Regiões: Firestore e Functions em `southamerica-east1`; Storage em `us-east1` (bucket `acerto-do-casal.firebasestorage.app`, faixa gratuita).
+  - Firestore com proteção contra exclusão ativada.
+- Login Google: `@capacitor-firebase/authentication` com `skipNativeAuth` (o idToken nativo vai para o Firebase JS SDK); na web, popup com redirect de reserva. No aparelho o Auth usa `initializeAuth` + IndexedDB.
 - Câmera e QR Code: plugin Capacitor com ML Kit
-- Testes: Vitest (domínio) e Firebase Emulator (regras)
-- Build: GitHub Actions gera o APK assinado e publica no Release. Instalação por download direto do GitHub.
+- Testes: Vitest (domínio, `npm test`) e emuladores do Firebase para regras e Functions (`npm run test:emulators`, projeto `demo-acerto`)
+- Build: GitHub Actions gera o APK assinado e publica no Release (`release.yml`, tag `vX.Y.Z`). `ci.yml` roda os testes e compila um APK de debug a cada push. Instalação por download direto do GitHub.
+
+## Comandos e cuidados do Firebase
+
+- `npm run emulators` sobe Auth, Firestore, Functions e Storage locais; o app usa os emuladores em dev com `VITE_USE_EMULATORS=true`.
+- Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
+- Antes de um deploy que inclua Firestore ou Storage, confirmar que o banco e o bucket existem e em qual região: o `firebase deploy` cria o banco sozinho na região padrão (`nam5`) quando ele não existe, e a região não muda depois.
+- Functions: as opções globais (região, `maxInstances`) ficam em `functions/src/options.ts`, importado antes de qualquer Function; com ESM, `setGlobalOptions` no corpo do `index.ts` roda tarde demais.
+- Artifact Registry com limpeza de imagens após 1 dia (`functions:artifacts:setpolicy`).
+- Regras do Firestore: `match /{document=**}` também casa com zero segmentos; para subcoleções use `match /{collection}/{document=**}`.
+- Deve existir uma única cópia de `@firebase/app` em `node_modules` (o CI confere); duas cópias quebram o app com "Component auth has not been registered yet". Corrigir com `npm dedupe`.
 
 ## Convenções
 
@@ -74,14 +87,33 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 Lançar, editar, anexar foto, aprovar e recusar funcionam offline. A consulta à SEFAZ de um QR lido offline acontece quando a conexão volta.
 
+### Vínculo do casal
+
+- Só pelas Functions callable `createGroup`, `renewInvite` e `joinGroup` (`functions/src/group.ts`), cada uma numa transação. O app nunca cria nem altera `members`.
+- Código de convite: 6 caracteres do alfabeto `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (sem 0/O, 1/I/L), exibido como `K7Q-4M2`, válido por 24 horas. Renovar invalida o anterior.
+- `joinGroup` recusa: código inválido ou vencido, o próprio código, grupo com 2 membros, quem já está num grupo completo. Mais de 10 códigos errados em 1 hora bloqueiam o usuário até a janela vencer.
+- Se os dois criaram grupo, quem digita o código do outro sai do próprio grupo (ainda só com ele), que é apagado.
+- Vínculo e entrada exigem conexão.
+
 ## Modelo de dados (Firestore)
 
 ```
-groups/{groupId}
-  members: [uid, uid]            // exatamente 2
-  memberNames: { [uid]: string }
-  defaultSplitPct: 50
-  inviteCode: string
+groups/{groupId}                 // criado e alterado em members/convite só pelas Functions
+  members: [uid] | [uid, uid]    // 1 enquanto espera o outro; no máximo 2
+  memberNames: { [uid]: string } // cada membro pode alterar só o próprio nome
+  defaultSplitPct: 50            // membros podem alterar (inteiro 0..100)
+  inviteCode: string | null      // sem hífen; null depois que o segundo entra
+  inviteExpiresAt: Timestamp | null
+  createdAt
+
+memberships/{uid}                // só Functions escrevem; cada um lê o próprio
+  groupId
+
+invites/{code}                   // só Functions; app sem acesso
+  groupId, createdBy, expiresAt
+
+joinAttempts/{uid}               // só Functions; app sem acesso
+  failures, windowStart
 
 groups/{groupId}/months/{YYYY-MM}
   status: 'open' | 'closed'
@@ -101,11 +133,15 @@ groups/{groupId}/recurring/{recurringId}
   description, kind: 'fixed' | 'variable', amountCents?, dayOfMonth, payerUid, payerSharePct, active
 ```
 
-Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload.
+Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
+
+Regras atuais: as subcoleções do grupo estão liberadas para membros de forma genérica; cada coleção (meses, gastos, recorrentes) ganha regras próprias na fase em que for implementada.
 
 ## Risco conhecido: NFC-e
 
 O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o portal da SEFAZ-SP, que pode ter captcha. Plano B: o QR preenche data, emitente e chave; o valor é digitado e o QR continua valendo como comprovante.
+
+Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HTML da página e não tem CORS, então a consulta roda numa Function. Detalhes em `scripts/sefaz-poc/PARECER.md`.
 
 ## Fases
 
