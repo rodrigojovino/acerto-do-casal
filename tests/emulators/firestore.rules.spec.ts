@@ -86,9 +86,9 @@ describe('groups', () => {
 });
 
 describe('subcoleções do grupo', () => {
-  it('membro lê e escreve', async () => {
+  it('membro lê gastos e meses', async () => {
     await assertSucceeds(as(B).doc(`groups/${GROUP}/expenses/e1`).get());
-    await assertSucceeds(as(B).doc(`groups/${GROUP}/expenses/e2`).set({ description: 'Luz' }));
+    await assertSucceeds(as(B).doc(`groups/${GROUP}/months/2026-09`).get());
   });
 
   it('não membro não lê nem escreve', async () => {
@@ -96,6 +96,16 @@ describe('subcoleções do grupo', () => {
     await assertFails(as(C).collection(`groups/${GROUP}/expenses`).get());
     await assertFails(as(C).doc(`groups/${GROUP}/expenses/e3`).set({ description: 'Invasão' }));
     await assertFails(anon().doc(`groups/${GROUP}/expenses/e1`).get());
+  });
+
+  it('ninguém escreve meses pelo app', async () => {
+    await assertFails(as(A).doc(`groups/${GROUP}/months/2026-09`).set({ status: 'closed' }));
+  });
+
+  it('subcoleções sem regra própria ficam fechadas, mesmo para membros', async () => {
+    await assertFails(as(A).doc(`groups/${GROUP}/recurring/r1`).get());
+    await assertFails(as(A).doc(`groups/${GROUP}/recurring/r1`).set({ description: 'Internet' }));
+    await assertFails(as(A).doc(`groups/${GROUP}/qualquer/x`).set({ a: 1 }));
   });
 });
 

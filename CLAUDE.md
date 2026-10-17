@@ -146,7 +146,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 ## Fases
 
 1. [x] Fundação: scaffold, Firebase, domínio + testes, build no GitHub Actions, prova de conceito da SEFAZ
-2. [ ] Acesso: login Google e vínculo do casal por código
+2. [x] Acesso: login Google e vínculo do casal por código
 3. [ ] Núcleo do acerto: lançamento, painel com saldo, offline
 4. [ ] Comprovantes e aprovação
 5. [ ] Recorrentes e parcelados (Cloud Functions)

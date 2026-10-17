@@ -9,9 +9,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function groupPath(groupId) {
+      return /databases/$(database)/documents/groups/$(groupId);
+    }
+
     function isMember(groupId) {
-      return signedIn()
-        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+      return signedIn() && request.auth.uid in get(groupPath(groupId)).data.members;
     }
 
     // Vínculo usuário → grupo: cada um lê só o próprio.
@@ -38,13 +41,110 @@ service cloud.firestore {
         && request.resource.data.memberNames[request.auth.uid].size() >= 1
         && request.resource.data.memberNames[request.auth.uid].size() <= 60;
 
-      // Dados do casal (meses, gastos, recorrentes): só membros.
-      // As regras de cada coleção são detalhadas nas próximas fases.
-      // Atenção: `{document=**}` sozinho também casa com o próprio grupo (zero
-      // segmentos) e liberaria alterar members; por isso `{collection}` antes.
-      match /{collection}/{document=**} {
-        allow read, write: if isMember(groupId);
+      // ---- Meses (competência) ----
+
+      function monthPath(month) {
+        return /databases/$(database)/documents/groups/$(groupId)/months/$(month);
       }
+
+      // Mês sem documento = aberto.
+      function isClosed(month) {
+        return exists(monthPath(month)) && get(monthPath(month)).data.status == 'closed';
+      }
+
+      // Fechar e reabrir chegam na Fase 6 (por Function); o app só lê.
+      match /months/{month} {
+        allow read: if isMember(groupId);
+        allow write: if false;
+      }
+
+      // ---- Gastos ----
+
+      // 'YYYY-MM' ou 'YYYY-MM-DD' → índice do mês (ano * 12 + mês - 1).
+      function monthIndex(s) {
+        return int(s.split('-')[0]) * 12 + int(s.split('-')[1]) - 1;
+      }
+
+      // Limite: até o fim do mês seguinte ao atual. Em UTC (3h à frente de
+      // São Paulo), então na virada do mês a regra fica mais permissiva que o
+      // app, nunca mais restritiva. O app valida no fuso de São Paulo.
+      function withinLimit(s) {
+        return monthIndex(s) <= request.time.year() * 12 + request.time.month();
+      }
+
+      // Competência: o mês da data; se ele estiver fechado, um mês posterior
+      // aberto (o app usa o mês aberto atual). Nunca um mês fechado.
+      function validCompetence(data) {
+        let dateMonth = data.date.split('-')[0] + '-' + data.date.split('-')[1];
+        return !isClosed(data.competence)
+          && withinLimit(data.competence)
+          && (data.competence == dateMonth
+              || (data.competence > dateMonth && isClosed(dateMonth)));
+      }
+
+      function validExpense(data) {
+        return data.description is string
+          && data.description.trim().size() >= 1
+          && data.description.size() <= 80
+          && data.totalCents is int
+          && data.totalCents > 0
+          && data.personalCents is int
+          && data.personalCents >= 0
+          && data.personalCents <= data.totalCents
+          && data.payerSharePct is int
+          && data.payerSharePct >= 0
+          && data.payerSharePct <= 100
+          && data.payerUid in get(groupPath(groupId)).data.members
+          && data.date is string
+          && data.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+          && withinLimit(data.date)
+          && data.competence is string
+          && data.competence.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          // Comprovante chega na Fase 4: por enquanto só "sem comprovante".
+          && data.receipt == { 'type': 'none' }
+          && validCompetence(data);
+      }
+
+      function expenseKeys() {
+        return ['description', 'totalCents', 'personalCents', 'payerUid', 'payerSharePct',
+                'date', 'competence', 'receipt', 'status', 'createdBy', 'createdAt', 'updatedAt'];
+      }
+
+      match /expenses/{expenseId} {
+        allow read: if isMember(groupId);
+
+        // Sem comprovante, o gasto nasce pendente de aprovação.
+        allow create: if isMember(groupId)
+          && request.resource.data.keys().hasOnly(expenseKeys())
+          && request.resource.data.keys().hasAll(expenseKeys())
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.status == 'pending_approval'
+          && validExpense(request.resource.data);
+
+        // Só quem lançou edita, e nunca em mês fechado (nem de origem nem de destino).
+        // O status não muda pela edição, exceto devolvido → pendente (corrigido).
+        allow update: if isMember(groupId)
+          && resource.data.createdBy == request.auth.uid
+          && !isClosed(resource.data.competence)
+          && request.resource.data.keys().hasOnly(expenseKeys())
+          && request.resource.data.keys().hasAll(expenseKeys())
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time
+          && (request.resource.data.status == resource.data.status
+              || (resource.data.status == 'returned'
+                  && request.resource.data.status == 'pending_approval'))
+          && validExpense(request.resource.data);
+
+        allow delete: if isMember(groupId)
+          && resource.data.createdBy == request.auth.uid
+          && !isClosed(resource.data.competence);
+      }
+
+      // Recorrentes chegam na Fase 5; até lá, fechado.
+      // Qualquer outra subcoleção também fica fechada (sem regra = negado).
     }
 
     // invites, joinAttempts e qualquer outra coleção: só as Functions.
