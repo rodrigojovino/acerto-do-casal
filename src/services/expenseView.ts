@@ -1,5 +1,6 @@
 import { formatDateBR, monthOf } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
+import { expenseDebt, type Cents, type Members, type SettlementExpense } from '@/domain/settlement';
 import { splitForViewer } from '@/domain/split';
 import type { Expense } from './expenses';
 
@@ -35,4 +36,27 @@ export function expenseSubtitle(expense: Expense, viewerUid: string, payerName: 
   if (expense.personalCents > 0) parts.push(`${formatBRL(expense.personalCents)} pessoal`);
   parts.push(splitLabel(expense, viewerUid));
   return parts.join(' · ');
+}
+
+export interface DebtView {
+  /** "Bia te deve por este gasto", "Você deve por este gasto" ou "Ninguém deve nada por este gasto". */
+  label: string;
+  amountCents: Cents;
+}
+
+/**
+ * Quem deve quanto por um gasto, do ponto de vista de quem olha. Usado pela
+ * prévia do formulário e pelo Detalhe, sempre via `expenseDebt`.
+ */
+export function debtView(
+  expense: Omit<SettlementExpense, 'status'>,
+  members: Members,
+  viewerUid: string,
+  nameOf: (uid: string) => string,
+): DebtView {
+  const debt = expenseDebt({ ...expense, status: 'pending_approval' }, members);
+  if (debt.amountCents === 0) return { label: 'Ninguém deve nada por este gasto', amountCents: 0 };
+  return debt.fromUid === viewerUid
+    ? { label: 'Você deve por este gasto', amountCents: debt.amountCents }
+    : { label: `${nameOf(debt.fromUid)} te deve por este gasto`, amountCents: debt.amountCents };
 }

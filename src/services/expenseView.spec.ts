@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
-import { expenseSubtitle, splitLabel, tagFor } from './expenseView';
+import { debtView, expenseSubtitle, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -53,5 +53,26 @@ describe('expenseSubtitle', () => {
   it('omite a parte pessoal zerada e mostra o ano quando a competência é outra', () => {
     const e = expense({ personalCents: 0, date: '2026-09-28', competence: '2026-10' });
     expect(expenseSubtitle(e, A, 'Você')).toBe('Você · 28/09/2026 · 50/50');
+  });
+});
+
+describe('debtView', () => {
+  const nameOf = (uid: string) => (uid === A ? 'Ana' : 'Bia');
+
+  it('mostra a dívida do lado de cada um', () => {
+    const e = { totalCents: 20000, personalCents: 5000, payerUid: A, payerSharePct: 50 };
+    expect(debtView(e, [A, B], A, nameOf)).toEqual({ label: 'Bia te deve por este gasto', amountCents: 7500 });
+    expect(debtView(e, [A, B], B, nameOf)).toEqual({ label: 'Você deve por este gasto', amountCents: 7500 });
+  });
+
+  it('respeita divisão diferente de 50/50 e pagador outro', () => {
+    // B pagou 100,00 e fica com 70%: A deve 30,00.
+    const e = { totalCents: 10000, personalCents: 0, payerUid: B, payerSharePct: 70 };
+    expect(debtView(e, [A, B], A, nameOf)).toEqual({ label: 'Você deve por este gasto', amountCents: 3000 });
+  });
+
+  it('gasto todo pessoal não gera dívida', () => {
+    const e = { totalCents: 5000, personalCents: 5000, payerUid: A, payerSharePct: 50 };
+    expect(debtView(e, [A, B], A, nameOf)).toEqual({ label: 'Ninguém deve nada por este gasto', amountCents: 0 });
   });
 });

@@ -94,7 +94,7 @@
 
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
-            <div class="row"><span class="muted">{{ preview.label }}</span><span class="num"><strong>{{ formatBRL(preview.amount) }}</strong></span></div>
+            <div class="row"><span class="muted">{{ preview.label }}</span><span class="num"><strong>{{ formatBRL(preview.amountCents) }}</strong></span></div>
             <div v-if="competenceNote" class="row note"><span>{{ competenceNote }}</span></div>
           </div>
 
@@ -119,9 +119,10 @@ import {
   todayInSaoPaulo,
 } from '@/domain/calendar';
 import { centsFromDigits, formatBRL } from '@/domain/money';
-import { expenseDebt, type Members } from '@/domain/settlement';
+import type { Members } from '@/domain/settlement';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
 import { createExpense, updateExpense, watchExpense, type Expense } from '@/services/expenses';
+import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
@@ -228,21 +229,18 @@ const sharedCents = computed(() => Math.max(0, totalCents.value - personalCents.
 
 const preview = computed(() => {
   const valid = totalCents.value > 0 && personalCents.value <= totalCents.value;
-  if (!valid || !partnerUid.value) return { label: 'Ninguém deve nada por este gasto', amount: 0 };
-  const debt = expenseDebt(
+  if (!valid || !partnerUid.value) return { label: 'Ninguém deve nada por este gasto', amountCents: 0 };
+  return debtView(
     {
       totalCents: totalCents.value,
       personalCents: personalCents.value,
       payerUid: payerUid.value,
       payerSharePct: payerSharePct.value,
-      status: 'pending_approval',
     },
     members.value,
+    myUid.value,
+    firstNameOf,
   );
-  if (debt.amountCents === 0) return { label: 'Ninguém deve nada por este gasto', amount: 0 };
-  return debt.toUid === myUid.value
-    ? { label: `${firstNameOf(debt.fromUid)} te deve por este gasto`, amount: debt.amountCents }
-    : { label: 'Você deve por este gasto', amount: debt.amountCents };
 });
 
 const competence = computed(() =>
@@ -284,7 +282,11 @@ function save(): void {
     ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value)
     : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value);
 
-  router.replace({ name: 'painel', query: { mes: result.competence } });
+  router.replace(
+    editing
+      ? { name: 'gasto', params: { id: result.id } }
+      : { name: 'painel', query: { mes: result.competence } },
+  );
 }
 
 function goBack(): void {

@@ -49,7 +49,8 @@
           <p class="hint">Toque em + para lançar o primeiro.</p>
         </div>
         <ul v-else class="list card">
-          <li v-for="item in expenses" :key="item.id" class="item">
+          <li v-for="item in expenses" :key="item.id">
+            <router-link class="item" :to="{ name: 'gasto', params: { id: item.id } }">
             <span class="avatar" aria-hidden="true">{{ initials(item.payerUid) }}</span>
             <span class="item-main">
               <span class="item-name">{{ item.description }}</span>
@@ -62,6 +63,7 @@
                 <span v-if="tagFor(item, myUid)" class="tag" :class="tagFor(item, myUid)">{{ tagLabel[tagFor(item, myUid)!] }}</span>
               </span>
             </span>
+            </router-link>
           </li>
         </ul>
       </main>
@@ -327,6 +329,8 @@ function initials(uid: string): string {
 }
 
 .item {
+  color: inherit;
+  text-decoration: none;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -334,8 +338,13 @@ function initials(uid: string): string {
   border-bottom: 1px solid var(--app-subtle);
 }
 
-.item:last-child {
+li:last-child .item {
   border-bottom: 0;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: -2px;
 }
 
 .avatar {
