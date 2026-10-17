@@ -23,6 +23,12 @@ service-account*.json
 *.log
 npm-debug.log*
 
+# Firebase
+/functions/lib
+/functions/node_modules
+/.firebase
+*-debug.log
+
 # Ionic / editores / SO
 /.ionic
 /.idea

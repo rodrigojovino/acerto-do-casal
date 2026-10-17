@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Regras definitivas de acesso por membro chegam no próximo passo da Fase 2.
+// Até lá, nada é acessível pelo app.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

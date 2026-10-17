@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Regras definitivas de acesso por membro chegam no próximo passo da Fase 2.
+// Até lá, nada é acessível pelo app.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

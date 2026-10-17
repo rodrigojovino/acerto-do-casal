@@ -1,12 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { connectAuthEmulator, getAuth } from 'firebase/auth';
 import {
+  connectFirestoreEmulator,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
-import { getStorage } from 'firebase/storage';
+import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
+import { connectStorageEmulator, getStorage } from 'firebase/storage';
 
 // Config web do Firebase: pública por natureza; a proteção vem das regras.
 const firebaseConfig = {
@@ -32,3 +33,12 @@ export const db = initializeFirestore(app, {
 export const storage = getStorage(app);
 
 export const functions = getFunctions(app, FIREBASE_REGION);
+
+// Em desenvolvimento, `VITE_USE_EMULATORS=true` aponta tudo para os emuladores locais
+// (`npm run emulators`). Nunca vale em build de produção.
+if (import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true') {
+  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, 'localhost', 8080);
+  connectStorageEmulator(storage, 'localhost', 9199);
+  connectFunctionsEmulator(functions, 'localhost', 5001);
+}
