@@ -56,6 +56,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 - Informa total, número de parcelas e mês da primeira. Gera uma parcela por mês com a mesma divisão e parte pessoal proporcional.
 - Valor por parcela = `floor(total / n)`; o resto dos centavos vai na primeira parcela.
+- Parte pessoal por arredondamento acumulado: a parte pessoal acumulada até a parcela *i* é `floor(totalAcumulado_i * personal / total)`, e a da parcela é a diferença para a anterior. A soma bate exatamente com o pessoal informado e nenhuma parcela tem parte pessoal maior que o próprio valor (caso extremo testado: R$ 0,10 com R$ 0,09 pessoal em 10 parcelas). Não usar a regra floor + resto na parte pessoal: nesse caso daria R$ 0,09 pessoal numa parcela de R$ 0,01.
 - O comprovante da compra vale para todas as parcelas.
 
 ### Recorrentes
