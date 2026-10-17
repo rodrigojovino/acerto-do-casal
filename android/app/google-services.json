@@ -12,7 +12,20 @@
           "package_name": "io.github.rodrigojovino.acerto"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "233702801609-8pegcd19344kk26nmf2qq2t4ntu6nigh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "io.github.rodrigojovino.acerto",
+            "certificate_hash": "441382b3f05f5b7441cc1a20a8302f95160371d2"
+          }
+        },
+        {
+          "client_id": "233702801609-iqen74od7vhtir6t9skukqj4vmst0fma.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAldCS-m9eaUR0d-hygL7H8oZUs_gjJa4A"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "233702801609-iqen74od7vhtir6t9skukqj4vmst0fma.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
