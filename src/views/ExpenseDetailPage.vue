@@ -98,16 +98,19 @@ const loaded = ref(false);
 const loadError = ref<string | null>(null);
 let stop: (() => void) | null = null;
 
+// Fixado na criação: o Ionic mantém a tela viva enquanto outras rotas abrem.
+const expenseId = String(route.params.id);
+
 watch(
-  [() => group.value?.id, () => route.params.id],
-  ([groupId, id]) => {
+  () => group.value?.id,
+  (groupId) => {
     stop?.();
     stop = null;
-    if (!groupId || typeof id !== 'string' || route.name !== 'gasto') return;
+    if (!groupId) return;
     loaded.value = false;
     stop = watchExpense(
       groupId,
-      id,
+      expenseId,
       (e) => {
         expense.value = e;
         loaded.value = true;

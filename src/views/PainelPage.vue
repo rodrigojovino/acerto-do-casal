@@ -104,12 +104,19 @@ const firstMonth = computed(() => {
 });
 const lastMonth = computed(() => lastAllowedMonth(today.value));
 
-const month = computed(() => {
-  const requested = typeof route.query.mes === 'string' && /^\d{4}-\d{2}$/.test(route.query.mes)
-    ? route.query.mes
-    : monthOf(today.value);
-  return clampMonth(requested, firstMonth.value, today.value);
-});
+// ?mes= só vale enquanto o Painel é a tela atual: o Ionic mantém a tela viva
+// e a rota global muda quando outras telas abrem.
+const requested = ref<string | null>(null);
+watch(
+  () => [route.name, route.query.mes] as const,
+  ([name, mes]) => {
+    if (name !== 'painel') return;
+    requested.value = typeof mes === 'string' && /^\d{4}-\d{2}$/.test(mes) ? mes : null;
+  },
+  { immediate: true },
+);
+
+const month = computed(() => clampMonth(requested.value ?? monthOf(today.value), firstMonth.value, today.value));
 
 function go(delta: 1 | -1): void {
   router.replace({ name: 'painel', query: { mes: addMonths(month.value, delta) } });

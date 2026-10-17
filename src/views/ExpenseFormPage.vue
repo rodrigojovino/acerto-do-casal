@@ -129,8 +129,9 @@ import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/servic
 const route = useRoute();
 const router = useRouter();
 
-const editId = computed(() => (route.name === 'gasto-editar' ? String(route.params.id) : null));
-const isEdit = computed(() => editId.value !== null);
+// Fixados na criação: o Ionic mantém a tela viva enquanto outras rotas abrem.
+const editId = route.name === 'gasto-editar' ? String(route.params.id) : null;
+const isEdit = editId !== null;
 
 const myUid = computed(() => user.value?.uid ?? '');
 const members = computed<Members>(() => [myUid.value, partnerUid.value ?? ''] as const);
@@ -146,14 +147,14 @@ const payerUid = ref(myUid.value);
 const payerSharePct = ref(group.value?.defaultSplitPct ?? 50);
 const showErrors = ref(false);
 
-const ready = ref(!isEdit.value);
+const ready = ref(!isEdit);
 const blocked = ref<string | null>(null);
 let editing: Expense | null = null;
 let stopWatch: (() => void) | null = null;
 
 // Novo gasto: volta ao estado inicial a cada entrada na tela.
 onIonViewWillEnter(() => {
-  if (isEdit.value) return;
+  if (isEdit) return;
   today.value = todayInSaoPaulo();
   totalCents.value = 0;
   personalCents.value = 0;
@@ -165,10 +166,10 @@ onIonViewWillEnter(() => {
 });
 
 // Edição: carrega o gasto uma vez (também do cache offline).
-if (isEdit.value && group.value) {
+if (editId && group.value) {
   stopWatch = watchExpense(
     group.value.id,
-    editId.value as string,
+    editId,
     (expense) => {
       if (ready.value || blocked.value) return;
       if (!expense) {

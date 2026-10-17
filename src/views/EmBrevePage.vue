@@ -25,7 +25,6 @@
 
 <script setup lang="ts">
 import { IonContent, IonFooter, IonPage } from '@ionic/vue';
-import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
 import { signOut } from '@/services/auth';
@@ -33,8 +32,9 @@ import { user } from '@/services/session';
 
 type Tab = 'pendencias' | 'historico' | 'ajustes';
 
-const route = useRoute();
-const tab = computed(() => route.name as Tab);
+// O Ionic mantém as telas visitadas vivas; ler a rota de forma reativa faria
+// esta tela reagir às rotas das outras. A aba é fixada na criação.
+const tab = useRoute().name as Tab;
 
 const texts: Record<Tab, { title: string; description: string }> = {
   pendencias: {
@@ -51,8 +51,7 @@ const texts: Record<Tab, { title: string; description: string }> = {
   },
 };
 
-const title = computed(() => texts[tab.value].title);
-const description = computed(() => texts[tab.value].description);
+const { title, description } = texts[tab];
 </script>
 
 <style scoped>
