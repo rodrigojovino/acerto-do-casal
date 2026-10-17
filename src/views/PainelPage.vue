@@ -1,18 +1,69 @@
 <template>
   <ion-page>
     <ion-content :fullscreen="true">
-      <main class="screen">
-        <header class="top">
-          <h1>Acerto do Casal</h1>
-          <button class="link" type="button" @click="sair">Sair</button>
+      <main class="screen painel">
+        <header class="month-nav">
+          <button class="icon-btn bordered" type="button" aria-label="Mês anterior" :disabled="month <= firstMonth" @click="go(-1)">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+          </button>
+          <div class="month-title">
+            <h1>{{ monthLabel(month) }}</h1>
+            <p class="month-state" :class="{ closed: isClosed }">● {{ isClosed ? 'Mês fechado' : 'Mês aberto' }}</p>
+          </div>
+          <button class="icon-btn bordered" type="button" aria-label="Próximo mês" :disabled="month >= lastMonth" @click="go(1)">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7" /></svg>
+          </button>
         </header>
 
-        <section class="hero">
-          <p class="label">Casal vinculado</p>
-          <p class="names">{{ myName }} e {{ partnerName ?? 'a outra pessoa' }}</p>
+        <SyncStatus :pending-writes="hasPendingWrites" />
+
+        <section class="balance" aria-labelledby="saldo-titulo">
+          <p id="saldo-titulo" class="muted small">{{ isClosed ? 'Saldo do acerto' : 'Saldo do acerto até agora' }}</p>
+          <div>
+            <p class="who">{{ balanceText.who }}</p>
+            <p class="amount num">{{ formatBRL(balance?.amountCents ?? 0) }}</p>
+          </div>
+          <div class="paid">
+            <div>
+              <span class="muted">Você pagou</span>
+              <span class="num strong">{{ formatBRL(paid[myUid] ?? 0) }}</span>
+            </div>
+            <div>
+              <span class="muted">{{ partnerFirstName }} pagou</span>
+              <span class="num strong">{{ formatBRL(paid[partnerUid ?? ''] ?? 0) }}</span>
+            </div>
+          </div>
         </section>
 
-        <p class="placeholder">O painel do mês, com saldo e gastos, chega na próxima fase.</p>
+        <p v-if="pending.open > 0" class="pending" role="status">{{ pendingText }}</p>
+
+        <div class="list-head">
+          <h2>Gastos do mês</h2>
+          <span class="hint">{{ countText }}</span>
+        </div>
+
+        <p v-if="loadError" class="alert-error" role="alert">{{ loadError }}</p>
+        <p v-else-if="!loaded" class="hint center">Carregando…</p>
+        <div v-else-if="expenses.length === 0" class="empty card">
+          <p class="strong">Nenhum gasto em {{ monthName(month) }}.</p>
+          <p class="hint">Toque em + para lançar o primeiro.</p>
+        </div>
+        <ul v-else class="list card">
+          <li v-for="item in expenses" :key="item.id" class="item">
+            <span class="avatar" aria-hidden="true">{{ initials(item.payerUid) }}</span>
+            <span class="item-main">
+              <span class="item-name">{{ item.description }}</span>
+              <span class="item-sub">{{ expenseSubtitle(item, myUid, firstNameOf(item.payerUid)) }}</span>
+            </span>
+            <span class="item-side">
+              <span class="num strong">{{ formatBRL(item.totalCents) }}</span>
+              <span class="tags">
+                <svg v-if="item.pendingWrite" class="sync-icon" role="img" aria-label="Sincronizando" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
+                <span v-if="tagFor(item, myUid)" class="tag" :class="tagFor(item, myUid)">{{ tagLabel[tagFor(item, myUid)!] }}</span>
+              </span>
+            </span>
+          </li>
+        </ul>
       </main>
     </ion-content>
     <ion-footer class="ion-no-border">
@@ -22,95 +73,339 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonFooter, IonPage } from '@ionic/vue';
+import { IonContent, IonFooter, IonPage, onIonViewWillEnter } from '@ionic/vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
-import { computed } from 'vue';
-import { signOut } from '@/services/auth';
-import { group, partnerName, user } from '@/services/session';
+import SyncStatus from '@/components/SyncStatus.vue';
+import { clampMonth, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
+import { formatBRL } from '@/domain/money';
+import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
+import { watchMonthExpenses, type Expense } from '@/services/expenses';
+import { expenseSubtitle, tagFor, tagLabel } from '@/services/expenseView';
+import { closedMonths } from '@/services/months';
+import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
-const myName = computed(() => {
-  const uid = user.value?.uid;
-  return (uid && group.value?.memberNames[uid]) || 'Você';
+const route = useRoute();
+const router = useRouter();
+
+const myUid = computed(() => user.value?.uid ?? '');
+const members = computed<Members>(() => [myUid.value, partnerUid.value ?? ''] as const);
+
+// ---- Mês exibido: ?mes=YYYY-MM, limitado do mês de criação do grupo ao mês seguinte ----
+const today = ref(todayInSaoPaulo());
+onIonViewWillEnter(() => (today.value = todayInSaoPaulo()));
+
+const firstMonth = computed(() => {
+  const created = group.value?.createdAt?.toDate();
+  return created ? monthOf(todayInSaoPaulo(created)) : monthOf(today.value);
+});
+const lastMonth = computed(() => lastAllowedMonth(today.value));
+
+const month = computed(() => {
+  const requested = typeof route.query.mes === 'string' && /^\d{4}-\d{2}$/.test(route.query.mes)
+    ? route.query.mes
+    : monthOf(today.value);
+  return clampMonth(requested, firstMonth.value, today.value);
 });
 
-async function sair(): Promise<void> {
-  await signOut();
+function go(delta: 1 | -1): void {
+  router.replace({ name: 'painel', query: { mes: addMonths(month.value, delta) } });
+}
+
+const isClosed = computed(() => closedMonths.value.has(month.value));
+
+// ---- Gastos do mês em tempo real (inclusive do cache offline) ----
+const expenses = ref<Expense[]>([]);
+const loaded = ref(false);
+const loadError = ref<string | null>(null);
+let stop: (() => void) | null = null;
+
+watch(
+  [() => group.value?.id, month],
+  ([groupId, m]) => {
+    stop?.();
+    stop = null;
+    loaded.value = false;
+    loadError.value = null;
+    expenses.value = [];
+    if (!groupId) return;
+    stop = watchMonthExpenses(
+      groupId,
+      m,
+      (snapshot) => {
+        expenses.value = snapshot.expenses;
+        loaded.value = true;
+      },
+      () => {
+        loadError.value = 'Não foi possível carregar os gastos. Verifique a conexão.';
+        loaded.value = true;
+      },
+    );
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stop?.());
+
+const hasPendingWrites = computed(() => expenses.value.some((e) => e.pendingWrite));
+
+// ---- Saldo e resumos: só funções de src/domain ----
+const balance = computed(() => (partnerUid.value ? monthBalance(expenses.value, members.value) : null));
+const paid = computed(() => (partnerUid.value ? paidByMember(expenses.value, members.value) : {}));
+const pending = computed(() => pendingSummary(expenses.value, myUid.value));
+
+const balanceText = computed(() => {
+  const b = balance.value;
+  if (!b) return { who: 'Ninguém deve nada' };
+  return b.fromUid === myUid.value
+    ? { who: `Você deve para ${partnerFirstName.value}` }
+    : { who: `${partnerFirstName.value} te deve` };
+});
+
+const pendingText = computed(() => {
+  const { open, awaitingMyApproval, returnedToMe } = pending.value;
+  const parts = [`${open} ${open === 1 ? 'gasto pendente' : 'gastos pendentes'}`];
+  if (awaitingMyApproval > 0) {
+    parts.push(`${awaitingMyApproval} ${awaitingMyApproval === 1 ? 'aguarda' : 'aguardam'} sua aprovação`);
+  }
+  if (returnedToMe > 0) {
+    parts.push(`${returnedToMe} ${returnedToMe === 1 ? 'devolvido' : 'devolvidos'} para você corrigir`);
+  }
+  return parts.join(' · ');
+});
+
+const countText = computed(() => {
+  const n = expenses.value.length;
+  return n === 1 ? '1 lançamento' : `${n} lançamentos`;
+});
+
+function initials(uid: string): string {
+  if (uid === myUid.value) return 'EU';
+  return firstNameOf(uid).slice(0, 3).toUpperCase();
 }
 </script>
 
 <style scoped>
-.screen {
-  min-height: 100%;
-  box-sizing: border-box;
-  max-width: 480px;
-  margin: 0 auto;
-  padding: calc(24px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.painel {
+  gap: 12px;
 }
 
-.top {
+.month-nav {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 
-h1 {
+.icon-btn.bordered {
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.month-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.month-title h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
 }
 
-.hero {
+.month-state {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e6b3a;
+}
+
+.month-state.closed {
+  color: var(--app-muted);
+}
+
+.balance {
   background: var(--app-text);
   color: #fff;
   border-radius: 20px;
   padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 14px;
 }
 
-.label {
+.balance p {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+}
+
+.muted {
   color: #c9c8c2;
 }
 
-.names {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.4px;
+.small {
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.placeholder {
+.who {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.amount {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.paid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  font-size: 13px;
+}
+
+.paid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.pending {
   margin: 0;
-  padding: 16px;
-  border: 1px dashed var(--app-border);
-  border-radius: 16px;
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--app-muted);
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fcebd9;
+  color: #8a3f00;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-top: 6px;
+}
+
+.list-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.center {
+  text-align: center;
+  padding: 24px 0;
+}
+
+.empty {
+  padding: 20px;
   text-align: center;
 }
 
-.link {
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--app-accent);
-  cursor: pointer;
+.empty p {
+  margin: 0 0 4px;
 }
 
-.link:focus-visible {
-  outline: 2px solid var(--app-accent);
-  outline-offset: 2px;
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--app-subtle);
+}
+
+.item:last-child {
+  border-bottom: 0;
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--app-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--app-muted);
+}
+
+.item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-name {
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-sub {
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+.item-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-size: 14px;
+}
+
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sync-icon {
+  color: var(--app-accent);
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.tag.pending,
+.tag.approve {
+  background: #fcebd9;
+  color: #8a3f00;
+}
+
+.tag.returned {
+  background: var(--app-danger-bg);
+  color: var(--app-danger);
 }
 </style>
