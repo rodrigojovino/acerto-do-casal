@@ -40,6 +40,12 @@ A mesma impressão digital pode ser conferida:
 - no log do workflow, no passo "Verificar assinatura e renomear" (linha `certificate SHA-256 digest`, sem os dois-pontos);
 - num APK já gerado: `keytool -printcert -jarfile acerto-do-casal-X.Y.Z.apk`.
 
+### Registro do pacote
+
+O pacote `io.github.rodrigojovino.acerto` está **registrado** na conta de distribuição limitada do Android Developer Console desde 2026-10-17, com 1 chave: o certificado da keystore acima. O registro foi direto, sem o desafio de arquivo nos assets.
+
+Consequência: o Android só instala APKs desse pacote assinados com essa chave. Trocar ou perder a keystore exige registrar a nova chave no console antes de publicar.
+
 ## 3. Converter a keystore para base64
 
 O GitHub Secrets só guarda texto. Este comando copia a keystore em base64 direto para a área de transferência, sem gravar arquivo:
