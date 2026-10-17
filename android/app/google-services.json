@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "233702801609",
+    "project_id": "acerto-do-casal",
+    "storage_bucket": "acerto-do-casal.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:233702801609:android:f3bc027876cc172ffdcd18",
+        "android_client_info": {
+          "package_name": "io.github.rodrigojovino.acerto"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAldCS-m9eaUR0d-hygL7H8oZUs_gjJa4A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
