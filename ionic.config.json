@@ -1,0 +1,7 @@
+{
+  "name": "acerto",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}

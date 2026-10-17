@@ -16,6 +16,24 @@ service-account*.json
 *-service-account.json
 *firebase-adminsdk*.json
 
+# Node / Vite
+/node_modules
+/dist
+/coverage
+*.log
+npm-debug.log*
+
+# Ionic / editores / SO
+/.ionic
+/.idea
+/.vscode/*
+!/.vscode/extensions.json
+*~
+*.sw[mnpcod]
+*.tmp
+.DS_Store
+Thumbs.db
+
 # Variáveis de ambiente locais
 .env
 .env.*
