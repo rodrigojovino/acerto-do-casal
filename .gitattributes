@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+# Scripts do Windows precisam de CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binários
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.jar binary
+*.jks binary
+*.keystore binary
+*.p12 binary
+*.pdf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary

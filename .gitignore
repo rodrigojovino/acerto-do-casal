@@ -1,0 +1,22 @@
+# Chaves e certificados: o repositório é público, nunca versionar
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.der
+*.cer
+*.crt
+*.p8
+*.b64
+keystore.properties
+key.properties
+service-account*.json
+*-service-account.json
+*firebase-adminsdk*.json
+
+# Variáveis de ambiente locais
+.env
+.env.*
+!.env.example
