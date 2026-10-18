@@ -140,9 +140,14 @@ groups/{groupId}/months/{YYYY-MM}
 groups/{groupId}/expenses/{expenseId}
   description, totalCents, personalCents, payerUid, payerSharePct
   date: 'YYYY-MM-DD', competence: 'YYYY-MM'
-  receipt: { type: 'photo' | 'nfce' | 'none', photoPath?, nfceKey?, nfceStatus?: 'pending' | 'ok' | 'failed' }
+  receipt:
+    { type: 'none' }
+    | { type: 'photo', photoPath: 'groups/{g}/receipts/{id}.jpg', photoUploaded: bool }
+    | { type: 'nfce', nfceKey (44 dígitos), nfceUrl (SEFAZ-SP), nfceStatus: 'pending' | 'ok' | 'failed',
+        nfceData?: { issuerName, totalCents, date }, nfceError? }   // nfceStatus ok/failed e nfceData: só a Function
   status: 'confirmed' | 'pending_approval' | 'returned' | 'awaiting_confirmation'
-  rejection?: { byUid, reason?, at }
+  approval?: { byUid, at }        // byUid 'nfce' = confirmado pela conferência da nota (só a Function grava)
+  rejection?: { byUid, reason? (até 200), at }
   recurringId?, installment?: { seriesId, index, count }
   createdBy, createdAt, updatedAt
 
@@ -152,18 +157,24 @@ groups/{groupId}/recurring/{recurringId}
 
 Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
 
-Regras atuais (`firestore.rules`, testadas em `tests/emulators/`):
-- `expenses`: só membros leem. Criação com todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status: 'pending_approval'` e `receipt: { type: 'none' }` (até a Fase 4). Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, competência coerente com a data e nunca em mês fechado.
-- Só quem lançou edita ou exclui, e nunca em mês fechado (origem e destino). A edição não muda o status, exceto `returned` → `pending_approval`.
-- `months`: só leitura para membros (fechamento por Function na Fase 6). Mês sem documento = aberto.
-- Subcoleções sem regra própria (ex.: `recurring` até a Fase 5) ficam fechadas.
-- `src/services/expenseData.ts` monta o documento como o app grava; os testes de regras usam as mesmas funções.
+Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
+- `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
+- **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, sempre `status: 'pending_approval'`, sem `approval`/`rejection` (a edição apaga as anteriores). Comprovante: foto no caminho do próprio gasto (não enviada na criação); QR só com `nfceStatus: 'pending'` e URL da SEFAZ-SP, ou mantido sem mudança na edição. Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
+- **Outro membro**: só aprova (`pending_approval` → `confirmed`, `approval.byUid` = ele; com foto, só depois de enviada) ou recusa (`→ returned`, motivo opcional). Não toca em valores nem no comprovante.
+- **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; grava `nfceStatus`/`nfceData`; confirma com `approval.byUid: 'nfce'` só se o valor lançado for igual ao da nota. `resolveNfce` (callable) só pré-preenche o formulário.
+- Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura (fechamento na Fase 6). Subcoleções sem regra própria (ex.: `recurring`) ficam fechadas.
+- Storage: só quem lançou o gasto (tipo foto) envia/troca/apaga a foto, JPEG até 1 MB; membros leem. Cada regra faz uma única leitura no Firestore (por isso o app apaga a foto antes do documento). Exige a permissão do agente do Storage para ler o Firestore (papel "Firebase Rules Firestore Service Agent").
+- `src/services/expenseData.ts` monta os documentos (gasto, edição, aprovação, recusa) como o app grava; os testes de regras usam as mesmas funções.
+
+Comprovantes no app:
+- Foto: câmera ou galeria (`@capacitor/camera`), comprimida no aparelho para JPEG < 500 KB (`src/domain/image.ts`) e guardada numa fila no IndexedDB (`src/services/photoQueue.ts`) até subir; só sobe depois que o gasto existe no servidor.
+- QR: leitor do Google (ML Kit, só Android, sem permissão de câmera); validado no aparelho com o mesmo parser das Functions (`functions/src/nfce.ts`, que só aceita URLs HTTPS da SEFAZ-SP).
 
 ## Risco conhecido: NFC-e
 
 O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o portal da SEFAZ-SP, que pode ter captcha. Plano B: o QR preenche data, emitente e chave; o valor é digitado e o QR continua valendo como comprovante.
 
-Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HTML da página e não tem CORS, então a consulta roda numa Function. Detalhes em `scripts/sefaz-poc/PARECER.md`.
+Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HTML da página e não tem CORS, então a consulta roda numa Function. Confirmado na nuvem na Fase 4 (6 de 6 notas a partir de `southamerica-east1`). Detalhes em `scripts/sefaz-poc/PARECER.md`.
 
 ## Fases
 
@@ -174,6 +185,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 5. [ ] Recorrentes e parcelados (Cloud Functions)
 6. [ ] Fechamento, reabertura e histórico
 7. [ ] Notificações, exportação Excel/PDF, versão web
+   - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
