@@ -23,6 +23,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
 - Antes de um deploy que inclua Firestore ou Storage, confirmar que o banco e o bucket existem e em qual região: o `firebase deploy` cria o banco sozinho na região padrão (`nam5`) quando ele não existe, e a região não muda depois.
 - Functions: as opções globais (região, `maxInstances`) ficam em `functions/src/options.ts`, importado antes de qualquer Function; com ESM, `setGlobalOptions` no corpo do `index.ts` roda tarde demais.
+- Functions: o `ignore` do `firebase.json` é aplicado com `matchBase` a qualquer pasta (um `"src"` excluía `lib/functions/src` e `lib/src/domain` do pacote); por isso ignora `"*.ts"`. Antes de mudar, simular o pacote com `readdirRecursive` da firebase-tools.
 - Artifact Registry com limpeza de imagens após 1 dia (`functions:artifacts:setpolicy`).
 - Regras do Firestore: `match /{document=**}` também casa com zero segmentos; para subcoleções use `match /{collection}/{document=**}`.
 - Deve existir uma única cópia de `@firebase/app` em `node_modules` (o CI confere); duas cópias quebram o app com "Component auth has not been registered yet". Corrigir com `npm dedupe`.
