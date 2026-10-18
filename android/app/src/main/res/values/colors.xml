@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Cor de destaque das notificações (a mesma do app, --app-accent). -->
+    <!-- Cor de destaque das notificações: a mesma cor de destaque do app. -->
     <color name="notification_accent">#2457C5</color>
 </resources>
