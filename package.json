@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "functions:build": "npm --prefix functions run build",
-    "emulators": "npm run functions:build && firebase emulators:start",
+    "emulators": "npm run functions:build && firebase emulators:start --project acerto-do-casal",
+    "recorrentes:gerar": "node scripts/dev/gerar-recorrentes.mjs",
     "test:emulators": "npm run functions:build && firebase emulators:exec --project demo-acerto --only auth,firestore,functions,storage \"vitest run -c vitest.emulators.config.ts\""
   },
   "dependencies": {

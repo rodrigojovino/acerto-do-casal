@@ -34,7 +34,7 @@ import { IonContent, IonFooter, IonPage } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import { signOut } from '@/services/auth';
-import { watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { group, user } from '@/services/session';
 
 const list = ref<RecurringDoc[]>([]);
@@ -51,7 +51,7 @@ onBeforeUnmount(() => stop?.());
 
 const recurringSummary = computed(() => {
   const active = list.value.filter((r) => r.active).length;
-  const waiting = list.value.filter((r) => r.active && r.status === 'pending_approval').length;
+  const waiting = list.value.filter(awaitsApproval).length;
   if (list.value.length === 0) return 'Nenhuma cadastrada';
   const parts = [`${active} ${active === 1 ? 'ativa' : 'ativas'}`];
   if (waiting > 0) parts.push(`${waiting} aguardando aprovação`);

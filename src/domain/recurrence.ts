@@ -9,6 +9,19 @@ import type { Cents, Competence } from './settlement.js';
 export type RecurringKind = 'fixed' | 'variable';
 export type RecurringStatus = 'pending_approval' | 'approved' | 'returned';
 
+/** O que define quanto cada um paga: mudar exige aprovação quando envolve fixo. */
+export interface RecurringTerms {
+  kind: RecurringKind;
+  /** Só no fixo. */
+  amountCents?: Cents;
+  payerUid: string;
+  payerSharePct: number;
+}
+
+/**
+ * Os campos de dinheiro do cadastro são sempre a versão aprovada (a que a
+ * geração usa); um reajuste fica em `proposal` até o outro membro aprovar.
+ */
 export interface Recurring {
   id: string;
   description: string;
@@ -27,6 +40,12 @@ export interface Recurring {
   status: RecurringStatus;
   /** Último mês já gerado (gravado só pela Function): nunca gera duas vezes, nem recria um excluído. */
   lastGeneratedMonth?: Competence;
+  /**
+   * Reajuste proposto (valor, quem paga, divisão ou tipo) aguardando aprovação.
+   * Não vale para a geração: aprovado, passa para os campos do cadastro e vale
+   * a partir da próxima geração; recusado, some e a versão aprovada continua.
+   */
+  proposal?: RecurringTerms;
 }
 
 /** Data de vencimento num mês: dia 29 a 31 vira o último dia em meses curtos. */
@@ -107,6 +126,8 @@ export interface Forecast {
   date: IsoDate;
   payerUid: string;
   payerSharePct: number;
+  /** Há reajuste aguardando aprovação (a previsão mostra a versão aprovada). */
+  adjustmentPending: boolean;
 }
 
 /**
@@ -138,6 +159,7 @@ export function forecastRecurring(
       date: dueDate(month, rec.dayOfMonth),
       payerUid: rec.payerUid,
       payerSharePct: rec.payerSharePct,
+      adjustmentPending: !!rec.proposal,
     }))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }

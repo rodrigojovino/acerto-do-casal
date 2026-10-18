@@ -26,16 +26,33 @@
             </dl>
             <p class="hint">Cadastrada por {{ firstNameOf(current.createdBy) }}.</p>
             <p v-if="current.rejection && current.status === 'returned'" class="hint">Recusada por você{{ current.rejection.reason ? `: "${current.rejection.reason}"` : '' }}.</p>
+            <p v-if="current.rejection && current.status === 'approved' && !current.proposal" class="hint">
+              Você recusou o último reajuste{{ current.rejection.reason ? `: "${current.rejection.reason}"` : '' }}. Vale a versão acima.
+            </p>
           </section>
 
-          <template v-if="current.active && current.status === 'pending_approval'">
+          <section v-if="current.proposal && current.status === 'approved'" class="card summary proposal" aria-labelledby="reajuste">
+            <h3 id="reajuste">Reajuste proposto por {{ firstNameOf(current.createdBy) }}</h3>
+            <dl>
+              <div v-for="row in proposalRows" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd><span class="was">{{ row.from }}</span> → {{ row.to }}</dd>
+              </div>
+            </dl>
+            <p class="hint">
+              Até você aprovar, a geração continua com a versão atual. Aprovado, vale a partir da próxima geração; gastos já
+              gerados (inclusive o deste mês) não mudam.
+            </p>
+          </section>
+
+          <template v-if="current.active && awaitsApproval(current)">
             <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
             <input id="motivo" v-model="reason" class="input" maxlength="200" />
             <div class="grid-2">
               <button class="btn outline" type="button" @click="reject">Recusar</button>
               <button class="btn primary" type="button" @click="approve">Aprovar</button>
             </div>
-            <p class="hint">Aprovada, ela gera um gasto confirmado todo mês (você ainda pode contestar cada um).</p>
+            <p v-if="current.status === 'pending_approval'" class="hint">Aprovada, ela gera um gasto confirmado todo mês (você ainda pode contestar cada um).</p>
           </template>
           <button v-if="current.active" class="btn danger" type="button" @click="deactivate">Desativar</button>
         </template>
@@ -45,6 +62,14 @@
           <p v-if="current?.status === 'returned' && current.rejection" class="alert-error">
             Recusada por {{ firstNameOf(current.rejection.byUid) }}{{ current.rejection.reason ? `: "${current.rejection.reason}"` : '' }}.
             Ajuste e salve para pedir nova aprovação.
+          </p>
+          <p v-if="current?.status === 'approved' && current.proposal" class="alert-info">
+            Reajuste aguardando a aprovação de {{ partnerFirstName }}. Até lá, a geração usa a versão aprovada:
+            {{ approvedSummary }}.
+          </p>
+          <p v-else-if="current?.status === 'approved' && current.rejection" class="alert-error">
+            {{ firstNameOf(current.rejection.byUid) }} recusou o reajuste{{ current.rejection.reason ? `: "${current.rejection.reason}"` : '' }}.
+            Continua valendo a versão aprovada: {{ approvedSummary }}.
           </p>
 
           <div class="field">
@@ -128,10 +153,12 @@ import { monthLabel, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { centsFromDigits, formatBRL } from '@/domain/money';
 import type { RecurringKind } from '@/domain/recurrence';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
-import { recurringMaterialChanged, type RecurringInput } from '@/services/recurringData';
-import { recurringBadge } from '@/services/recurringView';
+import type { RecurringTerms } from '@/domain/recurrence';
+import { needsAdjustmentApproval, recurringMaterialChanged, type RecurringInput } from '@/services/recurringData';
+import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import {
   approveRecurring,
+  awaitsApproval,
   createRecurring,
   deactivateRecurring,
   deleteRecurring,
@@ -186,12 +213,14 @@ watch(
         ready.value = true;
         if (found && !filled) {
           filled = true;
+          // Com reajuste pendente, o formulário mostra o proposto (a versão aprovada fica no aviso).
+          const terms = found.status === 'approved' && found.proposal ? found.proposal : found;
           description.value = found.description;
-          kind.value = found.kind;
-          amountCents.value = found.amountCents ?? 0;
+          kind.value = terms.kind;
+          amountCents.value = terms.amountCents ?? 0;
           dayOfMonth.value = found.dayOfMonth;
-          payerUid.value = found.payerUid;
-          payerSharePct.value = found.payerSharePct;
+          payerUid.value = terms.payerUid;
+          payerSharePct.value = terms.payerSharePct;
           startMonth.value = found.startMonth;
           endMonth.value = found.endMonth ?? '';
           noEnd.value = !found.endMonth;
@@ -238,13 +267,51 @@ function input(): RecurringInput {
   };
 }
 
+function splitText(terms: RecurringTerms): string {
+  const s = splitForViewer(terms.payerSharePct, terms.payerUid, myUid.value);
+  return `${s.mine}/${s.partner}`;
+}
+
+/** Versão aprovada em uma linha, para os avisos de reajuste. */
+const approvedSummary = computed(() => {
+  const c = current.value;
+  if (!c) return '';
+  return `${termsAmountLabel(c).toLowerCase()}, ${firstNameOf(c.payerUid)} paga, divisão ${splitText(c)}`;
+});
+
+/** O que muda no reajuste (para o outro membro aprovar). */
+const proposalRows = computed(() => {
+  const c = current.value;
+  const p = c?.proposal;
+  if (!c || !p) return [];
+  const rows: Array<{ label: string; from: string; to: string }> = [];
+  if (c.kind !== p.kind || (p.kind === 'fixed' && c.amountCents !== p.amountCents)) {
+    rows.push({ label: 'Valor', from: termsAmountLabel(c), to: termsAmountLabel(p) });
+  }
+  if (c.payerUid !== p.payerUid) rows.push({ label: 'Quem paga', from: firstNameOf(c.payerUid), to: firstNameOf(p.payerUid) });
+  if (splitText(c) !== splitText(p)) {
+    rows.push({ label: `Divisão (você / ${partnerFirstName.value.toLowerCase()})`, from: splitText(c), to: splitText(p) });
+  }
+  return rows;
+});
+
 /** Avisa quando salvar vai pedir (nova) aprovação de quem não cadastrou. */
 const approvalNote = computed(() => {
-  if (kind.value === 'variable') return 'Variável não precisa de aprovação: a cada mês, quem paga confirma o valor.';
-  if (!current.value) return `Fixa vai para a aprovação de ${partnerFirstName.value} antes de gerar o primeiro gasto.`;
-  if (current.value.status !== 'approved' || recurringMaterialChanged(input(), current.value)) {
-    return `Mudar valor, quem paga, divisão ou tipo pede nova aprovação de ${partnerFirstName.value}.`;
+  const c = current.value;
+  if (!c) {
+    return kind.value === 'variable'
+      ? 'Variável não precisa de aprovação: a cada mês, quem paga confirma o valor.'
+      : `Fixa vai para a aprovação de ${partnerFirstName.value} antes de gerar o primeiro gasto.`;
   }
+  if (c.status !== 'approved') {
+    return kind.value === 'variable'
+      ? 'Variável não precisa de aprovação: a cada mês, quem paga confirma o valor.'
+      : `Vai para a aprovação de ${partnerFirstName.value} antes de gerar o primeiro gasto.`;
+  }
+  if (needsAdjustmentApproval(input(), c)) {
+    return `Reajuste: vale só daqui para frente e pede a aprovação de ${partnerFirstName.value}. Até lá, a geração usa a versão aprovada; gastos já gerados não mudam (para mudar o deste mês, edite o gasto).`;
+  }
+  if (recurringMaterialChanged(input(), c)) return 'Variável: quem paga e divisão mudam direto, a partir da próxima geração.';
   return 'Descrição, dia e mês final mudam sem nova aprovação.';
 });
 
@@ -276,12 +343,12 @@ function deactivate(): void {
 }
 
 function approve(): void {
-  if (group.value && current.value) approveRecurring(group.value.id, current.value.id, myUid.value);
+  if (group.value && current.value) approveRecurring(group.value.id, current.value, myUid.value);
 }
 
 function reject(): void {
   if (!group.value || !current.value) return;
-  rejectRecurring(group.value.id, current.value.id, myUid.value, reason.value);
+  rejectRecurring(group.value.id, current.value, myUid.value, reason.value);
   reason.value = '';
 }
 
@@ -350,6 +417,27 @@ function goBack(): void {
   margin: 0;
   font-weight: 700;
   text-align: right;
+}
+
+.alert-info {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--app-radius-control);
+  background: #fcebd9;
+  color: #7a3700;
+  font-size: 14px;
+}
+
+.proposal h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.was {
+  color: var(--app-muted);
+  font-weight: 600;
+  text-decoration: line-through;
 }
 
 .stepper {

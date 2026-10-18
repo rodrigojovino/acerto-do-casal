@@ -79,7 +79,7 @@
               <span class="avatar" aria-hidden="true">{{ initials(f.payerUid) }}</span>
               <span class="item-main">
                 <span class="item-name">{{ f.description }}</span>
-                <span class="item-sub">{{ firstNameOf(f.payerUid) }} · {{ formatDateBR(f.date, false) }} · previsto</span>
+                <span class="item-sub">{{ firstNameOf(f.payerUid) }} · {{ formatDateBR(f.date, false) }} · previsto{{ f.adjustmentPending ? ' · reajuste aguardando aprovação' : '' }}</span>
               </span>
               <span class="item-side">
                 <span class="num strong">{{ f.amountCents === null ? 'a definir' : formatBRL(f.amountCents) }}</span>

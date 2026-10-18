@@ -45,7 +45,7 @@ import StatusBadge from '@/components/StatusBadge.vue';
 import { monthLabel } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { recurringBadge } from '@/services/recurringView';
-import { watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { hasPendingAdjustment, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const router = useRouter();
@@ -75,7 +75,8 @@ onBeforeUnmount(() => stop?.());
 
 function subtitle(r: RecurringDoc): string {
   const period = r.endMonth ? `até ${monthLabel(r.endMonth).toLowerCase()}` : 'sem prazo';
-  return `${firstNameOf(r.payerUid)} paga · dia ${r.dayOfMonth} · ${period}`;
+  const adjustment = hasPendingAdjustment(r) ? ' · reajuste aguardando aprovação' : '';
+  return `${firstNameOf(r.payerUid)} paga · dia ${r.dayOfMonth} · ${period}${adjustment}`;
 }
 
 function goBack(): void {

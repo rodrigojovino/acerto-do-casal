@@ -171,6 +171,12 @@ describe('forecastRecurring', () => {
     expect(forecastRecurring(recs, '2026-09', today, new Set())).toEqual([]);
   });
 
+  it('reajuste pendente: mostra a versão aprovada com a indicação', () => {
+    const r = rec({ id: 'net', proposal: { kind: 'fixed', amountCents: 15000, payerUid: A, payerSharePct: 50 } });
+    expect(forecastRecurring([r], '2026-11', today, new Set())[0]).toMatchObject({ amountCents: 12000, adjustmentPending: true });
+    expect(forecastRecurring([rec({ id: 'x' })], '2026-11', today, new Set())[0].adjustmentPending).toBe(false);
+  });
+
   it('total previsto soma só os fixos', () => {
     const f = forecastRecurring(recs, '2026-11', today, new Set());
     expect(forecastTotal(f)).toBe(12000 + 150000 + 12000);

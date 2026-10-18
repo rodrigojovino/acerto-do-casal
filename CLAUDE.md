@@ -19,6 +19,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 ## Comandos e cuidados do Firebase
 
 - `npm run emulators` sobe Auth, Firestore, Functions e Storage locais; o app usa os emuladores em dev com `VITE_USE_EMULATORS=true`.
+- `npm run recorrentes:gerar -- [YYYY-MM | YYYY-MM-DD]` dispara a geração de recorrentes no emulador simulando o dia 1 do mês (padrão: mês atual) ou um dia qualquer. O agendamento não roda no emulador.
 - Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
 - Antes de um deploy que inclua Firestore ou Storage, confirmar que o banco e o bucket existem e em qual região: o `firebase deploy` cria o banco sozinho na região padrão (`nam5`) quando ele não existe, e a região não muda depois.
 - Functions: as opções globais (região, `maxInstances`) ficam em `functions/src/options.ts`, importado antes de qualquer Function; com ESM, `setGlobalOptions` no corpo do `index.ts` roda tarde demais.
@@ -110,7 +111,9 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 ### Recorrentes
 
 - Cadastro em Ajustes > Contas recorrentes: descrição, fixo ou variável, valor (só fixo), dia do vencimento, quem paga, divisão, mês inicial, mês final opcional, ativa.
-- **Fixo** passa pela aprovação do outro membro uma vez. Mudar valor, quem paga, divisão ou tipo exige nova aprovação; descrição, dia, mês final e ativa não. **Variável** não precisa de aprovação.
+- **Fixo** passa pela aprovação do outro membro uma vez (recusado, quem cadastrou corrige e volta para aprovação). **Variável** não precisa de aprovação. Descrição, dia, mês inicial/final e ativa mudam direto, sem aprovação.
+- **Reajuste** (valor, quem paga, divisão ou tipo de um cadastro já aprovado, com fixo de um dos lados): vale só daqui para frente e exige aprovação do outro membro. A versão aprovada fica nos campos do cadastro (é a que a geração usa) e a proposta em `proposal`. Aprovado, a proposta passa a ser a versão aprovada e vale a partir da próxima geração; o gasto do mês já gerado não muda (para o valor novo no mês, edita-se o gasto, que vai para aprovação). Recusado, a proposta some e a versão aprovada continua. Voltar o formulário à versão aprovada cancela o reajuste. No variável, quem paga e divisão mudam direto; virar fixo é reajuste (gera como variável até a aprovação).
+- Selo do cadastro: Pendente/Aprovar (fixo novo), Reajuste pendente/Aprovar reajuste, Recusada, Ativa, Desativada.
 - Só quem cadastrou edita; qualquer um dos dois desativa.
 - **Geração**: todos os recorrentes ativos e aprovados são gerados no **dia 1** do mês (execução às 6h de São Paulo), com `date` = dia do vencimento (29–31 viram o último dia nos meses curtos). A Function `generateRecurringDaily` roda todo dia para gerar no dia seguinte os cadastrados ou aprovados no meio do mês e recuperar execuções perdidas. Idempotente: id do gasto `rec-{recurringId}-{YYYY-MM}` e `lastGeneratedMonth` no cadastro, em transação; gasto excluído não é recriado.
 - Gasto gerado: fixo nasce `confirmed` (automático, contestável; editar → `pending_approval`); variável nasce `awaiting_confirmation` com valor 0 e `createdBy` = quem paga, que confirma o valor (depois vale a regra do comprovante). `recurringId` só a Function grava.
@@ -187,6 +190,7 @@ groups/{groupId}/recurring/{recurringId}
   description, kind: 'fixed' | 'variable', amountCents?, dayOfMonth, payerUid, payerSharePct
   startMonth: 'YYYY-MM', endMonth?, active
   status: 'pending_approval' | 'approved' | 'returned', approval?, rejection?
+  proposal?: { kind, amountCents?, payerUid, payerSharePct, at }   // reajuste aguardando aprovação
   lastGeneratedMonth?            // só a Function grava
   createdBy, createdAt, updatedAt
 ```
@@ -198,7 +202,7 @@ Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators
 - **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status` conforme a regra do comprovante e da edição (tabelas acima), sem `approval`/`rejection` (a edição apaga as anteriores); `recurringId` nunca na criação e inalterado na edição. Comprovante: foto no caminho do próprio gasto (não enviada na criação); QR com chave de 44 dígitos e modelo 65: de SP só `'pending'` com a URL canônica da própria chave, de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
 - **Outro membro**: em `pending_approval` aprova (`→ confirmed`, `approval.byUid` = ele) ou recusa (`→ returned`, motivo opcional); em automático valida (grava `approval` sem mudar o status) ou contesta (`→ returned`, motivo obrigatório). Não toca em valores nem no comprovante.
 - **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; só grava `nfceStatus`/`nfceData`, nunca muda o status. `resolveNfce` (callable) só pré-preenche o formulário.
-- `recurring`: só membros leem. Quem cadastrou cria e edita com o status exigido (variável `approved`; fixo novo, recusado ou com mudança de valor/pagador/divisão/tipo `pending_approval`); o outro aprova ou recusa o fixo pendente; qualquer um desativa; só quem cadastrou exclui. `lastGeneratedMonth` só pelo Admin SDK.
+- `recurring`: só membros leem. Ainda não aprovado (novo, pendente, recusado): quem cadastrou grava variável `approved` e fixo `pending_approval`, sem `approval`/`proposal`; o outro aprova ou recusa. Já aprovado: quem cadastrou mantém status, aprovação e versão aprovada; o dinheiro só muda direto entre variáveis, senão vai em `proposal` (diferente da versão aprovada, valores válidos, `at` do servidor); o outro aprova (versão aprovada = `proposal`, nova `approval`) ou recusa (`proposal` some, versão aprovada intacta). Qualquer um desativa; só quem cadastrou exclui. `lastGeneratedMonth` só pelo Admin SDK.
 - Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura (fechamento na Fase 6). Subcoleções sem regra própria ficam fechadas.
 - Storage: só quem lançou o gasto (tipo foto) envia/troca/apaga a foto, JPEG até 1 MB; membros leem. Cada regra faz uma única leitura no Firestore (por isso o app apaga a foto antes do documento). Exige a permissão do agente do Storage para ler o Firestore (papel "Firebase Rules Firestore Service Agent").
 - `src/services/expenseData.ts` monta os documentos (gasto, edição, aprovação, recusa) como o app grava; os testes de regras usam as mesmas funções.

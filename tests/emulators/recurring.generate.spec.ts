@@ -1,5 +1,8 @@
 import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { recurringApprovalData, recurringRejectionData } from '../../src/services/recurringData';
 import { PROJECT_ID, createTestEnv } from './setup';
 
 // Geração dos recorrentes (a mesma função da Function agendada), rodando com o
@@ -155,6 +158,51 @@ describe('generateRecurring', () => {
     await seed('r1', recurring());
     await generateRecurring('2026-10-12');
     expect((await expenses())[0]).toMatchObject({ date: '2026-10-10', competence: '2026-11' });
+  });
+
+  describe('reajuste do fixo (versão aprovada × proposta)', () => {
+    const proposal = { kind: 'fixed' as const, amountCents: 15000, payerUid: A, payerSharePct: 50 };
+    const serverTime = () => firebase.firestore.FieldValue.serverTimestamp();
+    const removeField = () => firebase.firestore.FieldValue.delete();
+    const asB = () => env.authenticatedContext(B).firestore().doc(`groups/${GROUP}/recurring/r1`);
+    const amountOf = async (month: string) => (await expenses()).find((e) => e.id === `rec-r1-${month}`)?.totalCents;
+
+    beforeEach(async () => {
+      await seed('r1', recurring({ approval: { byUid: B, at: new Date() }, proposal: { ...proposal, at: new Date() } }));
+    });
+
+    it('com reajuste pendente, gera com a versão aprovada', async () => {
+      await generateRecurring('2026-10-01');
+      expect(await amountOf('2026-10')).toBe(12000);
+      expect((await readRecurring('r1'))?.proposal).toBeDefined();
+    });
+
+    it('aprovado: o gasto já gerado não muda; o mês seguinte usa a nova versão', async () => {
+      await generateRecurring('2026-10-01');
+      await asB().update(recurringApprovalData({ proposal }, B, serverTime(), removeField()));
+      const rec = await readRecurring('r1');
+      expect(rec).toMatchObject({ amountCents: 15000, status: 'approved' });
+      expect(rec?.proposal).toBeUndefined();
+      await generateRecurring('2026-10-20'); // execução diária do mesmo mês: nada muda
+      expect(await amountOf('2026-10')).toBe(12000);
+      await generateRecurring('2026-11-01');
+      expect(await amountOf('2026-11')).toBe(15000);
+    });
+
+    it('recusado: a versão aprovada anterior continua valendo', async () => {
+      await asB().update(recurringRejectionData({ proposal }, B, 'Não combinamos', serverTime(), removeField()));
+      const rec = await readRecurring('r1');
+      expect(rec?.proposal).toBeUndefined();
+      expect(rec).toMatchObject({ amountCents: 12000, status: 'approved', rejection: { byUid: B, reason: 'Não combinamos' } });
+      await generateRecurring('2026-11-01');
+      expect(await amountOf('2026-11')).toBe(12000);
+    });
+
+    it('variável com reajuste para fixo pendente segue gerando como variável', async () => {
+      await seed('r1', recurring({ kind: 'variable', amountCents: undefined, proposal: { ...proposal, at: new Date() } }));
+      await generateRecurring('2026-10-01');
+      expect((await expenses())[0]).toMatchObject({ status: 'awaiting_confirmation', totalCents: 0 });
+    });
   });
 
   it('pagador que não é membro não gera', async () => {

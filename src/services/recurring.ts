@@ -10,7 +10,7 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { Recurring } from '@/domain/recurrence';
+import type { Recurring, RecurringTerms } from '@/domain/recurrence';
 import { db } from './firebase';
 import {
   newRecurringData,
@@ -28,8 +28,17 @@ export interface RecurringDoc extends Recurring {
   createdBy: string;
   approval?: { byUid: string; at: Date | null };
   rejection?: { byUid: string; reason?: string; at: Date | null };
+  proposal?: RecurringTerms & { at: Date | null };
   pendingWrite: boolean;
 }
+
+/** Reajuste aguardando aprovação (cadastro ativo e já aprovado). */
+export const hasPendingAdjustment = (r: Pick<RecurringDoc, 'active' | 'status' | 'proposal'>): boolean =>
+  r.active && r.status === 'approved' && !!r.proposal;
+
+/** Precisa da aprovação do outro membro: fixo novo pendente ou reajuste. */
+export const awaitsApproval = (r: Pick<RecurringDoc, 'active' | 'status' | 'proposal'>): boolean =>
+  r.active && (r.status === 'pending_approval' || hasPendingAdjustment(r));
 
 const recurringCol = (groupId: string) => collection(db, 'groups', groupId, 'recurring');
 const toDate = (v: unknown) => (v instanceof Timestamp ? v.toDate() : null);
@@ -53,6 +62,7 @@ export function watchRecurring(
           rejection: data.rejection
             ? { byUid: data.rejection.byUid, reason: data.rejection.reason, at: toDate(data.rejection.at) }
             : undefined,
+          proposal: data.proposal ? { ...data.proposal, at: toDate(data.proposal.at) } : undefined,
           pendingWrite: d.metadata.hasPendingWrites,
         } as RecurringDoc;
       });
@@ -77,13 +87,18 @@ export function updateRecurring(groupId: string, current: RecurringDoc, input: R
   );
 }
 
-export function approveRecurring(groupId: string, id: string, uid: string): void {
-  trackWrite(updateDoc(doc(recurringCol(groupId), id), recurringApprovalData(uid, serverTimestamp())), 'Não foi possível aprovar.');
+/** Aprova o cadastro novo ou o reajuste pendente. */
+export function approveRecurring(groupId: string, current: RecurringDoc, uid: string): void {
+  trackWrite(
+    updateDoc(doc(recurringCol(groupId), current.id), recurringApprovalData(current, uid, serverTimestamp(), deleteField())),
+    'Não foi possível aprovar.',
+  );
 }
 
-export function rejectRecurring(groupId: string, id: string, uid: string, reason?: string): void {
+/** Recusa o cadastro novo ou o reajuste pendente (a versão aprovada continua). */
+export function rejectRecurring(groupId: string, current: RecurringDoc, uid: string, reason?: string): void {
   trackWrite(
-    updateDoc(doc(recurringCol(groupId), id), recurringRejectionData(uid, reason, serverTimestamp())),
+    updateDoc(doc(recurringCol(groupId), current.id), recurringRejectionData(current, uid, reason, serverTimestamp(), deleteField())),
     'Não foi possível recusar.',
   );
 }

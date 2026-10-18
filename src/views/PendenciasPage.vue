@@ -95,11 +95,11 @@
             >
               <span class="item-main">
                 <span class="item-name">{{ r.description }}</span>
-                <span class="item-sub">Conta recorrente nova ou alterada · dia {{ r.dayOfMonth }}</span>
+                <span class="item-sub">{{ r.proposal ? 'Reajuste proposto' : 'Conta recorrente nova' }} · dia {{ r.dayOfMonth }}</span>
               </span>
               <span class="side">
-                <span class="num strong">{{ formatBRL(r.amountCents ?? 0) }}</span>
-                <StatusBadge kind="pending" label="Aprovar" />
+                <span class="num strong">{{ termsAmountLabel(r.proposal ?? r) }}</span>
+                <StatusBadge v-bind="recurringBadge(r, myUid)" />
               </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
@@ -129,7 +129,8 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthName } from '@/domain/calendar';
 import TypeBadge from '@/components/TypeBadge.vue';
-import { watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
 import { badgeFor, flagLabel, flagsFor } from '@/services/expenseView';
@@ -189,12 +190,8 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => stopRecurring?.());
-const recurringToApprove = computed(() =>
-  recurrings.value.filter((r) => r.active && r.status === 'pending_approval' && r.createdBy !== myUid.value),
-);
-const recurringWaiting = computed(() =>
-  recurrings.value.filter((r) => r.active && r.status === 'pending_approval' && r.createdBy === myUid.value),
-);
+const recurringToApprove = computed(() => recurrings.value.filter((r) => awaitsApproval(r) && r.createdBy !== myUid.value));
+const recurringWaiting = computed(() => recurrings.value.filter((r) => awaitsApproval(r) && r.createdBy === myUid.value));
 
 /** "Bia · 15/10 · sem comprovante" (+ mês quando não é o atual, + avisos da nota/foto). */
 function subtitle(e: Expense): string {

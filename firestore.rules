@@ -264,10 +264,13 @@ service cloud.firestore {
       }
 
       // ---- Contas recorrentes ----
-      // Fixo: vai para aprovação do outro membro; mudar valor, quem paga, divisão
-      // ou tipo exige nova aprovação. Variável: não precisa de aprovação (cada mês
-      // passa pela confirmação do valor). Só quem cadastrou edita; qualquer um dos
-      // dois desativa. A geração dos gastos é da Function (lastGeneratedMonth).
+      // Fixo novo: vai para aprovação do outro membro. Variável: não precisa de
+      // aprovação (cada mês passa pela confirmação do valor). Num cadastro já
+      // aprovado, os campos de dinheiro (tipo, valor, quem paga, divisão) são
+      // sempre a versão aprovada, que a geração usa; mudá-los com fixo de um dos
+      // lados vira reajuste em `proposal`, que só vale quando o outro aprovar.
+      // Só quem cadastrou edita; qualquer um dos dois desativa. A geração dos
+      // gastos é da Function (lastGeneratedMonth).
 
       function recurringKeys() {
         return ['description', 'kind', 'dayOfMonth', 'payerUid', 'payerSharePct', 'startMonth',
@@ -276,7 +279,7 @@ service cloud.firestore {
 
       function validRecurring(d) {
         return d.keys().hasAll(recurringKeys())
-          && d.keys().hasOnly(recurringKeys().concat(['amountCents', 'endMonth', 'approval', 'rejection', 'lastGeneratedMonth']))
+          && d.keys().hasOnly(recurringKeys().concat(['amountCents', 'endMonth', 'approval', 'rejection', 'proposal', 'lastGeneratedMonth']))
           && d.description is string
           && d.description.trim().size() >= 1
           && d.description.size() <= 80
@@ -295,19 +298,69 @@ service cloud.firestore {
           && d.active is bool;
       }
 
-      function recurringMaterialChanged() {
-        return request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['kind', 'amountCents', 'payerUid', 'payerSharePct']);
+      // Campos de dinheiro (de um cadastro ou de um reajuste), para comparar.
+      function recurringTerms(d) {
+        return {
+          'kind': d.kind,
+          'amountCents': d.get('amountCents', null),
+          'payerUid': d.payerUid,
+          'payerSharePct': d.payerSharePct
+        };
       }
 
-      // Status que o autor grava: variável sempre aprovado; fixo novo, devolvido
-      // ou com mudança de dinheiro vai para aprovação; senão mantém.
-      function recurringAuthorStatus(isNew) {
-        return request.resource.data.kind == 'variable'
-          ? 'approved'
-          : isNew || resource.data.status == 'returned' || recurringMaterialChanged()
-            ? 'pending_approval'
-            : resource.data.status;
+      function validProposal(p) {
+        return p is map
+          && p.keys().hasAll(['kind', 'payerUid', 'payerSharePct', 'at'])
+          && p.keys().hasOnly(['kind', 'amountCents', 'payerUid', 'payerSharePct', 'at'])
+          && (
+            p.kind == 'fixed' && p.amountCents is int && p.amountCents > 0
+            || p.kind == 'variable' && !p.keys().hasAny(['amountCents'])
+          )
+          && p.payerUid in get(groupPath(groupId)).data.members
+          && p.payerSharePct is int && p.payerSharePct >= 0 && p.payerSharePct <= 100
+          && p.at == request.time;
+      }
+
+      // Status que o autor grava num cadastro ainda não aprovado (novo, pendente
+      // ou recusado): variável já aprovado; fixo vai para aprovação.
+      function recurringAuthorStatus() {
+        return request.resource.data.kind == 'variable' ? 'approved' : 'pending_approval';
+      }
+
+      function isRecurringRejection() {
+        return request.resource.data.rejection.keys().hasAll(['byUid', 'at', 'kind'])
+          && request.resource.data.rejection.keys().hasOnly(['byUid', 'at', 'kind', 'reason'])
+          && request.resource.data.rejection.byUid == request.auth.uid
+          && request.resource.data.rejection.at == request.time
+          && request.resource.data.rejection.kind == 'reject'
+          && (
+            !request.resource.data.rejection.keys().hasAny(['reason'])
+            || request.resource.data.rejection.reason is string
+              && request.resource.data.rejection.reason.size() <= 200
+          );
+      }
+
+      // Edição de quem cadastrou num cadastro aprovado: aprovação e versão
+      // aprovada mantidas; sem reajuste, o dinheiro só muda direto entre
+      // variáveis; com reajuste, ele difere da versão aprovada e envolve fixo.
+      function isApprovedAuthorEdit() {
+        return request.resource.data.status == 'approved'
+          && request.resource.data.get('approval', null) == resource.data.get('approval', null)
+          && (
+            !request.resource.data.keys().hasAny(['proposal'])
+              && (
+                recurringTerms(request.resource.data) == recurringTerms(resource.data)
+                || resource.data.kind == 'variable' && request.resource.data.kind == 'variable'
+              )
+            || request.resource.data.keys().hasAny(['proposal'])
+              && recurringTerms(request.resource.data) == recurringTerms(resource.data)
+              && (
+                request.resource.data.proposal == resource.data.get('proposal', null)
+                || validProposal(request.resource.data.proposal)
+              )
+              && recurringTerms(request.resource.data.proposal) != recurringTerms(resource.data)
+              && (request.resource.data.proposal.kind == 'fixed' || resource.data.kind == 'fixed')
+          );
       }
 
       match /recurring/{recurringId} {
@@ -319,25 +372,25 @@ service cloud.firestore {
           && request.resource.data.createdAt == request.time
           && request.resource.data.updatedAt == request.time
           && request.resource.data.active == true
-          && !request.resource.data.keys().hasAny(['approval', 'rejection', 'lastGeneratedMonth'])
-          && request.resource.data.status == recurringAuthorStatus(true);
+          && !request.resource.data.keys().hasAny(['approval', 'rejection', 'proposal', 'lastGeneratedMonth'])
+          && request.resource.data.status == recurringAuthorStatus();
 
         allow update: if isMember(groupId) && (
-          // Quem cadastrou edita. A aprovação só é mantida num fixo que continua aprovado.
+          // Quem cadastrou edita. A recusa anterior é sempre descartada.
           resource.data.createdBy == request.auth.uid
             && validRecurring(request.resource.data)
             && request.resource.data.createdBy == resource.data.createdBy
             && request.resource.data.createdAt == resource.data.createdAt
             && request.resource.data.updatedAt == request.time
             && request.resource.data.get('lastGeneratedMonth', null) == resource.data.get('lastGeneratedMonth', null)
-            && request.resource.data.status == recurringAuthorStatus(false)
             && !request.resource.data.keys().hasAny(['rejection'])
             && (
-              request.resource.data.kind == 'fixed' && request.resource.data.status == 'approved'
-                ? request.resource.data.get('approval', null) == resource.data.get('approval', null)
-                : !request.resource.data.keys().hasAny(['approval'])
+              resource.data.status == 'approved'
+                ? isApprovedAuthorEdit()
+                : request.resource.data.status == recurringAuthorStatus()
+                  && !request.resource.data.keys().hasAny(['approval', 'proposal'])
             )
-          // O outro membro aprova ou recusa um fixo pendente.
+          // O outro membro aprova ou recusa um fixo novo pendente.
           || resource.data.createdBy != request.auth.uid
             && resource.data.status == 'pending_approval'
             && request.resource.data.diff(resource.data).affectedKeys()
@@ -349,16 +402,24 @@ service cloud.firestore {
                 && !request.resource.data.keys().hasAny(['rejection'])
               || request.resource.data.status == 'returned'
                 && !request.resource.data.keys().hasAny(['approval'])
-                && request.resource.data.rejection.keys().hasAll(['byUid', 'at', 'kind'])
-                && request.resource.data.rejection.keys().hasOnly(['byUid', 'at', 'kind', 'reason'])
-                && request.resource.data.rejection.byUid == request.auth.uid
-                && request.resource.data.rejection.at == request.time
-                && request.resource.data.rejection.kind == 'reject'
-                && (
-                  !request.resource.data.rejection.keys().hasAny(['reason'])
-                  || request.resource.data.rejection.reason is string
-                    && request.resource.data.rejection.reason.size() <= 200
-                )
+                && isRecurringRejection()
+            )
+          // O outro membro aprova o reajuste (passa a ser a versão aprovada) ou o
+          // recusa (some; a versão aprovada continua). O status não muda.
+          || resource.data.createdBy != request.auth.uid
+            && resource.data.status == 'approved'
+            && resource.data.keys().hasAny(['proposal'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['kind', 'amountCents', 'payerUid', 'payerSharePct', 'proposal', 'approval', 'rejection', 'updatedAt'])
+            && !request.resource.data.keys().hasAny(['proposal'])
+            && request.resource.data.updatedAt == request.time
+            && (
+              recurringTerms(request.resource.data) == recurringTerms(resource.data.proposal)
+                && request.resource.data.approval == { 'byUid': request.auth.uid, 'at': request.time }
+                && !request.resource.data.keys().hasAny(['rejection'])
+              || recurringTerms(request.resource.data) == recurringTerms(resource.data)
+                && request.resource.data.get('approval', null) == resource.data.get('approval', null)
+                && isRecurringRejection()
             )
           // Qualquer um dos dois desativa.
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt'])
