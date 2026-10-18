@@ -184,11 +184,12 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 1. [x] Fundação: scaffold, Firebase, domínio + testes, build no GitHub Actions, prova de conceito da SEFAZ
 2. [x] Acesso: login Google e vínculo do casal por código
 3. [x] Núcleo do acerto: lançamento, painel com saldo, offline
-4. [ ] Comprovantes e aprovação
+4. [x] Comprovantes e aprovação
 5. [ ] Recorrentes e parcelados (Cloud Functions)
 6. [ ] Fechamento, reabertura e histórico
 7. [ ] Notificações, exportação Excel/PDF, versão web
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
+   - Pendência herdada da Fase 4 (prioridade baixa): reduzir o tamanho do APK (de ~6 MB para ~31,5 MB com a leitura de QR); avaliar o modelo de QR via Google Play Services em vez do embutido no APK.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
