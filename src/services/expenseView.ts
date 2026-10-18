@@ -22,10 +22,13 @@ export const flagLabel: Record<ExpenseFlag, string> = {
 };
 
 /** Avisos sobre o comprovante (nota divergente, falha na conferência, foto pendente). */
-export function flagsFor(expense: Pick<Expense, 'receipt' | 'totalCents' | 'status'>): ExpenseFlag[] {
+export function flagsFor(expense: Pick<Expense, 'receipt' | 'totalCents' | 'status' | 'installment'>): ExpenseFlag[] {
   const r = expense.receipt;
   if (r.type === 'nfce') {
-    if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== expense.totalCents) return ['nfce-diff'];
+    // Numa parcela, a nota é da compra inteira: a comparação fica no Detalhe.
+    if (r.nfceStatus === 'ok' && r.nfceData && !expense.installment && r.nfceData.totalCents !== expense.totalCents) {
+      return ['nfce-diff'];
+    }
     if (r.nfceStatus === 'failed') return ['nfce-failed'];
     if (r.nfceStatus === 'pending') return ['nfce-checking'];
   }
@@ -40,7 +43,7 @@ export const NFCE_APPROVER = 'nfce';
  * Confirmado sem aprovação de pessoa: pelo comprovante, recorrente fixo ou a
  * conferência do QR da versão anterior. É o único confirmado contestável.
  */
-export function isAutoConfirmed(expense: Pick<Expense, 'status' | 'approval'>): boolean {
+export function isAutoConfirmed(expense: Pick<Expense, 'status'> & { approval?: { byUid: string } }): boolean {
   return expense.status === 'confirmed' && (!expense.approval || expense.approval.byUid === NFCE_APPROVER);
 }
 

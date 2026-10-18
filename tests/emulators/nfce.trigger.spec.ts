@@ -145,3 +145,38 @@ describe('checkNfce: só registra, nunca muda o status', () => {
     expect((await read('contestado'))?.status).toBe('returned');
   });
 });
+
+describe('checkNfce: compra parcelada', () => {
+  it('só a parcela 1 consulta; o resultado vale para todas as parcelas da série', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const batch = ctx.firestore().batch();
+      for (const index of [1, 2, 3]) {
+        const id = index === 1 ? 'serie' : `serie-${index}`;
+        batch.set(
+          ctx.firestore().doc(path(id)),
+          nfceExpense(
+            { nfceStatus: 'pending' },
+            { status: 'confirmed', installment: { seriesId: 'serie', index, count: 3, firstMonth: '2026-10' } },
+          ),
+        );
+      }
+      await batch.commit();
+    });
+    for (const id of ['serie', 'serie-2', 'serie-3']) {
+      const d = await waitFor(id, (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
+      const receipt = d?.receipt as { nfceStatus: string; nfceError: string };
+      expect(receipt.nfceStatus).toBe('failed');
+      expect(receipt.nfceError).toBe('invalid_url');
+      expect(d?.status).toBe('confirmed');
+    }
+  });
+
+  it('parcela que não é a 1 não consulta sozinha', async () => {
+    await write(
+      'avulsa-2',
+      nfceExpense({ nfceStatus: 'pending' }, { installment: { seriesId: 'avulsa', index: 2, count: 3, firstMonth: '2026-10' } }),
+    );
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(((await read('avulsa-2'))?.receipt as { nfceStatus: string }).nfceStatus).toBe('pending');
+  });
+});

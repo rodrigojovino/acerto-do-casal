@@ -109,7 +109,8 @@ import SyncStatus from '@/components/SyncStatus.vue';
 import { clampMonth, formatDateBR, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
-import { watchMonthExpenses, type Expense } from '@/services/expenses';
+import { watchLatestInstallmentMonth, watchMonthExpenses, type Expense } from '@/services/expenses';
+import { navigationLastMonth } from '@/domain/installments';
 import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { forecastRecurring, forecastTotal } from '@/domain/recurrence';
@@ -131,7 +132,24 @@ const firstMonth = computed(() => {
   const created = group.value?.createdAt?.toDate();
   return created ? monthOf(todayInSaoPaulo(created)) : monthOf(today.value);
 });
-const lastMonth = computed(() => lastAllowedMonth(today.value));
+// Parcelas futuras estendem o limite até o mês da última parcela existente
+// (a previsão de recorrentes não estende).
+const latestInstallmentMonth = ref<string | null>(null);
+let stopLatest: (() => void) | null = null;
+watch(
+  [() => group.value?.id, () => lastAllowedMonth(today.value)],
+  ([groupId, base]) => {
+    stopLatest?.();
+    stopLatest = null;
+    latestInstallmentMonth.value = null;
+    if (groupId) {
+      stopLatest = watchLatestInstallmentMonth(groupId, base, (m) => (latestInstallmentMonth.value = m), () => undefined);
+    }
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopLatest?.());
+const lastMonth = computed(() => navigationLastMonth(today.value, latestInstallmentMonth.value));
 
 // ?mes= só vale enquanto o Painel é a tela atual: o Ionic mantém a tela viva
 // e a rota global muda quando outras telas abrem.
@@ -145,7 +163,7 @@ watch(
   { immediate: true },
 );
 
-const month = computed(() => clampMonth(requested.value ?? monthOf(today.value), firstMonth.value, today.value));
+const month = computed(() => clampMonth(requested.value ?? monthOf(today.value), firstMonth.value, today.value, lastMonth.value));
 
 function go(delta: 1 | -1): void {
   router.replace({ name: 'painel', query: { mes: addMonths(month.value, delta) } });

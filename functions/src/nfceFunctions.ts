@@ -57,6 +57,9 @@ export const checkNfce = onDocumentWritten(
     if (!after?.exists) return;
     const receipt = after.get('receipt') as NfceReceipt | undefined;
     if (receipt?.type !== 'nfce') return;
+    // Compra parcelada: a nota é da compra; só a parcela 1 consulta e repassa o resultado.
+    const installment = after.get('installment') as { seriesId: string; index: number } | undefined;
+    if (installment && installment.index !== 1) return;
 
     if (receipt.nfceStatus === 'pending') {
       let update: Partial<NfceReceipt>;
@@ -72,16 +75,23 @@ export const checkNfce = onDocumentWritten(
         update = { nfceStatus: 'failed', nfceError: err instanceof NfceError ? err.reason : 'unknown' };
       }
       // Só grava se o gasto ainda tiver o mesmo QR pendente (pode ter mudado durante a consulta).
+      // Numa série, grava em todas as parcelas com a mesma nota ainda não conferida.
+      const refs = installment
+        ? (await after.ref.parent.where('installment.seriesId', '==', installment.seriesId).get()).docs.map((d) => d.ref)
+        : [after.ref];
       await db.runTransaction(async (tx) => {
-        const current = await tx.get(after.ref);
-        const r = current.get('receipt') as NfceReceipt | undefined;
-        if (!current.exists || r?.type !== 'nfce' || r.nfceKey !== receipt.nfceKey || r.nfceStatus !== 'pending') return;
-        tx.update(after.ref, {
-          'receipt.nfceStatus': update.nfceStatus,
-          'receipt.nfceData': update.nfceData ?? FieldValue.delete(),
-          'receipt.nfceError': update.nfceError ?? FieldValue.delete(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+        const docs = await Promise.all(refs.map((ref) => tx.get(ref)));
+        for (const current of docs) {
+          const r = current.get('receipt') as NfceReceipt | undefined;
+          if (!current.exists || r?.type !== 'nfce' || r.nfceKey !== receipt.nfceKey || r.nfceStatus === 'ok') continue;
+          if (current.ref.isEqual(after.ref) && r.nfceStatus !== 'pending') continue;
+          tx.update(current.ref, {
+            'receipt.nfceStatus': update.nfceStatus,
+            'receipt.nfceData': update.nfceData ?? FieldValue.delete(),
+            'receipt.nfceError': update.nfceError ?? FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
       });
     }
   },

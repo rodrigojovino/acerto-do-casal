@@ -6,14 +6,22 @@
           <button class="icon-btn" type="button" aria-label="Voltar" @click="goBack">
             <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
-          <h1>{{ confirmingValue ? 'Confirmar valor' : isEdit ? 'Editar gasto' : 'Novo gasto' }}</h1>
+          <h1>{{ confirmingValue ? 'Confirmar valor' : editingSeries ? 'Editar compra parcelada' : isEdit ? 'Editar gasto' : 'Novo gasto' }}</h1>
         </header>
 
         <p v-if="blocked" class="alert-error" role="alert">{{ blocked }}</p>
 
         <form v-else-if="ready" class="form" novalidate @submit.prevent="save">
-          <div class="card amount">
-            <label for="valor" class="label">Valor total</label>
+          <div v-if="editingSeries" class="card series-summary">
+            <p class="strong">{{ seriesSummary }}</p>
+            <p class="hint">
+              Muda em todas as parcelas de meses abertos: descrição, quem pagou, divisão e comprovante. Para mudar o
+              valor, o número de parcelas ou o primeiro mês, exclua a compra e lance de novo.
+            </p>
+          </div>
+
+          <div v-else class="card amount">
+            <label for="valor" class="label">{{ installmentOn ? 'Valor total da compra' : 'Valor total' }}</label>
             <input
               id="valor"
               class="amount-input num"
@@ -41,8 +49,8 @@
               />
               <p v-if="showErrors && errors.description" class="field-error">{{ errors.description }}</p>
             </div>
-            <div class="field">
-              <label for="data" class="label">Data</label>
+            <div v-if="!editingSeries" class="field">
+              <label for="data" class="label">{{ installmentOn ? 'Data da compra' : 'Data' }}</label>
               <input
                 id="data"
                 v-model="date"
@@ -68,7 +76,7 @@
           </div>
 
           <div class="grid-2">
-            <div class="field">
+            <div v-if="!editingSeries" class="field">
               <label for="pessoal" class="label">{{ personalLabel }}</label>
               <input
                 id="pessoal"
@@ -91,6 +99,41 @@
             </div>
           </div>
 
+          <div v-if="!isEdit" class="card installments">
+            <label class="check">
+              <input v-model="installmentOn" type="checkbox" />
+              <span class="strong">Compra parcelada</span>
+            </label>
+            <template v-if="installmentOn">
+              <div class="grid-2">
+                <div class="field">
+                  <span id="parcelas" class="label">Parcelas</span>
+                  <div class="stepper" role="group" aria-labelledby="parcelas">
+                    <button type="button" aria-label="Menos parcelas" :disabled="installmentCount <= MIN_INSTALLMENTS" @click="installmentCount--">−</button>
+                    <output class="num" aria-live="polite">{{ installmentCount }}x</output>
+                    <button type="button" aria-label="Mais parcelas" :disabled="installmentCount >= MAX_INSTALLMENTS" @click="installmentCount++">+</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="primeira" class="label">Mês da primeira</label>
+                  <input
+                    id="primeira"
+                    v-model="installmentFirstMonth"
+                    class="input"
+                    type="month"
+                    @input="firstMonthTouched = true"
+                    :min="firstMonthBounds.min"
+                    :max="firstMonthBounds.max"
+                    :aria-invalid="showErrors && !!errors.firstMonth"
+                  />
+                  <p v-if="showErrors && errors.firstMonth" class="field-error">{{ errors.firstMonth }}</p>
+                </div>
+              </div>
+              <p class="hint" aria-live="polite">{{ installmentText }}</p>
+              <p class="hint">O comprovante da compra vale para todas as parcelas; sem ele, a série inteira vai para aprovação uma vez.</p>
+            </template>
+          </div>
+
           <ReceiptPicker
             ref="picker"
             v-model="receipt"
@@ -102,7 +145,8 @@
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
             <div class="row"><span class="muted">{{ preview.label }}</span><span class="num"><strong>{{ formatBRL(preview.amountCents) }}</strong></span></div>
-            <div v-if="competenceNote" class="row note"><span>{{ competenceNote }}</span></div>
+            <div v-if="competenceNote && !installmentOn" class="row note"><span>{{ competenceNote }}</span></div>
+            <div v-if="installmentOn" class="row note"><span>Na compra inteira; cada parcela entra no acerto do mês dela.</span></div>
           </div>
 
           <button class="btn primary" type="submit">{{ isEdit ? 'Salvar alteração' : 'Salvar gasto' }}</button>
@@ -114,13 +158,14 @@
 
 <script setup lang="ts">
 import { IonContent, IonPage, onIonViewDidEnter, onIonViewWillEnter } from '@ionic/vue';
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ReceiptPicker, { type ReceiptState } from '@/components/ReceiptPicker.vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   firstDayOf,
   isIsoDate,
   lastAllowedDate,
+  monthLabel,
   monthName,
   monthOf,
   resolveCompetence,
@@ -129,7 +174,25 @@ import {
 import { centsFromDigits, formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
-import { createExpense, receiptPhotoUrl, updateExpense, watchExpense, type Expense, type ReceiptChoice } from '@/services/expenses';
+import {
+  createExpense,
+  createInstallmentSeries,
+  receiptPhotoUrl,
+  updateExpense,
+  updateSeries,
+  watchExpense,
+  watchSeries,
+  type Expense,
+  type ReceiptChoice,
+} from '@/services/expenses';
+import {
+  MAX_INSTALLMENTS,
+  MIN_INSTALLMENTS,
+  firstMonthRange,
+  installmentPreview,
+  lastInstallmentMonth,
+} from '@/domain/installments';
+import { seriesTargets } from '@/services/series';
 import { formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
@@ -162,7 +225,16 @@ const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
 /** `?anexar=qr` (aba Pendências): abre o leitor de QR assim que o gasto carregar. */
 const attachQr = route.query.anexar === 'qr';
 
+// Compra parcelada (lançamento novo)
+const installmentOn = ref(false);
+const installmentCount = ref(MIN_INSTALLMENTS);
+const installmentFirstMonth = ref(monthOf(today.value));
+
 const ready = ref(!isEdit);
+/** Edição de uma parcela = edição da série (parcelas de meses abertos). */
+const editingSeries = ref(false);
+const seriesParcels = ref<Expense[]>([]);
+let stopSeries: (() => void) | null = null;
 /** Recorrente variável aguardando quem paga confirmar o valor. */
 const confirmingValue = ref(false);
 const blocked = ref<string | null>(null);
@@ -183,6 +255,10 @@ onIonViewWillEnter(() => {
   receipt.value = { type: 'none' };
   dateTouched.value = false;
   nfceMessage.value = null;
+  installmentOn.value = false;
+  installmentCount.value = MIN_INSTALLMENTS;
+  installmentFirstMonth.value = monthOf(today.value);
+  firstMonthTouched.value = false;
 });
 
 // Edição: carrega o gasto uma vez (também do cache offline).
@@ -201,6 +277,10 @@ if (editId && group.value) {
       } else {
         editing = expense;
         confirmingValue.value = expense.status === 'awaiting_confirmation';
+        if (expense.installment && group.value) {
+          editingSeries.value = true;
+          stopSeries = watchSeries(group.value.id, expense.installment.seriesId, (list) => (seriesParcels.value = list), () => undefined);
+        }
         totalCents.value = expense.totalCents;
         personalCents.value = expense.personalCents;
         description.value = expense.description;
@@ -216,7 +296,10 @@ if (editId && group.value) {
     () => (blocked.value = 'Não foi possível carregar o gasto.'),
   );
 }
-onBeforeUnmount(() => stopWatch?.());
+onBeforeUnmount(() => {
+  stopWatch?.();
+  stopSeries?.();
+});
 
 /** Comprovante atual do gasto em edição, na forma da seção de comprovante. */
 async function loadReceipt(expense: Expense): Promise<void> {
@@ -341,14 +424,59 @@ const competenceNote = computed(() => {
   return `${closed[0].toUpperCase()}${closed.slice(1)} está fechado: este gasto entra em ${monthName(competence.value)}.`;
 });
 
+// ---- Compra parcelada ----
+const firstMonthBounds = computed(() => {
+  const range = isIsoDate(date.value) ? firstMonthRange(date.value, today.value) : { min: firstMonth.value, max: monthOf(maxDate.value) };
+  return { min: range.min > firstMonth.value ? range.min : firstMonth.value, max: range.max };
+});
+
+// A primeira parcela acompanha o mês da compra até a pessoa escolher outro mês.
+const firstMonthTouched = ref(false);
+watch(firstMonthBounds, (bounds) => {
+  const m = firstMonthTouched.value ? installmentFirstMonth.value : bounds.min;
+  installmentFirstMonth.value = m < bounds.min ? bounds.min : m > bounds.max ? bounds.max : m;
+});
+
+const shortMonth = (m: string) => monthLabel(m).toLowerCase().replace(/^(\S{3})\S* /, '$1/');
+
+/** "10x · 1ª de R$ 100,05 e 9 de R$ 100,00 · de out/2026 a jul/2027". */
+const installmentText = computed(() => {
+  const n = installmentCount.value;
+  if (totalCents.value <= 0) return `${n} parcelas, uma por mês.`;
+  const { firstCents, otherCents } = installmentPreview(totalCents.value, n);
+  const values = firstCents === otherCents
+    ? `${n}x de ${formatBRL(otherCents)}`
+    : `${n}x · 1ª de ${formatBRL(firstCents)} e ${n - 1} de ${formatBRL(otherCents)}`;
+  const from = installmentFirstMonth.value;
+  return /^\d{4}-\d{2}$/.test(from)
+    ? `${values} · de ${shortMonth(from)} a ${shortMonth(lastInstallmentMonth({ count: n, firstMonth: from }))}`
+    : values;
+});
+
+/** Resumo travado da série na edição. */
+const seriesSummary = computed(() => {
+  const e = editing;
+  if (!e?.installment) return '';
+  const total = seriesParcels.value.reduce((s, p) => s + p.totalCents, 0);
+  const totalText = seriesParcels.value.length === e.installment.count ? ` · total ${formatBRL(total)}` : '';
+  return `Parcela ${e.installment.index}/${e.installment.count} · ${formatBRL(e.totalCents)}${totalText}`;
+});
+
 // ---- Validação ----
 const errors = computed(() => {
-  const e: Partial<Record<'total' | 'description' | 'date' | 'personal', string>> = {};
+  const e: Partial<Record<'total' | 'description' | 'date' | 'personal' | 'firstMonth', string>> = {};
   if (totalCents.value <= 0) e.total = 'Informe o valor.';
   if (description.value.trim() === '') e.description = 'Informe a descrição.';
   if (!isIsoDate(date.value)) e.date = 'Informe a data.';
   else if (date.value < minDate.value || date.value > maxDate.value) e.date = 'Data fora do período permitido.';
   if (personalCents.value > totalCents.value) e.personal = 'Não pode ser maior que o total.';
+  if (installmentOn.value) {
+    const m = installmentFirstMonth.value;
+    if (!/^\d{4}-\d{2}$/.test(m)) e.firstMonth = 'Informe o mês da primeira.';
+    else if (m < firstMonthBounds.value.min || m > firstMonthBounds.value.max) e.firstMonth = 'Mês fora do período permitido.';
+    else if (closedMonths.value.has(m)) e.firstMonth = 'Este mês está fechado.';
+    if (totalCents.value > 0 && totalCents.value < installmentCount.value) e.total = 'Valor menor que o número de parcelas.';
+  }
   return e;
 });
 
@@ -368,6 +496,23 @@ function save(): void {
   };
   const photo = receipt.value.type === 'photo' ? receipt.value.data : undefined;
   // Não espera o servidor: offline, a gravação (e a foto) sincronizam depois.
+  if (editing?.installment) {
+    const targets = seriesParcels.value.length > 0 ? seriesTargets(seriesParcels.value, 'edit', myUid.value, closedMonths.value) : [editing];
+    updateSeries(group.value.id, editing.installment.seriesId, targets, input, photo);
+    router.replace({ name: 'gasto', params: { id: editing.id } });
+    return;
+  }
+  if (!editing && installmentOn.value) {
+    const result = createInstallmentSeries(
+      group.value.id,
+      input,
+      { count: installmentCount.value, firstMonth: installmentFirstMonth.value },
+      myUid.value,
+      photo,
+    );
+    router.replace({ name: 'painel', query: { mes: result.competence } });
+    return;
+  }
   const result = editing
     ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value, photo)
     : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value, photo);
@@ -393,6 +538,30 @@ function goBack(): void {
 </script>
 
 <style scoped>
+.series-summary,
+.installments {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.series-summary p {
+  margin: 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+}
+
 .nfce-msg {
   margin: -4px 0 0;
   padding: 10px 12px;

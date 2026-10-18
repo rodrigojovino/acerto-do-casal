@@ -64,9 +64,16 @@ export function resolveCompetence(
   return candidate;
 }
 
-/** Faixa de meses navegáveis: do mês de criação do grupo ao mês seguinte ao atual. */
-export function clampMonth(month: Competence, firstMonth: Competence, today: IsoDate): Competence {
-  const last = lastAllowedMonth(today);
+/**
+ * Faixa de meses navegáveis: do mês de criação do grupo ao mês seguinte ao
+ * atual, ou até `last` (estendido pelas parcelas futuras).
+ */
+export function clampMonth(
+  month: Competence,
+  firstMonth: Competence,
+  today: IsoDate,
+  last: Competence = lastAllowedMonth(today),
+): Competence {
   if (month < firstMonth) return firstMonth;
   if (month > last) return last;
   return month;

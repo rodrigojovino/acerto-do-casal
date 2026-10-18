@@ -1,4 +1,14 @@
-import { doc, getDocFromCache, getDocFromServer, serverTimestamp, updateDoc } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDocFromCache,
+  getDocFromServer,
+  getDocsFromServer,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { createStore, del, entries, set } from 'idb-keyval';
 import { readonly, ref, watch } from 'vue';
@@ -79,7 +89,27 @@ async function uploadOne(item: QueuedPhoto): Promise<Outcome> {
   if (!receipt.photoUploaded) {
     await updateDoc(expenseRef, { 'receipt.photoUploaded': true, updatedAt: serverTimestamp() });
   }
+  await markSeriesUploaded(item.groupId, item.expenseId, path);
   return 'uploaded';
+}
+
+/**
+ * Compra parcelada: a foto é da série (id da parcela 1) e vale para todas as
+ * parcelas; marca as outras como enviadas, uma a uma (parcela de mês fechado
+ * recusa e fica como está).
+ */
+async function markSeriesUploaded(groupId: string, seriesId: string, path: string): Promise<void> {
+  const parcels = await getDocsFromServer(
+    query(collection(db, 'groups', groupId, 'expenses'), where('installment.seriesId', '==', seriesId)),
+  );
+  await Promise.all(
+    parcels.docs
+      .filter((d) => {
+        const r = d.get('receipt') as { type?: string; photoPath?: string; photoUploaded?: boolean } | undefined;
+        return d.id !== seriesId && r?.type === 'photo' && r.photoPath === path && !r.photoUploaded;
+      })
+      .map((d) => updateDoc(d.ref, { 'receipt.photoUploaded': true, updatedAt: serverTimestamp() }).catch(() => undefined)),
+  );
 }
 
 let flushing: Promise<void> | null = null;

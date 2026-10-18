@@ -1,5 +1,6 @@
 import type { IsoDate } from '@/domain/calendar';
 import { receiptPhotoPath } from '@/domain/image';
+import { installmentExpenseId, planInstallments } from '@/domain/installments';
 import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
 
 /**
@@ -188,6 +189,87 @@ export function contestData<T, D>(uid: string, reason: string, now: T, removeFie
     status: 'returned' as const,
     rejection: { byUid: uid, at: now, kind: 'contest' as const, reason: trimmed },
     approval: removeField,
+    updatedAt: now,
+  };
+}
+
+// ---- Compra parcelada ----
+
+/** Parcelamento escolhido no formulário. */
+export interface InstallmentChoice {
+  count: number;
+  /** Mês da primeira parcela. */
+  firstMonth: Competence;
+}
+
+/**
+ * Série nova: um documento por parcela (id da parcela 1 = id da série), com o
+ * mesmo comprovante da compra (a foto fica no caminho da série) e o mesmo
+ * status pela regra do comprovante. `input.totalCents` e `personalCents` são os
+ * da compra inteira.
+ */
+export function newInstallmentSeriesData<T>(
+  input: ExpenseInput,
+  choice: InstallmentChoice,
+  uid: string,
+  ids: { groupId: string; seriesId: string },
+  now: T,
+) {
+  const receipt = receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId });
+  const status = authorStatus(input.receipt);
+  return planInstallments({
+    totalCents: input.totalCents,
+    personalCents: input.personalCents,
+    count: choice.count,
+    firstMonth: choice.firstMonth,
+    purchaseDate: input.date,
+  }).map((p) => ({
+    id: installmentExpenseId(ids.seriesId, p.index),
+    data: {
+      description: input.description.trim(),
+      totalCents: p.totalCents,
+      personalCents: p.personalCents,
+      payerUid: input.payerUid,
+      payerSharePct: input.payerSharePct,
+      date: p.date,
+      competence: p.competence,
+      receipt,
+      status,
+      installment: { seriesId: ids.seriesId, index: p.index, count: p.count, firstMonth: choice.firstMonth },
+      createdBy: uid,
+      createdAt: now,
+      updatedAt: now,
+    },
+  }));
+}
+
+/** O que muda na edição de uma série (valor, parcelas e primeiro mês: exclui e lança de novo). */
+export interface SeriesEditInput {
+  description: string;
+  payerUid: string;
+  payerSharePct: number;
+  receipt: ReceiptChoice;
+}
+
+/**
+ * Edição de uma parcela da série (o app aplica em todas as de meses abertos):
+ * mesma regra de status da edição de um gasto; descarta aprovação ou recusa.
+ */
+export function installmentUpdateData<T, D>(
+  input: SeriesEditInput,
+  current: { receipt: StoredReceipt; status: ExpenseStatus },
+  ids: { groupId: string; seriesId: string },
+  now: T,
+  removeField: D,
+) {
+  return {
+    description: input.description.trim(),
+    payerUid: input.payerUid,
+    payerSharePct: input.payerSharePct,
+    receipt: receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId }, current.receipt),
+    status: authorStatus(input.receipt, current.status),
+    approval: removeField,
+    rejection: removeField,
     updatedAt: now,
   };
 }

@@ -24,6 +24,7 @@
               <span class="side">
                 <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
                 <StatusBadge v-bind="badgeFor(e, myUid)" />
+                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
               </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
@@ -42,6 +43,7 @@
                 <span class="side">
                   <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
                   <StatusBadge v-bind="badgeFor(e, myUid)" />
+                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
                 </span>
                 <span aria-hidden="true" class="chev">›</span>
               </router-link>
@@ -65,6 +67,7 @@
               <span class="side">
                 <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
                 <StatusBadge v-bind="badgeFor(e, myUid)" />
+                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
               </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
@@ -84,6 +87,7 @@
               <span class="side">
                 <TypeBadge label="Recorrente" />
                 <StatusBadge v-bind="badgeFor(e, myUid)" />
+                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
               </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
@@ -129,6 +133,7 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthName } from '@/domain/calendar';
 import TypeBadge from '@/components/TypeBadge.vue';
+import { collapseSeries } from '@/services/series';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import { formatBRL } from '@/domain/money';
@@ -167,13 +172,21 @@ watch(
 );
 onBeforeUnmount(() => stop?.());
 
+// Compra parcelada: uma linha por série (as ações valem para a série inteira).
 const toApprove = computed(() =>
-  items.value.filter((e) => e.status === 'pending_approval' && e.createdBy !== myUid.value),
+  collapseSeries(items.value.filter((e) => e.status === 'pending_approval' && e.createdBy !== myUid.value)),
 );
 const waiting = computed(() =>
-  items.value.filter((e) => e.status === 'pending_approval' && e.createdBy === myUid.value),
+  collapseSeries(items.value.filter((e) => e.status === 'pending_approval' && e.createdBy === myUid.value)),
 );
-const returned = computed(() => items.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value));
+const returned = computed(() =>
+  collapseSeries(items.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value)),
+);
+
+function seriesLabel(e: Expense & { seriesSize?: number }): string {
+  if (!e.installment) return '';
+  return (e.seriesSize ?? 1) > 1 ? `${e.seriesSize} parcelas` : `Parcela ${e.installment.index}/${e.installment.count}`;
+}
 const toConfirm = computed(() =>
   items.value.filter((e) => e.status === 'awaiting_confirmation' && e.createdBy === myUid.value),
 );

@@ -29,6 +29,11 @@
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
           </section>
 
+          <div v-if="expense.installment" class="card series">
+            <p class="strong">Compra parcelada · {{ expense.installment.count }} parcelas</p>
+            <p class="hint">{{ seriesText }}</p>
+          </div>
+
           <div v-if="expense.status === 'returned' && expense.rejection" class="rejection" role="status">
             <p class="strong">
               {{ expense.rejection.kind === 'contest' ? 'Contestado' : 'Recusado' }} por {{ nameLower(expense.rejection.byUid) }}
@@ -93,6 +98,7 @@
                 <button class="btn outline" type="button" @click="reject">Recusar</button>
                 <button class="btn primary" type="button" @click="approve">Aprovar</button>
               </div>
+              <p v-if="seriesNote('approve')" class="hint">{{ seriesNote('approve') }}</p>
             </template>
 
             <!-- Outro membro: validar ou contestar um confirmado automaticamente -->
@@ -111,6 +117,7 @@
               <p v-if="contestTried && !reason.trim()" class="field-error">Informe o motivo para contestar.</p>
               <button class="btn outline" type="button" @click="contest">Contestar</button>
               <p class="hint">O gasto volta para {{ creatorLabel }} corrigir ou excluir; a correção passa pela sua aprovação.</p>
+              <p v-if="seriesNote('contest')" class="hint">{{ seriesNote('contest') }}</p>
             </template>
 
             <!-- Recorrente variável: quem paga confirma o valor -->
@@ -131,9 +138,10 @@
               <div class="grid-2">
                 <button class="btn danger" type="button" @click="confirmDelete">Excluir</button>
                 <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">
-                  {{ expense.status === 'returned' ? 'Corrigir' : 'Editar' }}
+                  {{ expense.status === 'returned' ? 'Corrigir' : expense.installment ? 'Editar série' : 'Editar' }}
                 </router-link>
               </div>
+              <p v-if="expense.installment" class="hint">Editar e excluir valem para todas as parcelas de meses abertos.</p>
               <p v-if="expense.status === 'confirmed'" class="hint">
                 Editar este gasto faz ele voltar para a aprovação de {{ partnerFirstName }}.
               </p>
@@ -183,10 +191,13 @@ import {
   receiptPhotoUrl,
   rejectExpense,
   retryNfceCheck,
+  deleteSeries,
   validateExpense,
   watchExpense,
+  watchSeries,
   type Expense,
 } from '@/services/expenses';
+import { seriesTargets, type SeriesAction } from '@/services/series';
 import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -235,11 +246,62 @@ watch(
 );
 onBeforeUnmount(() => stop?.());
 
+// ---- Compra parcelada: a série inteira em tempo real ----
+const seriesParcels = ref<Expense[]>([]);
+let stopSeries: (() => void) | null = null;
+watch(
+  () => [group.value?.id, expense.value?.installment?.seriesId] as const,
+  ([groupId, seriesId]) => {
+    stopSeries?.();
+    stopSeries = null;
+    seriesParcels.value = [];
+    if (groupId && seriesId) {
+      stopSeries = watchSeries(groupId, seriesId, (list) => (seriesParcels.value = list), () => undefined);
+    }
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopSeries?.());
+
+/** Gastos que a ação atinge: a série inteira (meses abertos) ou só este gasto. */
+function targetsFor(action: SeriesAction): Expense[] {
+  const e = expense.value;
+  if (!e) return [];
+  if (!e.installment) return [e];
+  const parcels = seriesParcels.value.length > 0 ? seriesParcels.value : [e];
+  return seriesTargets(parcels, action, myUid.value, closedMonths.value);
+}
+
+function seriesNote(action: SeriesAction): string | null {
+  if (!expense.value?.installment) return null;
+  const n = targetsFor(action).length;
+  return n > 1 ? `Vale para a compra inteira: ${n} parcelas de meses abertos.` : null;
+}
+
+/** Valor da compra inteira (soma das parcelas), quando a série está carregada. */
+const purchaseCents = computed(() => {
+  const e = expense.value;
+  if (!e?.installment || seriesParcels.value.length !== e.installment.count) return e?.totalCents ?? 0;
+  return seriesParcels.value.reduce((s, p) => s + p.totalCents, 0);
+});
+
+const seriesText = computed(() => {
+  const e = expense.value;
+  const i = e?.installment;
+  if (!e || !i) return '';
+  const short = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
+  const last = seriesParcels.value.length > 0 ? seriesParcels.value[seriesParcels.value.length - 1].competence : null;
+  const total = seriesParcels.value.length === i.count ? `Total ${formatBRL(purchaseCents.value)}` : null;
+  return [`Esta é a parcela ${i.index} de ${i.count}`, total, last ? `de ${short(i.firstMonth)} a ${short(last)}` : null]
+    .filter(Boolean)
+    .join(' · ');
+});
+
 // ---- Foto ----
 const photoUrl = ref<string | null>(null);
 const zoomOpen = ref(false);
 const zoomed = ref(false);
-const photoQueuedHere = computed(() => pendingPhotoIds.value.has(expenseId));
+const photoQueuedHere = computed(() => pendingPhotoIds.value.has(expense.value?.installment?.seriesId ?? expenseId));
 
 watch(
   () => [expense.value?.receipt, photoQueuedHere.value] as const,
@@ -309,7 +371,7 @@ const receiptTitle = computed(() => {
   if (r.nfceStatus === 'unchecked') return `Nota de ${nfceUf.value}: conferência automática só para SP`;
   if (r.nfceStatus === 'pending') return 'Nota fiscal: consultando a SEFAZ…';
   if (r.nfceStatus === 'failed') return 'Nota fiscal: não foi possível conferir';
-  if (r.nfceData && expense.value && r.nfceData.totalCents !== expense.value.totalCents) {
+  if (r.nfceData && expense.value && r.nfceData.totalCents !== purchaseCents.value) {
     return `Valor diferente da nota: ${formatBRL(r.nfceData.totalCents)}`;
   }
   return 'Nota fiscal conferida pela SEFAZ';
@@ -337,8 +399,8 @@ const receiptDetail = computed(() => {
   if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
   if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
   if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante.');
-  if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== e.totalCents) {
-    parts.push(`O valor lançado (${formatBRL(e.totalCents)}) não bate com a nota.`);
+  if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== purchaseCents.value) {
+    parts.push(`O valor lançado (${formatBRL(purchaseCents.value)}) não bate com a nota.`);
   }
   return parts.join(' ') || null;
 });
@@ -348,7 +410,6 @@ const canRetryNfce = computed(
     isCreator.value &&
     expense.value?.receipt.type === 'nfce' &&
     expense.value.receipt.nfceStatus === 'failed' &&
-    expense.value.status === 'confirmed' &&
     !isClosed.value,
 );
 
@@ -397,14 +458,16 @@ const createdText = computed(() => {
 // ---- Ações (não esperam o servidor: funcionam offline) ----
 const reason = ref('');
 
+const idsFor = (action: SeriesAction) => targetsFor(action).map((p) => p.id);
+
 function approve(): void {
   if (!group.value || !expense.value) return;
-  approveExpense(group.value.id, expense.value.id, myUid.value);
+  approveExpense(group.value.id, idsFor('approve'), myUid.value);
 }
 
 function validate(): void {
   if (!group.value || !expense.value) return;
-  validateExpense(group.value.id, expense.value.id, myUid.value);
+  validateExpense(group.value.id, idsFor('validate'), myUid.value);
 }
 
 const contestTried = ref(false);
@@ -412,14 +475,14 @@ const contestTried = ref(false);
 function contest(): void {
   contestTried.value = true;
   if (!group.value || !expense.value || !reason.value.trim()) return;
-  contestExpense(group.value.id, expense.value.id, myUid.value, reason.value);
+  contestExpense(group.value.id, idsFor('contest'), myUid.value, reason.value);
   reason.value = '';
   contestTried.value = false;
 }
 
 function reject(): void {
   if (!group.value || !expense.value) return;
-  rejectExpense(group.value.id, expense.value.id, myUid.value, reason.value);
+  rejectExpense(group.value.id, idsFor('reject'), myUid.value, reason.value);
   reason.value = '';
 }
 
@@ -430,6 +493,7 @@ function retryNfce(): void {
 async function confirmDelete(): Promise<void> {
   const e = expense.value;
   if (!e || !group.value) return;
+  if (e.installment) return confirmDeleteSeries(e);
   const alert = await alertController.create({
     header: 'Excluir gasto?',
     message: `"${e.description}" de ${formatBRL(e.totalCents)} sai do saldo de ${monthName(e.competence)}.`,
@@ -445,6 +509,27 @@ async function confirmDelete(): Promise<void> {
   router.replace({ name: 'painel', query: { mes: e.competence } });
 }
 
+async function confirmDeleteSeries(e: Expense): Promise<void> {
+  if (!group.value || !e.installment) return;
+  const targets = targetsFor('delete');
+  const kept = e.installment.count - targets.length;
+  const alert = await alertController.create({
+    header: 'Excluir a compra parcelada?',
+    message:
+      `"${e.description}": ${targets.length} ${targets.length === 1 ? 'parcela sai' : 'parcelas saem'} do saldo.` +
+      (kept > 0 ? ` ${kept} de meses fechados ${kept === 1 ? 'fica' : 'ficam'}.` : ''),
+    buttons: [
+      { text: 'Cancelar', role: 'cancel' },
+      { text: 'Excluir', role: 'destructive' },
+    ],
+  });
+  await alert.present();
+  const { role } = await alert.onDidDismiss();
+  if (role !== 'destructive') return;
+  await deleteSeries(group.value.id, e.installment.seriesId, targets);
+  router.replace({ name: 'painel', query: { mes: e.competence } });
+}
+
 function goBack(): void {
   if (window.history.state?.back) router.back();
   else router.replace({ name: 'painel', query: expense.value ? { mes: expense.value.competence } : {} });
@@ -452,6 +537,14 @@ function goBack(): void {
 </script>
 
 <style scoped>
+.series {
+  padding: 12px 16px;
+}
+
+.series p {
+  margin: 0 0 2px;
+}
+
 .missing {
   padding: 20px;
 }

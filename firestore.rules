@@ -47,9 +47,18 @@ service cloud.firestore {
         return /databases/$(database)/documents/groups/$(groupId)/months/$(month);
       }
 
-      // Mês sem documento = aberto.
+      // 'YYYY-MM' ou 'YYYY-MM-DD' → índice do mês (ano * 12 + mês - 1).
+      function monthIndex(s) {
+        return int(s.split('-')[0]) * 12 + int(s.split('-')[1]) - 1;
+      }
+
+      // Mês sem documento = aberto. Mês futuro (em UTC) nunca está fechado (o
+      // fechamento só vale até o mês atual): não gasta leitura, o que permite
+      // lançar uma série de até 48 parcelas num só lote.
       function isClosed(month) {
-        return exists(monthPath(month)) && get(monthPath(month)).data.status == 'closed';
+        return monthIndex(month) <= request.time.year() * 12 + request.time.month() - 1
+          && exists(monthPath(month))
+          && get(monthPath(month)).data.status == 'closed';
       }
 
       // Fechar e reabrir chegam na Fase 6 (por Function); o app só lê.
@@ -59,11 +68,6 @@ service cloud.firestore {
       }
 
       // ---- Gastos ----
-
-      // 'YYYY-MM' ou 'YYYY-MM-DD' → índice do mês (ano * 12 + mês - 1).
-      function monthIndex(s) {
-        return int(s.split('-')[0]) * 12 + int(s.split('-')[1]) - 1;
-      }
 
       // Limite: até o fim do mês seguinte ao atual. Em UTC (3h à frente de
       // São Paulo), então na virada do mês a regra fica mais permissiva que o
@@ -77,7 +81,7 @@ service cloud.firestore {
       function validCompetence(data) {
         let dateMonth = data.date.split('-')[0] + '-' + data.date.split('-')[1];
         return !isClosed(data.competence)
-          && withinLimit(data.competence)
+          && (isInstallment(data) || withinLimit(data.competence))
           && (data.competence == dateMonth
               || (data.competence > dateMonth && isClosed(dateMonth)));
       }
@@ -93,11 +97,12 @@ service cloud.firestore {
       // - outros estados: só 'unchecked', sem URL (sem conferência automática).
       // O app nunca grava 'ok'/'failed' nem nfceData. Na edição, o QR pode ser
       // mantido exatamente como está (inclusive já conferido).
-      function validReceipt(r, expenseId, isNew) {
+      // `ownerId`: o gasto (ou, numa parcela, a série) dono da foto.
+      function validReceipt(r, ownerId, isNew) {
         return r.type == 'none' && r.keys().hasOnly(['type'])
           || r.type == 'photo'
             && r.keys().hasOnly(['type', 'photoPath', 'photoUploaded'])
-            && r.photoPath == photoPath(expenseId)
+            && r.photoPath == photoPath(ownerId)
             && r.photoUploaded is bool
             && (!isNew || r.photoUploaded == false)
           || r.type == 'nfce'
@@ -119,6 +124,43 @@ service cloud.firestore {
             );
       }
 
+      // ---- Parcelas ----
+      // Cada parcela é um gasto com installment { seriesId, index, count,
+      // firstMonth }; a parcela 1 tem o id da série, as outras `{série}-{índice}`.
+      // O comprovante da compra (foto da série) vale para todas. Exceção ao
+      // limite de datas só dentro de série válida: o primeiro mês respeita o
+      // limite, a competência é a do índice e, na criação, a parcela 1 da mesma
+      // série (mesmo número de parcelas e primeiro mês) existe, do mesmo autor.
+
+      function isInstallment(data) {
+        return data.keys().hasAny(['installment']);
+      }
+
+      function receiptOwner(data, expenseId) {
+        return isInstallment(data) ? data.installment.seriesId : expenseId;
+      }
+
+      function validInstallment(data, expenseId, isNew) {
+        let i = data.installment;
+        return i is map
+          && i.keys().hasAll(['seriesId', 'index', 'count', 'firstMonth'])
+          && i.keys().hasOnly(['seriesId', 'index', 'count', 'firstMonth'])
+          && i.seriesId is string && i.seriesId.matches('^[A-Za-z0-9]{1,40}$')
+          && i.count is int && i.count >= 2 && i.count <= 48
+          && i.index is int && i.index >= 1 && i.index <= i.count
+          && i.firstMonth is string && i.firstMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && withinLimit(i.firstMonth)
+          && monthIndex(data.competence) == monthIndex(i.firstMonth) + i.index - 1
+          && expenseId == (i.index == 1 ? i.seriesId : i.seriesId + '-' + string(i.index))
+          && (i.index == 1 || !isNew || firstInstallmentMatches(i));
+      }
+
+      function firstInstallmentMatches(i) {
+        let first = getAfter(/databases/$(database)/documents/groups/$(groupId)/expenses/$(i.seriesId)).data;
+        return first.get('installment', null) == { 'seriesId': i.seriesId, 'index': 1, 'count': i.count, 'firstMonth': i.firstMonth }
+          && first.createdBy == request.auth.uid;
+      }
+
       function validExpense(data, expenseId, isNew) {
         return data.description is string
           && data.description.trim().size() >= 1
@@ -134,11 +176,11 @@ service cloud.firestore {
           && data.payerUid in get(groupPath(groupId)).data.members
           && data.date is string
           && data.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
-          && withinLimit(data.date)
           && data.competence is string
           && data.competence.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && (isInstallment(data) ? validInstallment(data, expenseId, isNew) : withinLimit(data.date))
           && data.receipt is map
-          && validReceipt(data.receipt, expenseId, isNew)
+          && validReceipt(data.receipt, receiptOwner(data, expenseId), isNew)
           && validCompetence(data);
       }
 
@@ -163,12 +205,20 @@ service cloud.firestore {
 
       // recurringId: só a Function grava (gasto gerado de conta recorrente); o
       // app não cria gasto recorrente e, ao editar um gerado, não muda o campo.
+      // installment: só na criação; na edição de uma parcela, a série, o valor,
+      // a parte pessoal e a data ficam (para mudá-los, exclui e lança de novo).
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId']))
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment']))
           && request.resource.data.keys().hasAll(expenseKeys())
           && (isNew
                 ? !request.resource.data.keys().hasAny(['recurringId'])
-                : request.resource.data.get('recurringId', null) == resource.data.get('recurringId', null))
+                : request.resource.data.get('recurringId', null) == resource.data.get('recurringId', null)
+                  && request.resource.data.get('installment', null) == resource.data.get('installment', null)
+                  && (
+                    !isInstallment(resource.data)
+                    || !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['totalCents', 'personalCents', 'date', 'competence'])
+                  ))
           && request.resource.data.status == authorStatus(request.resource.data, isNew)
           && request.resource.data.updatedAt == request.time;
       }
@@ -180,6 +230,18 @@ service cloud.firestore {
           && resource.data.receipt.type == 'photo'
           && request.resource.data.receipt.diff(resource.data.receipt).affectedKeys().hasOnly(['photoUploaded'])
           && request.resource.data.receipt.photoUploaded == true
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      // Nova consulta da NFC-e de SP que falhou ("Consultar de novo"): só volta
+      // a conferência para 'pending', sem mexer em mais nada (nem no status).
+      function isNfceRetry() {
+        let old = resource.data.receipt;
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receipt', 'updatedAt'])
+          && old.type == 'nfce'
+          && old.nfceStatus == 'failed'
+          && old.keys().hasAny(['nfceUrl'])
+          && request.resource.data.receipt == { 'type': 'nfce', 'nfceKey': old.nfceKey, 'nfceUrl': old.nfceUrl, 'nfceStatus': 'pending' }
           && request.resource.data.updatedAt == request.time;
       }
 
@@ -255,6 +317,7 @@ service cloud.firestore {
               && request.resource.data.createdAt == resource.data.createdAt
               && validExpense(request.resource.data, expenseId, false)
             || resource.data.createdBy == request.auth.uid && isPhotoUploadedMark()
+            || resource.data.createdBy == request.auth.uid && isNfceRetry()
             || isReviewWrite()
           );
 
