@@ -17,6 +17,32 @@ service cloud.firestore {
       return signedIn() && request.auth.uid in get(groupPath(groupId)).data.members;
     }
 
+    // Preferências de aviso e aparelhos (push): cada um lê e grava só os próprios.
+    // As Functions leem para enviar os avisos e apagam tokens recusados pelo FCM.
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['notificationPrefs'])
+        && request.resource.data.notificationPrefs is map
+        && request.resource.data.notificationPrefs.keys().hasOnly(['expenses', 'returns', 'settlement', 'recurring'])
+        && request.resource.data.notificationPrefs.values().hasOnly([true, false]);
+      allow delete: if false;
+
+      match /devices/{deviceId} {
+        allow read, delete: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn() && request.auth.uid == uid
+          && deviceId.matches('^[A-Za-z0-9_-]{8,64}$')
+          && request.resource.data.keys().hasOnly(['token', 'platform', 'appVersion', 'updatedAt'])
+          && request.resource.data.token is string
+          && request.resource.data.token.size() > 0
+          && request.resource.data.token.size() <= 4096
+          && request.resource.data.platform == 'android'
+          && request.resource.data.appVersion is string
+          && request.resource.data.appVersion.size() <= 32
+          && request.resource.data.updatedAt == request.time;
+      }
+    }
+
     // Vínculo usuário → grupo: cada um lê só o próprio.
     match /memberships/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;

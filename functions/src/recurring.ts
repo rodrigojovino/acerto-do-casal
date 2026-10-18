@@ -10,6 +10,8 @@ import {
   shouldGenerate,
   type Recurring,
 } from '../../src/domain/recurrence.js';
+import { variableRecurringSummary } from '../../src/domain/notifications.js';
+import { sendNotices } from './notify.js';
 
 if (getApps().length === 0) initializeApp();
 
@@ -38,6 +40,8 @@ export async function generateRecurring(today: IsoDate, db: Firestore = getFires
 
     const closedSnap = await group.ref.collection('months').where('status', '==', 'closed').get();
     const closedMonths = new Set(closedSnap.docs.map((d) => d.id));
+    /** Variáveis gerados agora, para o resumo de quem paga (um aviso por pessoa). */
+    const variables: Array<{ payerUid: string; description: string }> = [];
 
     for (const doc of recurring.docs) {
       const rec = { id: doc.id, ...doc.data() } as Recurring;
@@ -56,8 +60,19 @@ export async function generateRecurring(today: IsoDate, db: Firestore = getFires
         tx.create(expenseRef, recurringExpenseData(current, today, closedMonths, FieldValue.serverTimestamp()));
         return true;
       });
-      if (created) report.created++;
-      else report.skipped++;
+      if (created) {
+        report.created++;
+        if (rec.kind === 'variable') variables.push({ payerUid: rec.payerUid, description: rec.description });
+      } else report.skipped++;
+    }
+
+    if (variables.length > 0) {
+      try {
+        await sendNotices(group.id, variableRecurringSummary(variables));
+      } catch (err) {
+        // O aviso nunca impede a geração.
+        logger.error('Resumo dos recorrentes não enviado', { groupId: group.id, err: String(err) });
+      }
     }
   }
   return report;

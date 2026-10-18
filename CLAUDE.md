@@ -173,6 +173,13 @@ groups/{groupId}                 // criado e alterado em members/convite só pel
   inviteExpiresAt: Timestamp | null
   createdAt
 
+users/{uid}                      // cada um lê e grava só o próprio
+  notificationPrefs: { expenses?, returns?, settlement?, recurring? }   // false desliga; ausente = ligado
+users/{uid}/devices/{deviceId}   // um por aparelho (push); as Functions apagam tokens recusados pelo FCM
+  token, platform: 'android', appVersion, updatedAt
+
+groups/{g}/notificationLog/{chave}  // só Functions: um aviso por lote numa série; apagado por TTL (expireAt, 7 dias)
+
 memberships/{uid}                // só Functions escrevem; cada um lê o próprio
   groupId
 
@@ -232,6 +239,7 @@ Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators
   - `registerPayment`: só quem deve pagar o que falta (saldo − pagamentos), sempre o valor exato; PIX exige a foto já no Storage.
   - `closeMonth`: qualquer membro; mês atual ou passado (nunca futuro); sem pendentes, devolvidos, recorrentes a confirmar ou fotos não enviadas; acerto pago (saldo zero fecha sem pagamento). Guarda a memória de cálculo.
   - `requestReopen` (motivo obrigatório), `answerReopen` (só o outro membro; aprovado volta a aberto, os pagamentos continuam valendo) e `cancelReopen` (quem pediu).
+- Avisos (push): gatilhos `notifyExpense`, `notifyMonth` e `notifyRecurring` (`functions/src/notify.ts`) aplicam as regras de `src/domain/notifications.ts` ao antes/depois do documento; o resumo do dia 1 sai de `generateRecurring`. Cada aviso respeita a categoria ligada/desligada de quem recebe, vai para todos os aparelhos dele com o contador (`actionCount`) como número do ícone (`notificationCount`) e canal `avisos`; numa série, ações em lote geram um aviso só (`notificationLog`, chave da série + instante do lote). No emulador, os avisos vão para `notificationOutbox` (testes) e tokens "invalid-…" simulam a recusa do FCM.
 - Subcoleções sem regra própria ficam fechadas.
 - Storage: só quem lançou o gasto (tipo foto) envia/troca/apaga a foto, JPEG até 1 MB; membros leem. Cada regra faz uma única leitura no Firestore (por isso o app apaga a foto antes do documento). Exige a permissão do agente do Storage para ler o Firestore (papel "Firebase Rules Firestore Service Agent").
 - `src/services/expenseData.ts` monta os documentos (gasto, edição, aprovação, recusa) como o app grava; os testes de regras usam as mesmas funções.
