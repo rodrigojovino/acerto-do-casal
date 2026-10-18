@@ -25,17 +25,16 @@
             </span>
             <span v-if="statusText" class="hint">{{ statusText }}</span>
             <h2>{{ expense.description }}</h2>
-            <p class="value num">{{ expense.status === 'awaiting_confirmation' ? 'Valor a confirmar' : formatBRL(expense.totalCents) }}</p>
-            <p v-if="expense.installment" class="hint big">
-              parcela {{ expense.installment.index }} de {{ expense.installment.count }} · total da compra
-              <span class="num">{{ formatBRL(purchaseCents) }}</span>
+            <p class="value num">
+              {{ expense.status === 'awaiting_confirmation' ? 'Valor a confirmar' : formatBRL(expense.installment ? purchaseCents : expense.totalCents) }}
             </p>
+            <p v-if="expense.installment" class="parcel-line">{{ parcelLine }}</p>
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
           </section>
 
           <div v-if="expense.installment" class="card series">
             <p class="strong">Compra parcelada</p>
-            <p class="hint">{{ seriesText }}</p>
+            <p class="hint">{{ seriesPeriod }}</p>
           </div>
 
           <div v-if="expense.status === 'returned' && expense.rejection" class="rejection" role="status">
@@ -99,15 +98,24 @@
               <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
               <input id="motivo" v-model="reason" class="input" maxlength="200" placeholder="Ex.: anexe a nota, por favor" />
               <div class="grid-2">
-                <button class="btn outline" type="button" @click="reject">{{ actionLabel('Recusar') }}</button>
-                <button class="btn primary" type="button" @click="approve">{{ actionLabel('Aprovar') }}</button>
+                <button class="btn outline" :class="{ stacked: expense.installment }" type="button" @click="reject">
+                  <span>{{ actionVerb('Recusar') }}</span>
+                  <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+                </button>
+                <button class="btn primary" :class="{ stacked: expense.installment }" type="button" @click="approve">
+                  <span>{{ actionVerb('Aprovar') }}</span>
+                  <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+                </button>
               </div>
               <p v-if="seriesNote('approve')" class="hint">{{ seriesNote('approve') }}</p>
             </template>
 
             <!-- Outro membro: validar ou contestar um confirmado automaticamente -->
             <template v-else-if="contestable">
-              <button class="btn primary" type="button" @click="validate">{{ actionLabel('Validar') }}</button>
+              <button class="btn primary" :class="{ stacked: expense.installment }" type="button" @click="validate">
+                <span>{{ actionVerb('Validar') }}</span>
+                <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+              </button>
               <p class="hint">Validar confirma que está tudo certo: o gasto não poderá mais ser contestado.</p>
               <label for="contestacao" class="label">Ou conteste, com o motivo</label>
               <input
@@ -119,7 +127,10 @@
                 :aria-invalid="contestTried && !reason.trim()"
               />
               <p v-if="contestTried && !reason.trim()" class="field-error">Informe o motivo para contestar.</p>
-              <button class="btn outline" type="button" @click="contest">{{ actionLabel('Contestar') }}</button>
+              <button class="btn outline" :class="{ stacked: expense.installment }" type="button" @click="contest">
+                <span>{{ actionVerb('Contestar') }}</span>
+                <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+              </button>
               <p class="hint">O gasto volta para {{ creatorLabel }} corrigir ou excluir; a correção passa pela sua aprovação.</p>
               <p v-if="seriesNote('contest')" class="hint">{{ seriesNote('contest') }}</p>
             </template>
@@ -286,18 +297,28 @@ function seriesNote(action: SeriesAction): string | null {
 /** Valor da compra inteira (gravado em cada parcela). */
 const purchaseCents = computed(() => expense.value?.installment?.purchaseCents ?? expense.value?.totalCents ?? 0);
 
-/** "10x de R$ 214,00 · out/2026 a jul/2027". */
-const seriesText = computed(() => {
-  const i = expense.value?.installment;
-  if (!i) return '';
-  const short = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
-  const { values, firstMonth, lastMonth } = installmentSummary(i, formatBRL);
-  return `${values} · ${short(firstMonth)} a ${short(lastMonth)}`;
+const shortMonth = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
+
+/** "48x de R$ 100,00 · esta é a parcela 1 (out/2026)". */
+const parcelLine = computed(() => {
+  const e = expense.value;
+  const i = e?.installment;
+  if (!e || !i) return '';
+  const { values } = installmentSummary(i, formatBRL);
+  return `${values} · esta é a parcela ${i.index} (${shortMonth(e.competence)})`;
 });
 
-/** Numa série, o botão diz o que está sendo decidido: "Aprovar compra de R$ 2.140,00". */
-function actionLabel(verb: string): string {
-  return expense.value?.installment ? `${verb} compra de ${formatBRL(purchaseCents.value)}` : verb;
+/** "de out/2026 a set/2030". */
+const seriesPeriod = computed(() => {
+  const i = expense.value?.installment;
+  if (!i) return '';
+  const { firstMonth, lastMonth } = installmentSummary(i, formatBRL);
+  return `de ${shortMonth(firstMonth)} a ${shortMonth(lastMonth)}`;
+});
+
+/** Numa série, o botão diz o que está sendo decidido: "Aprovar compra" (com o total na linha de baixo). */
+function actionVerb(verb: string): string {
+  return expense.value?.installment ? `${verb} compra` : verb;
 }
 
 // ---- Foto ----
@@ -443,7 +464,7 @@ const split = computed(() =>
 
 const debt = computed(() =>
   expense.value && partnerUid.value
-    ? debtView(expense.value, members.value, myUid.value, firstNameOf)
+    ? debtView(expense.value, members.value, myUid.value, firstNameOf, expense.value.installment ? 'esta parcela' : 'este gasto')
     : { label: '', amountCents: 0 },
 );
 
@@ -551,6 +572,27 @@ function goBack(): void {
 </script>
 
 <style scoped>
+.parcel-line {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-accent-dark);
+}
+
+.btn.stacked {
+  flex-direction: column;
+  gap: 0;
+  height: auto;
+  min-height: 52px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.2;
+}
+
+.btn.stacked .num {
+  white-space: nowrap;
+}
+
 .series {
   padding: 12px 16px;
 }

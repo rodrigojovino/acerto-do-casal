@@ -57,6 +57,17 @@ describe('expenseSubtitle', () => {
   });
 });
 
+describe('debtView numa parcela', () => {
+  it('fala da parcela, não do gasto', () => {
+    const e = { totalCents: 10000, personalCents: 0, payerUid: A, payerSharePct: 50 };
+    expect(debtView(e, [A, B], B, () => 'Bia', 'esta parcela').label).toBe('Você deve por esta parcela');
+    expect(debtView(e, [A, B], A, () => 'Bia', 'esta parcela').label).toBe('Bia te deve por esta parcela');
+    expect(debtView({ ...e, personalCents: 10000 }, [A, B], A, () => 'Bia', 'esta parcela').label).toBe(
+      'Ninguém deve nada por esta parcela',
+    );
+  });
+});
+
 describe('debtView', () => {
   const nameOf = (uid: string) => (uid === A ? 'Ana' : 'Bia');
 

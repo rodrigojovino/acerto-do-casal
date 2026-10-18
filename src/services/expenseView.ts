@@ -87,19 +87,21 @@ export interface DebtView {
 
 /**
  * Quem deve quanto por um gasto, do ponto de vista de quem olha. Usado pela
- * prévia do formulário e pelo Detalhe, sempre via `expenseDebt`.
+ * prévia do formulário e pelo Detalhe, sempre via `expenseDebt`. `subject`:
+ * "esta parcela" no Detalhe de uma parcela.
  */
 export function debtView(
   expense: Omit<SettlementExpense, 'status'>,
   members: Members,
   viewerUid: string,
   nameOf: (uid: string) => string,
+  subject = 'este gasto',
 ): DebtView {
   const debt = expenseDebt({ ...expense, status: 'pending_approval' }, members);
-  if (debt.amountCents === 0) return { label: 'Ninguém deve nada por este gasto', amountCents: 0 };
+  if (debt.amountCents === 0) return { label: `Ninguém deve nada por ${subject}`, amountCents: 0 };
   return debt.fromUid === viewerUid
-    ? { label: 'Você deve por este gasto', amountCents: debt.amountCents }
-    : { label: `${nameOf(debt.fromUid)} te deve por este gasto`, amountCents: debt.amountCents };
+    ? { label: `Você deve por ${subject}`, amountCents: debt.amountCents }
+    : { label: `${nameOf(debt.fromUid)} te deve por ${subject}`, amountCents: debt.amountCents };
 }
 
 /** Tipos de selo de status (cor + ícone + texto). */
