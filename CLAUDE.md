@@ -272,7 +272,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
    - Pendência da Fase 5: campo de observação opcional no lançamento (até ~300 caracteres), visível no Detalhe e resumido em Pendências. Vale para parcelas (é da série) e para a confirmação de recorrente variável. Editar a observação de um gasto confirmado volta para aprovação, como qualquer edição.
    - Pendência da Fase 6: relançar automaticamente no mês aberto o gasto lançado offline num mês que fechou antes de sincronizar (hoje o aviso mostra descrição, valor e data para relançar à mão).
    - Pendência da Fase 5: contador na aba Pendências da barra inferior.
-     - Conta só o que depende de ação de quem vê: "Para você aprovar", "Devolvidos para você corrigir" e "Recorrentes para confirmar" (variáveis, cadastros e reajustes). Não conta "Aguardando [nome] aprovar" nem automáticos não validados.
+     - Conta só o que depende de ação de quem vê: "Para você aprovar", "Devolvidos para você corrigir", "Recorrentes para confirmar" (variáveis, cadastros e reajustes) e "Reabertura para aprovar". Não conta "Aguardando [nome] aprovar" nem automáticos não validados. Regra pura em `actionCount` (`src/domain/notifications.ts`), a mesma no app e nas Functions (número do aviso).
      - Série de parcelas conta 1. Acima de 9, mostra "9+". Sem pendências, o número não aparece.
      - O número no ícone do app (launcher) fica para junto das notificações.
    - Pendência da Fase 5: foto opcional junto com a chave do documento fiscal (QR, código de barras ou digitada), principalmente quando o valor é digitado (NF-e, NFC-e de outro estado, chave digitada). O gasto mantém o selo Automático; o Detalhe mostra os dados da chave e a foto ampliável.
