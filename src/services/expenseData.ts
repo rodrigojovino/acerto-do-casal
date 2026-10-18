@@ -144,6 +144,19 @@ export function expenseUpdateData<T, D>(
 /** Limite do motivo de recusa ou contestação (o mesmo das regras). */
 export const MAX_REJECTION_REASON = 200;
 
+/**
+ * Validação pelo outro membro de um confirmado automaticamente: grava a própria
+ * aprovação sem mudar o status. Daí em diante conta como aprovado manualmente
+ * (não é mais contestável; editado, volta para aprovação).
+ */
+export function validationData<T>(uid: string, now: T) {
+  return {
+    status: 'confirmed' as const,
+    approval: { byUid: uid, at: now },
+    updatedAt: now,
+  };
+}
+
 /** Aprovação pelo outro membro: confirma um gasto pendente. */
 export function approvalData<T>(uid: string, now: T) {
   return {

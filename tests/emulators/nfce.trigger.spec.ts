@@ -25,7 +25,23 @@ let env: RulesTestEnvironment;
 
 beforeAll(async () => {
   env = await createTestEnv();
-});
+  // Aquecimento: a primeira execução do gatilho no emulador pode passar de 20 s
+  // (partida da Function). Dispara uma vez e espera, fora dos testes.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc('groups/aquecimento/expenses/e').set({
+      receipt: { type: 'nfce', nfceKey: KEY, nfceUrl: 'https://exemplo.invalid/qr', nfceStatus: 'pending' },
+    });
+  });
+  const until = Date.now() + 60_000;
+  while (Date.now() < until) {
+    let status: string | undefined;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      status = (await ctx.firestore().doc('groups/aquecimento/expenses/e').get()).get('receipt.nfceStatus');
+    });
+    if (status !== 'pending') break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}, 90_000);
 
 afterAll(async () => {
   await env.cleanup();

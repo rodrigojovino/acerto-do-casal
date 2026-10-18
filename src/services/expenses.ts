@@ -23,6 +23,7 @@ import {
   expenseUpdateData,
   newExpenseData,
   rejectionData,
+  validationData,
   type ExpenseInput,
   type StoredReceipt,
 } from './expenseData';
@@ -58,6 +59,8 @@ export interface Expense extends SettlementExpense {
   updatedAt: Date | null;
   approval?: Approval;
   rejection?: Rejection;
+  /** Gasto gerado de uma conta recorrente (gravado só pela Function). */
+  recurringId?: string;
   /** Gravado no aparelho e ainda não confirmado pelo servidor. */
   pendingWrite: boolean;
 }
@@ -91,6 +94,7 @@ function toExpense(snap: DocumentSnapshot): Expense {
     rejection: data.rejection
       ? { byUid: data.rejection.byUid, reason: data.rejection.reason, at: toDate(data.rejection.at), kind: data.rejection.kind }
       : undefined,
+    recurringId: data.recurringId,
     pendingWrite: snap.metadata.hasPendingWrites,
   };
 }
@@ -275,4 +279,9 @@ export function contestExpense(groupId: string, id: string, uid: string, reason:
     updateDoc(doc(expensesCol(groupId), id), contestData(uid, reason, serverTimestamp(), deleteField())),
     'Não foi possível contestar o gasto.',
   );
+}
+
+/** Validação de um confirmado automaticamente pelo outro membro. Funciona offline. */
+export function validateExpense(groupId: string, id: string, uid: string): void {
+  trackWrite(updateDoc(doc(expensesCol(groupId), id), validationData(uid, serverTimestamp())), 'Não foi possível validar o gasto.');
 }

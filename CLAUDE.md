@@ -79,7 +79,18 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 | pendente + "Anexar comprovante e dispensar aprovação" | `confirmed` (único caso de edição que confirma: o gasto nunca foi aprovado) |
 
 - **Só a criação com comprovante confirma automaticamente.** Quem lança nunca grava aprovação nem recusa; editar descarta a aprovação/recusa anterior.
-- **O outro membro:** num pendente, aprova ou recusa (`rejection.kind: 'reject'`, motivo opcional); num confirmado automático, **contesta** (`kind: 'contest'`, motivo obrigatório), até o fechamento do mês. Confirmado automático = `confirmed` sem `approval` (ou com `approval.byUid: 'nfce'`, dos gastos da versão anterior). Gasto aprovado manualmente não é contestável.
+- **O outro membro:** num pendente, aprova ou recusa (`rejection.kind: 'reject'`, motivo opcional); num confirmado automático, **valida** (grava `approval { byUid: ele, at }` sem mudar o status) ou **contesta** (`kind: 'contest'`, motivo obrigatório), até o fechamento do mês. Confirmado automático = `confirmed` sem `approval` (ou com `approval.byUid: 'nfce'`, dos gastos da versão anterior). Validado conta como aprovado manualmente: não é contestável e, se editado, volta para aprovação.
+- **Selos de status** (`badgeFor` em `src/services/expenseView.ts`, componente `StatusBadge`), diferentes em cor, claridade e ícone:
+
+  | selo | quando | visual |
+  | --- | --- | --- |
+  | Pendente / Aprovar (para o outro) | `pending_approval` | âmbar claro, relógio |
+  | Automático | `confirmed` sem aprovação de pessoa | branco com contorno azul tracejado, raio |
+  | Validado | `confirmed` aprovado/validado por pessoa | verde escuro preenchido, check |
+  | Devolvido (Detalhe: Contestado ou Recusado) | `returned` | vermelho médio, seta de retorno |
+  | A confirmar | `awaiting_confirmation` | cinza médio, calendário |
+
+  O Detalhe mostra a origem (`originLabel`): "Validado por [nome]", "Automático · nota conferida", "Automático · foto" ou "Automático · recorrente".
 - **QR:** a conferência na SEFAZ (só SP) apenas registra ok, falha ou valor divergente (aviso), e nunca muda o status.
 - Só quem lançou edita ou exclui o gasto.
 - A mesma regra de edição vale para recorrentes fixos e séries de parcelas.

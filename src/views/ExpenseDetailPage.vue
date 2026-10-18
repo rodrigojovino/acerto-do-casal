@@ -18,7 +18,11 @@
 
         <template v-else>
           <section class="summary">
-            <span class="status" :class="statusClass">{{ statusText }}</span>
+            <span class="badge-row">
+              <StatusBadge v-bind="badgeFor(expense, myUid, true)" />
+              <span v-if="origin" class="origin">{{ origin }}</span>
+            </span>
+            <span v-if="statusText" class="hint">{{ statusText }}</span>
             <h2>{{ expense.description }}</h2>
             <p class="value num">{{ formatBRL(expense.totalCents) }}</p>
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
@@ -90,9 +94,11 @@
               </div>
             </template>
 
-            <!-- Outro membro: contestar um confirmado automaticamente -->
+            <!-- Outro membro: validar ou contestar um confirmado automaticamente -->
             <template v-else-if="contestable">
-              <label for="contestacao" class="label">Motivo da contestação</label>
+              <button class="btn primary" type="button" @click="validate">Validar</button>
+              <p class="hint">Validar confirma que está tudo certo: o gasto não poderá mais ser contestado.</p>
+              <label for="contestacao" class="label">Ou conteste, com o motivo</label>
               <input
                 id="contestacao"
                 v-model="reason"
@@ -170,10 +176,12 @@ import {
   receiptPhotoUrl,
   rejectExpense,
   retryNfceCheck,
+  validateExpense,
   watchExpense,
   type Expense,
 } from '@/services/expenses';
-import { NFCE_APPROVER, canContest, debtView, isAutoConfirmed, tagFor } from '@/services/expenseView';
+import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor } from '@/services/expenseView';
+import StatusBadge from '@/components/StatusBadge.vue';
 import { closedMonths } from '@/services/months';
 import { formatCnpj } from '@/services/nfce';
 import { UF_BY_CODE, parseAccessKey } from '../../functions/src/nfce';
@@ -252,33 +260,37 @@ const dateTime = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
 });
 
+/** Frase de apoio ao selo (quem precisa agir). */
 const statusText = computed(() => {
   const e = expense.value;
   if (!e) return '';
-  if (e.status === 'confirmed') return isAutoConfirmed(e) ? 'Confirmado pelo comprovante' : 'Aprovado';
+  if (e.status === 'awaiting_confirmation') {
+    return isCreator.value ? 'Confirme o valor deste mês.' : `Aguarda ${partnerFirstName.value} confirmar o valor.`;
+  }
   switch (tagFor(e, myUid.value)) {
     case 'pending':
-      return `Aguarda aprovação de ${partnerFirstName.value}`;
+      return `Aguarda aprovação de ${partnerFirstName.value}.`;
     case 'approve':
-      return 'Aguarda sua aprovação';
+      return 'Aguarda sua aprovação.';
     case 'returned':
-      return e.rejection?.kind === 'contest' ? 'Contestado: aguarda correção' : 'Devolvido para correção';
+      return isCreator.value ? 'Corrija ou exclua; a correção vai para aprovação.' : `Aguarda ${partnerFirstName.value} corrigir.`;
     default:
       return '';
   }
 });
-const statusClass = computed(() => (expense.value?.status === 'confirmed' ? 'ok' : expense.value?.status));
+
+/** "Validado por Bia", "Automático · nota conferida", "Automático · foto"… */
+const origin = computed(() => (expense.value ? originLabel(expense.value, (uid) => nameLower(uid)) : null));
 
 const approvalText = computed(() => {
   const e = expense.value;
   if (!e || e.status !== 'confirmed') return null;
   if (isAutoConfirmed(e)) {
     const who = isCreator.value ? partnerFirstName.value : 'Você';
-    const how = e.approval?.byUid === NFCE_APPROVER ? 'pela conferência da nota fiscal' : 'pelo comprovante';
-    return `Confirmado ${how}. ${who} pode contestar até o fechamento do mês.`;
+    return `${who} pode validar ou contestar até o fechamento do mês.`;
   }
   const a = e.approval;
-  return a ? `Aprovado por ${nameLower(a.byUid)}${a.at ? ` em ${dateTime.format(a.at).replace(', ', ' às ')}` : ''}.` : null;
+  return a?.at && a.byUid !== NFCE_APPROVER ? `Validado em ${dateTime.format(a.at).replace(', ', ' às ')}.` : null;
 });
 
 /** Comprovante sem foto exibível: sem comprovante, foto não enviada ou nota. */
@@ -382,6 +394,11 @@ function approve(): void {
   approveExpense(group.value.id, expense.value.id, myUid.value);
 }
 
+function validate(): void {
+  if (!group.value || !expense.value) return;
+  validateExpense(group.value.id, expense.value.id, myUid.value);
+}
+
 const contestTried = ref(false);
 
 function contest(): void {
@@ -465,24 +482,22 @@ function goBack(): void {
   font-size: 13px;
 }
 
-.status {
-  align-self: flex-start;
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-row :deep(.badge) {
+  font-size: 12px;
+  padding: 3px 10px 3px 8px;
+}
+
+.origin {
   font-size: 12px;
   font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #fcebd9;
-  color: #8a3f00;
-}
-
-.status.returned {
-  background: var(--app-danger-bg);
-  color: var(--app-danger);
-}
-
-.status.ok {
-  background: #e2f1e6;
-  color: #1e6b3a;
+  color: var(--app-muted);
 }
 
 .rejection {

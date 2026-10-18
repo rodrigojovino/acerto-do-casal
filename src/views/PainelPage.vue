@@ -63,7 +63,7 @@
               <span class="tags">
                 <svg v-if="item.pendingWrite" class="sync-icon" role="img" aria-label="Sincronizando" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
                 <span v-for="flag in flagsFor(item)" :key="flag" class="tag flag">{{ flagLabel[flag] }}</span>
-                <span v-if="tagFor(item, myUid)" class="tag" :class="tagFor(item, myUid)">{{ tagLabel[tagFor(item, myUid)!] }}</span>
+                <StatusBadge v-bind="badgeFor(item, myUid)" />
               </span>
             </span>
             </router-link>
@@ -82,12 +82,13 @@ import { IonContent, IonFooter, IonPage, onIonViewWillEnter } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
+import StatusBadge from '@/components/StatusBadge.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { clampMonth, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
-import { expenseSubtitle, flagLabel, flagsFor, tagFor, tagLabel } from '@/services/expenseView';
+import { badgeFor, expenseSubtitle, flagLabel, flagsFor } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 

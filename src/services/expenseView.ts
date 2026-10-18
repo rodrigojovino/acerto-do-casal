@@ -98,3 +98,51 @@ export function debtView(
     ? { label: 'Você deve por este gasto', amountCents: debt.amountCents }
     : { label: `${nameOf(debt.fromUid)} te deve por este gasto`, amountCents: debt.amountCents };
 }
+
+/** Tipos de selo de status (cor + ícone + texto). */
+export type BadgeKind = 'pending' | 'auto' | 'validated' | 'returned' | 'awaiting';
+
+export interface Badge {
+  kind: BadgeKind;
+  label: string;
+}
+
+/**
+ * Selo de status do ponto de vista de quem olha. `detailed`: no Detalhe, o
+ * devolvido diz se foi contestado ou recusado.
+ */
+export function badgeFor(
+  expense: Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection'>,
+  viewerUid: string,
+  detailed = false,
+): Badge {
+  switch (expense.status) {
+    case 'pending_approval':
+      return { kind: 'pending', label: expense.createdBy === viewerUid ? 'Pendente' : 'Aprovar' };
+    case 'returned':
+      if (!detailed) return { kind: 'returned', label: 'Devolvido' };
+      return { kind: 'returned', label: expense.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' };
+    case 'awaiting_confirmation':
+      return { kind: 'awaiting', label: 'A confirmar' };
+    default:
+      return isAutoConfirmed(expense) ? { kind: 'auto', label: 'Automático' } : { kind: 'validated', label: 'Validado' };
+  }
+}
+
+/**
+ * Origem da confirmação, para o Detalhe: "Validado por Bia", "Automático · nota
+ * conferida", "Automático · foto", "Automático · recorrente".
+ */
+export function originLabel(
+  expense: Pick<Expense, 'status' | 'approval' | 'receipt'> & { recurringId?: string },
+  nameOf: (uid: string) => string,
+): string | null {
+  if (expense.status !== 'confirmed') return null;
+  if (!isAutoConfirmed(expense)) return `Validado por ${nameOf(expense.approval!.byUid)}`;
+  const r = expense.receipt;
+  if (expense.approval?.byUid === NFCE_APPROVER || (r.type === 'nfce' && r.nfceStatus === 'ok')) return 'Automático · nota conferida';
+  if (r.type === 'nfce') return 'Automático · nota fiscal';
+  if (r.type === 'photo') return 'Automático · foto';
+  if (expense.recurringId) return 'Automático · recorrente';
+  return 'Automático';
+}

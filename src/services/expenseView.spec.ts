@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
 import { authorStatus } from './expenseData';
-import { canContest, debtView, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
+import { badgeFor, canContest, debtView, originLabel, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -136,5 +136,52 @@ describe('authorStatus (status que quem lança grava)', () => {
   it('pendente continua pendente; com comprovante anexado, confirma', () => {
     expect(authorStatus(none, 'pending_approval')).toBe('pending_approval');
     expect(authorStatus(photo, 'pending_approval')).toBe('confirmed');
+  });
+});
+
+describe('badgeFor', () => {
+  it('pendente: "Pendente" para quem lançou, "Aprovar" para o outro', () => {
+    expect(badgeFor(expense({ status: 'pending_approval' }), A)).toEqual({ kind: 'pending', label: 'Pendente' });
+    expect(badgeFor(expense({ status: 'pending_approval' }), B)).toEqual({ kind: 'pending', label: 'Aprovar' });
+  });
+
+  it('automático (sem aprovação ou "nfce") e validado (aprovação de pessoa)', () => {
+    expect(badgeFor(expense({ status: 'confirmed' }), B).kind).toBe('auto');
+    expect(badgeFor(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), B).kind).toBe('auto');
+    expect(badgeFor(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), A)).toEqual({ kind: 'validated', label: 'Validado' });
+  });
+
+  it('devolvido: na lista "Devolvido"; no Detalhe, "Contestado" ou "Recusado"', () => {
+    const contestado = expense({ status: 'returned', rejection: { byUid: B, at: null, kind: 'contest', reason: 'x' } });
+    const recusado = expense({ status: 'returned', rejection: { byUid: B, at: null, kind: 'reject' } });
+    expect(badgeFor(contestado, A)).toEqual({ kind: 'returned', label: 'Devolvido' });
+    expect(badgeFor(contestado, A, true).label).toBe('Contestado');
+    expect(badgeFor(recusado, A, true).label).toBe('Recusado');
+  });
+
+  it('a confirmar (recorrente variável)', () => {
+    expect(badgeFor(expense({ status: 'awaiting_confirmation' }), A)).toEqual({ kind: 'awaiting', label: 'A confirmar' });
+  });
+});
+
+describe('originLabel', () => {
+  const nameOf = (uid: string) => (uid === A ? 'você' : 'Bia');
+
+  it('validado por quem aprovou', () => {
+    expect(originLabel(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), nameOf)).toBe('Validado por Bia');
+  });
+
+  it('automático: nota conferida, foto ou recorrente', () => {
+    const nfceOk = { type: 'nfce' as const, nfceKey: '3'.repeat(44), nfceStatus: 'ok' as const };
+    expect(originLabel(expense({ status: 'confirmed', receipt: nfceOk }), nameOf)).toBe('Automático · nota conferida');
+    expect(originLabel(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), nameOf)).toBe('Automático · nota conferida');
+    expect(
+      originLabel(expense({ status: 'confirmed', receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }), nameOf),
+    ).toBe('Automático · foto');
+    expect(originLabel({ ...expense({ status: 'confirmed' }), recurringId: 'r1' }, nameOf)).toBe('Automático · recorrente');
+  });
+
+  it('sem origem quando não está confirmado', () => {
+    expect(originLabel(expense({ status: 'pending_approval' }), nameOf)).toBeNull();
   });
 });

@@ -182,8 +182,9 @@ service cloud.firestore {
       // Mexe só em status, approval/rejection e updatedAt:
       // - gasto pendente: aprova ou recusa (motivo opcional);
       // - gasto confirmado automaticamente (por comprovante, pela conferência
-      //   do QR ou recorrente fixo): contesta, com motivo obrigatório.
-      // Gasto aprovado manualmente pelo outro membro não é contestável.
+      //   do QR ou recorrente fixo): valida (grava a própria aprovação, sem mudar
+      //   o status) ou contesta, com motivo obrigatório.
+      // Gasto aprovado ou validado pelo outro membro não é contestável.
       function isReviewWrite() {
         return resource.data.createdBy != request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -191,7 +192,7 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && (
             resource.data.status == 'pending_approval' && (isApproval() || isRejection('reject'))
-            || isAutoConfirmed() && isRejection('contest')
+            || isAutoConfirmed() && (isApproval() || isRejection('contest'))
           );
       }
 

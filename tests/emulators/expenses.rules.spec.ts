@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import {
   approvalData,
   contestData,
+  validationData,
   expenseUpdateData,
   newExpenseData,
   rejectionData,
@@ -148,6 +149,10 @@ function approve(uid: string, id: string, byUid = uid) {
 
 function reject(uid: string, id: string, reason?: string) {
   return db(uid).doc(path(id)).update(rejectionData(uid, reason, serverTime()));
+}
+
+function validate(uid: string, id: string, byUid = uid) {
+  return db(uid).doc(path(id)).update(validationData(byUid, serverTime()));
 }
 
 function contest(uid: string, id: string, reason = 'O valor não bate com a nota') {
@@ -443,7 +448,7 @@ describe('aprovação e recusa de pendente pelo outro membro', () => {
   });
 
   it('não aprova nem recusa o que não está pendente', async () => {
-    await assertFails(approve(A, 'b-foto')); // já confirmado pelo comprovante
+    await assertFails(approve(A, 'b-aprovado')); // já aprovado
     await assertFails(reject(A, 'b-foto')); // confirmado se contesta, não se recusa
     await assertSucceeds(reject(A, 'b-sem'));
     await assertFails(approve(A, 'b-sem')); // devolvido
@@ -507,6 +512,51 @@ describe('contestação de confirmado automaticamente', () => {
   it('quem lançou exclui o contestado', async () => {
     await assertSucceeds(contest(A, 'b-foto'));
     await assertSucceeds(db(B).doc(path('b-foto')).delete());
+  });
+});
+
+describe('validação de confirmado automaticamente', () => {
+  it('o outro membro valida um confirmado pelo comprovante, sem mudar o status', async () => {
+    await assertSucceeds(validate(A, 'b-foto'));
+  });
+
+  it('valida o confirmado pela conferência antiga do QR (troca a aprovação "nfce")', async () => {
+    await assertSucceeds(validate(A, 'b-qr-antigo'));
+  });
+
+  it('não valida o próprio gasto', async () => {
+    await assertFails(validate(A, 'a-qr'));
+  });
+
+  it('não valida um pendente (pendente se aprova)', async () => {
+    // Validar = gravar a aprovação mantendo confirmed; num pendente isso é aprovar.
+    await assertFails(db(A).doc(path('b-sem')).update({ approval: { byUid: A, at: serverTime() }, updatedAt: serverTime() }));
+  });
+
+  it('não valida em mês fechado; terceiro não valida', async () => {
+    await assertFails(validate(A, 'b-fechado-foto'));
+    await assertFails(validate(C, 'b-foto'));
+  });
+
+  it('não valida em nome do outro, como "nfce" ou sem horário do servidor', async () => {
+    await assertFails(validate(A, 'b-foto', B));
+    await assertFails(validate(A, 'b-foto', 'nfce'));
+    await assertFails(
+      db(A).doc(path('b-foto')).update({ status: 'confirmed', approval: { byUid: A, at: new Date() }, updatedAt: serverTime() }),
+    );
+  });
+
+  it('validar não altera valores nem o status', async () => {
+    await assertFails(db(A).doc(path('b-foto')).update({ ...validationData(A, serverTime()), totalCents: 1 }));
+    await assertFails(db(A).doc(path('b-foto')).update({ ...validationData(A, serverTime()), status: 'pending_approval' }));
+  });
+
+  it('validado conta como aprovado: não é mais contestável nem validável, e editado volta para aprovação', async () => {
+    await assertSucceeds(validate(A, 'b-foto'));
+    await assertFails(contest(A, 'b-foto'));
+    await assertFails(validate(A, 'b-foto'));
+    await assertFails(edit(B, 'b-foto', { description: 'Outro', approval: removeField() })); // continuaria confirmado
+    await assertSucceeds(edit(B, 'b-foto', { description: 'Outro', status: 'pending_approval', approval: removeField() }));
   });
 });
 

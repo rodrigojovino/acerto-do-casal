@@ -21,7 +21,10 @@
                 <span class="item-name">{{ e.description }}</span>
                 <span class="item-sub">{{ subtitle(e) }}</span>
               </span>
-              <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+              <span class="side">
+                <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                <StatusBadge v-bind="badgeFor(e, myUid)" />
+              </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="toApprove.length === 0" class="empty">Nada para aprovar agora.</p>
@@ -36,7 +39,10 @@
                   <span class="item-name">{{ e.description }}</span>
                   <span class="item-sub">{{ subtitle(e) }}</span>
                 </span>
-                <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                <span class="side">
+                  <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                  <StatusBadge v-bind="badgeFor(e, myUid)" />
+                </span>
                 <span aria-hidden="true" class="chev">›</span>
               </router-link>
               <router-link v-if="e.receipt.type === 'none'" class="attach" :to="{ name: 'gasto-editar', params: { id: e.id } }">
@@ -56,7 +62,10 @@
                   {{ e.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' }}{{ e.rejection?.reason ? `: "${e.rejection.reason}"` : ' sem motivo informado' }}
                 </span>
               </span>
-              <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+              <span class="side">
+                <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                <StatusBadge v-bind="badgeFor(e, myUid)" />
+              </span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="returned.length === 0" class="empty">
@@ -88,7 +97,8 @@ import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthName } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
-import { flagLabel, flagsFor } from '@/services/expenseView';
+import { badgeFor, flagLabel, flagsFor } from '@/services/expenseView';
+import StatusBadge from '@/components/StatusBadge.vue';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const myUid = computed(() => user.value?.uid ?? '');
@@ -207,6 +217,13 @@ function subtitle(e: Expense): string {
 
 .strong {
   font-weight: 800;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .chev {
