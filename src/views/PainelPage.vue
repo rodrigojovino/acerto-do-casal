@@ -33,9 +33,13 @@
               <span class="num strong">{{ formatBRL(paid[partnerUid ?? ''] ?? 0) }}</span>
             </div>
           </div>
+          <p v-if="forecast.length > 0" class="forecast-line small">
+            <span class="muted">Previsto em recorrentes</span>
+            <span class="num strong">{{ formatBRL(forecastFixedCents) }}</span>
+          </p>
         </section>
 
-        <router-link v-if="pending.open > 0" class="pending" :to="{ name: 'pendencias' }">
+        <router-link v-if="pending.open > 0 || pending.awaitingMine > 0" class="pending" :to="{ name: 'pendencias' }">
           <span>{{ pendingText }}</span><span aria-hidden="true">›</span>
         </router-link>
 
@@ -46,7 +50,7 @@
 
         <p v-if="loadError" class="alert-error" role="alert">{{ loadError }}</p>
         <p v-else-if="!loaded" class="hint center">Carregando…</p>
-        <div v-else-if="expenses.length === 0" class="empty card">
+        <div v-else-if="expenses.length === 0 && forecast.length === 0" class="empty card">
           <p class="strong">Nenhum gasto em {{ monthName(month) }}.</p>
           <p class="hint">Toque em + para lançar o primeiro.</p>
         </div>
@@ -59,13 +63,31 @@
               <span class="item-sub">{{ expenseSubtitle(item, myUid, firstNameOf(item.payerUid)) }}</span>
             </span>
             <span class="item-side">
-              <span class="num strong">{{ formatBRL(item.totalCents) }}</span>
+              <span class="num strong">{{ item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents) }}</span>
               <span class="tags">
+                <TypeBadge v-for="t in typeBadges(item)" :key="t" :label="t" />
                 <svg v-if="item.pendingWrite" class="sync-icon" role="img" aria-label="Sincronizando" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
                 <span v-for="flag in flagsFor(item)" :key="flag" class="tag flag">{{ flagLabel[flag] }}</span>
                 <StatusBadge v-bind="badgeFor(item, myUid)" />
               </span>
             </span>
+            </router-link>
+          </li>
+          <!-- Previsão de recorrentes (calculada, não gravada; fora do saldo) -->
+          <li v-for="f in forecast" :key="`previsto-${f.recurringId}`">
+            <router-link class="item forecast" :to="{ name: 'recorrente', params: { id: f.recurringId } }">
+              <span class="avatar" aria-hidden="true">{{ initials(f.payerUid) }}</span>
+              <span class="item-main">
+                <span class="item-name">{{ f.description }}</span>
+                <span class="item-sub">{{ firstNameOf(f.payerUid) }} · {{ formatDateBR(f.date, false) }} · previsto</span>
+              </span>
+              <span class="item-side">
+                <span class="num strong">{{ f.amountCents === null ? 'a definir' : formatBRL(f.amountCents) }}</span>
+                <span class="tags">
+                  <TypeBadge label="Recorrente" />
+                  <StatusBadge v-bind="FORECAST_BADGE" />
+                </span>
+              </span>
             </router-link>
           </li>
         </ul>
@@ -84,11 +106,14 @@ import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
-import { clampMonth, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
+import { clampMonth, formatDateBR, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
-import { badgeFor, expenseSubtitle, flagLabel, flagsFor } from '@/services/expenseView';
+import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
+import TypeBadge from '@/components/TypeBadge.vue';
+import { forecastRecurring, forecastTotal } from '@/domain/recurrence';
+import { watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
@@ -162,6 +187,25 @@ onBeforeUnmount(() => stop?.());
 
 const hasPendingWrites = computed(() => expenses.value.some((e) => e.pendingWrite));
 
+// ---- Previsão de recorrentes (meses futuros; calculada a partir dos cadastros) ----
+const recurrings = ref<RecurringDoc[]>([]);
+let stopRecurring: (() => void) | null = null;
+watch(
+  () => group.value?.id,
+  (groupId) => {
+    stopRecurring?.();
+    stopRecurring = groupId ? watchRecurring(groupId, (l) => (recurrings.value = l), () => undefined) : null;
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopRecurring?.());
+
+const forecast = computed(() => {
+  const generated = new Set(expenses.value.map((e) => e.recurringId).filter((id): id is string => !!id));
+  return forecastRecurring(recurrings.value, month.value, today.value, generated);
+});
+const forecastFixedCents = computed(() => forecastTotal(forecast.value));
+
 // ---- Saldo e resumos: só funções de src/domain ----
 const balance = computed(() => (partnerUid.value ? monthBalance(expenses.value, members.value) : null));
 const paid = computed(() => (partnerUid.value ? paidByMember(expenses.value, members.value) : {}));
@@ -176,8 +220,12 @@ const balanceText = computed(() => {
 });
 
 const pendingText = computed(() => {
-  const { open, awaitingMyApproval, returnedToMe } = pending.value;
-  const parts = [`${open} ${open === 1 ? 'gasto pendente' : 'gastos pendentes'}`];
+  const { open, awaitingMyApproval, returnedToMe, awaitingMine } = pending.value;
+  const parts: string[] = [];
+  if (open > 0) parts.push(`${open} ${open === 1 ? 'gasto pendente' : 'gastos pendentes'}`);
+  if (awaitingMine > 0) {
+    parts.push(`${awaitingMine} ${awaitingMine === 1 ? 'recorrente' : 'recorrentes'} para confirmar o valor`);
+  }
   if (awaitingMyApproval > 0) {
     parts.push(`${awaitingMyApproval} ${awaitingMyApproval === 1 ? 'aguarda' : 'aguardam'} sua aprovação`);
   }
@@ -396,6 +444,23 @@ li:last-child .item {
 .item-sub {
   font-size: 12px;
   color: var(--app-muted);
+}
+
+.item.forecast {
+  background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(0, 0, 0, 0.025) 8px 16px);
+}
+
+.item.forecast .item-name,
+.item.forecast .num {
+  color: var(--app-muted);
+}
+
+.forecast-line {
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  justify-content: space-between;
 }
 
 .item-side {

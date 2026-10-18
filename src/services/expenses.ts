@@ -229,15 +229,15 @@ export function rejectExpense(groupId: string, id: string, uid: string, reason?:
 }
 
 /**
- * Gastos pendentes ou devolvidos de todos os meses (aba Pendências), em tempo
- * real e do cache offline.
+ * Gastos pendentes, devolvidos ou aguardando confirmação de todos os meses (aba
+ * Pendências), em tempo real e do cache offline.
  */
 export function watchOpenItems(
   groupId: string,
   onChange: (expenses: Expense[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(expensesCol(groupId), where('status', 'in', ['pending_approval', 'returned']));
+  const q = query(expensesCol(groupId), where('status', 'in', ['pending_approval', 'returned', 'awaiting_confirmation']));
   return onSnapshot(
     q,
     { includeMetadataChanges: true },

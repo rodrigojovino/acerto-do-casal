@@ -2,7 +2,7 @@
   "name": "acerto-do-casal-functions",
   "private": true,
   "type": "module",
-  "main": "lib/index.js",
+  "main": "lib/functions/src/index.js",
   "engines": {
     "node": "22"
   },

@@ -1,4 +1,4 @@
-import { addMonths, type Competence } from './settlement';
+import { addMonths, type Competence } from './settlement.js';
 
 /** Data no formato `YYYY-MM-DD`. */
 export type IsoDate = string;

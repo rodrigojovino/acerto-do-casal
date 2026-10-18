@@ -239,7 +239,7 @@ describe('pendingSummary', () => {
       { status: 'confirmed' as const, createdBy: B },
       { status: 'awaiting_confirmation' as const, createdBy: A },
     ];
-    expect(pendingSummary(list, A)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 1 });
-    expect(pendingSummary(list, B)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 0 });
+    expect(pendingSummary(list, A)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 1, awaitingMine: 1 });
+    expect(pendingSummary(list, B)).toEqual({ open: 3, awaitingMyApproval: 1, returnedToMe: 0, awaitingMine: 0 });
   });
 });

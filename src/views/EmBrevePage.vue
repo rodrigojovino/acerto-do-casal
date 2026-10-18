@@ -11,10 +11,6 @@
           <p class="hint">{{ description }}</p>
         </div>
 
-        <template v-if="tab === 'ajustes'">
-          <p class="hint">Conectado como {{ user?.email }}</p>
-          <button class="btn outline" type="button" @click="signOut">Sair</button>
-        </template>
       </main>
     </ion-content>
     <ion-footer class="ion-no-border">
@@ -27,10 +23,8 @@
 import { IonContent, IonFooter, IonPage } from '@ionic/vue';
 import { useRoute } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
-import { signOut } from '@/services/auth';
-import { user } from '@/services/session';
 
-type Tab = 'historico' | 'ajustes';
+type Tab = 'historico';
 
 // O Ionic mantém as telas visitadas vivas; ler a rota de forma reativa faria
 // esta tela reagir às rotas das outras. A aba é fixada na criação.
@@ -40,10 +34,6 @@ const texts: Record<Tab, { title: string; description: string }> = {
   historico: {
     title: 'Histórico',
     description: 'Meses fechados, exportação e pedido de reabertura chegam junto com o fechamento do mês.',
-  },
-  ajustes: {
-    title: 'Ajustes',
-    description: 'Perfis, divisão padrão e notificações chegam nas próximas fases.',
   },
 };
 

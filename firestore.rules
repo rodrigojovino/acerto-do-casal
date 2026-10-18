@@ -161,9 +161,14 @@ service cloud.firestore {
           : 'confirmed';
       }
 
+      // recurringId: só a Function grava (gasto gerado de conta recorrente); o
+      // app não cria gasto recorrente e, ao editar um gerado, não muda o campo.
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys())
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId']))
           && request.resource.data.keys().hasAll(expenseKeys())
+          && (isNew
+                ? !request.resource.data.keys().hasAny(['recurringId'])
+                : request.resource.data.get('recurringId', null) == resource.data.get('recurringId', null))
           && request.resource.data.status == authorStatus(request.resource.data, isNew)
           && request.resource.data.updatedAt == request.time;
       }
@@ -258,8 +263,115 @@ service cloud.firestore {
           && !isClosed(resource.data.competence);
       }
 
-      // Recorrentes chegam na Fase 5; até lá, fechado.
-      // Qualquer outra subcoleção também fica fechada (sem regra = negado).
+      // ---- Contas recorrentes ----
+      // Fixo: vai para aprovação do outro membro; mudar valor, quem paga, divisão
+      // ou tipo exige nova aprovação. Variável: não precisa de aprovação (cada mês
+      // passa pela confirmação do valor). Só quem cadastrou edita; qualquer um dos
+      // dois desativa. A geração dos gastos é da Function (lastGeneratedMonth).
+
+      function recurringKeys() {
+        return ['description', 'kind', 'dayOfMonth', 'payerUid', 'payerSharePct', 'startMonth',
+                'active', 'status', 'createdBy', 'createdAt', 'updatedAt'];
+      }
+
+      function validRecurring(d) {
+        return d.keys().hasAll(recurringKeys())
+          && d.keys().hasOnly(recurringKeys().concat(['amountCents', 'endMonth', 'approval', 'rejection', 'lastGeneratedMonth']))
+          && d.description is string
+          && d.description.trim().size() >= 1
+          && d.description.size() <= 80
+          && (
+            d.kind == 'fixed' && d.amountCents is int && d.amountCents > 0
+            || d.kind == 'variable' && !d.keys().hasAny(['amountCents'])
+          )
+          && d.dayOfMonth is int && d.dayOfMonth >= 1 && d.dayOfMonth <= 31
+          && d.payerUid in get(groupPath(groupId)).data.members
+          && d.payerSharePct is int && d.payerSharePct >= 0 && d.payerSharePct <= 100
+          && d.startMonth is string && d.startMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && (
+            !d.keys().hasAny(['endMonth'])
+            || d.endMonth is string && d.endMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$') && d.endMonth >= d.startMonth
+          )
+          && d.active is bool;
+      }
+
+      function recurringMaterialChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['kind', 'amountCents', 'payerUid', 'payerSharePct']);
+      }
+
+      // Status que o autor grava: variável sempre aprovado; fixo novo, devolvido
+      // ou com mudança de dinheiro vai para aprovação; senão mantém.
+      function recurringAuthorStatus(isNew) {
+        return request.resource.data.kind == 'variable'
+          ? 'approved'
+          : isNew || resource.data.status == 'returned' || recurringMaterialChanged()
+            ? 'pending_approval'
+            : resource.data.status;
+      }
+
+      match /recurring/{recurringId} {
+        allow read: if isMember(groupId);
+
+        allow create: if isMember(groupId)
+          && validRecurring(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.active == true
+          && !request.resource.data.keys().hasAny(['approval', 'rejection', 'lastGeneratedMonth'])
+          && request.resource.data.status == recurringAuthorStatus(true);
+
+        allow update: if isMember(groupId) && (
+          // Quem cadastrou edita. A aprovação só é mantida num fixo que continua aprovado.
+          resource.data.createdBy == request.auth.uid
+            && validRecurring(request.resource.data)
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.createdAt == resource.data.createdAt
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.get('lastGeneratedMonth', null) == resource.data.get('lastGeneratedMonth', null)
+            && request.resource.data.status == recurringAuthorStatus(false)
+            && !request.resource.data.keys().hasAny(['rejection'])
+            && (
+              request.resource.data.kind == 'fixed' && request.resource.data.status == 'approved'
+                ? request.resource.data.get('approval', null) == resource.data.get('approval', null)
+                : !request.resource.data.keys().hasAny(['approval'])
+            )
+          // O outro membro aprova ou recusa um fixo pendente.
+          || resource.data.createdBy != request.auth.uid
+            && resource.data.status == 'pending_approval'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['status', 'approval', 'rejection', 'updatedAt'])
+            && request.resource.data.updatedAt == request.time
+            && (
+              request.resource.data.status == 'approved'
+                && request.resource.data.approval == { 'byUid': request.auth.uid, 'at': request.time }
+                && !request.resource.data.keys().hasAny(['rejection'])
+              || request.resource.data.status == 'returned'
+                && !request.resource.data.keys().hasAny(['approval'])
+                && request.resource.data.rejection.keys().hasAll(['byUid', 'at', 'kind'])
+                && request.resource.data.rejection.keys().hasOnly(['byUid', 'at', 'kind', 'reason'])
+                && request.resource.data.rejection.byUid == request.auth.uid
+                && request.resource.data.rejection.at == request.time
+                && request.resource.data.rejection.kind == 'reject'
+                && (
+                  !request.resource.data.rejection.keys().hasAny(['reason'])
+                  || request.resource.data.rejection.reason is string
+                    && request.resource.data.rejection.reason.size() <= 200
+                )
+            )
+          // Qualquer um dos dois desativa.
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'updatedAt'])
+            && resource.data.active == true
+            && request.resource.data.active == false
+            && request.resource.data.updatedAt == request.time
+        );
+
+        // Excluir o cadastro não apaga os gastos já gerados.
+        allow delete: if isMember(groupId) && resource.data.createdBy == request.auth.uid;
+      }
+
+      // Qualquer outra subcoleção fica fechada (sem regra = negado).
     }
 
     // invites, joinAttempts e qualquer outra coleção: só as Functions.

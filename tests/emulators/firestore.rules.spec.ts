@@ -103,8 +103,7 @@ describe('subcoleções do grupo', () => {
   });
 
   it('subcoleções sem regra própria ficam fechadas, mesmo para membros', async () => {
-    await assertFails(as(A).doc(`groups/${GROUP}/recurring/r1`).get());
-    await assertFails(as(A).doc(`groups/${GROUP}/recurring/r1`).set({ description: 'Internet' }));
+    await assertFails(as(A).doc(`groups/${GROUP}/qualquer/x`).get());
     await assertFails(as(A).doc(`groups/${GROUP}/qualquer/x`).set({ a: 1 }));
   });
 });

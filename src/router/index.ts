@@ -6,6 +6,9 @@ import EntradaPage from '../views/EntradaPage.vue';
 import VinculoPage from '../views/VinculoPage.vue';
 import PainelPage from '../views/PainelPage.vue';
 import EmBrevePage from '../views/EmBrevePage.vue';
+import AjustesPage from '../views/AjustesPage.vue';
+import RecurringListPage from '../views/RecurringListPage.vue';
+import RecurringFormPage from '../views/RecurringFormPage.vue';
 import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 import ExpenseDetailPage from '../views/ExpenseDetailPage.vue';
@@ -17,7 +20,10 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/painel', name: 'painel', component: PainelPage },
   { path: '/pendencias', name: 'pendencias', component: PendenciasPage },
   { path: '/historico', name: 'historico', component: EmBrevePage },
-  { path: '/ajustes', name: 'ajustes', component: EmBrevePage },
+  { path: '/ajustes', name: 'ajustes', component: AjustesPage },
+  { path: '/ajustes/recorrentes', name: 'recorrentes', component: RecurringListPage },
+  { path: '/ajustes/recorrentes/nova', name: 'recorrente-novo', component: RecurringFormPage },
+  { path: '/ajustes/recorrentes/:id', name: 'recorrente', component: RecurringFormPage },
   { path: '/gasto/novo', name: 'gasto-novo', component: ExpenseFormPage },
   { path: '/gasto/:id', name: 'gasto', component: ExpenseDetailPage },
   { path: '/gasto/:id/editar', name: 'gasto-editar', component: ExpenseFormPage },
@@ -37,7 +43,7 @@ const allowed: Record<SessionStatus, ReadonlySet<string>> = {
   signedOut: new Set(['entrar']),
   noGroup: new Set(['vinculo']),
   waitingPartner: new Set(['vinculo']),
-  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar']),
+  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente']),
 };
 
 const router = createRouter({

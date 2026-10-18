@@ -73,10 +73,43 @@
             </p>
           </section>
 
-          <!-- 4. Recorrentes (Fase 5) -->
+          <!-- 4. Recorrentes: valor a confirmar (variáveis) e cadastros a aprovar -->
           <section class="section" aria-labelledby="sec-recorrentes">
-            <h2 id="sec-recorrentes" class="title">Recorrentes para confirmar · 0</h2>
-            <p class="empty">Contas fixas geradas no dia aparecem aqui para você confirmar o valor.</p>
+            <h2 id="sec-recorrentes" class="title">Recorrentes para confirmar · {{ toConfirm.length + recurringToApprove.length }}</h2>
+            <router-link v-for="e in toConfirm" :key="e.id" class="item card" :to="{ name: 'gasto-editar', params: { id: e.id } }">
+              <span class="item-main">
+                <span class="item-name">{{ e.description }}</span>
+                <span class="item-sub">Vence {{ formatDateBR(e.date, false) }} · confirme o valor deste mês</span>
+              </span>
+              <span class="side">
+                <TypeBadge label="Recorrente" />
+                <StatusBadge v-bind="badgeFor(e, myUid)" />
+              </span>
+              <span aria-hidden="true" class="chev">›</span>
+            </router-link>
+            <router-link
+              v-for="r in recurringToApprove"
+              :key="r.id"
+              class="item card"
+              :to="{ name: 'recorrente', params: { id: r.id } }"
+            >
+              <span class="item-main">
+                <span class="item-name">{{ r.description }}</span>
+                <span class="item-sub">Conta recorrente nova ou alterada · dia {{ r.dayOfMonth }}</span>
+              </span>
+              <span class="side">
+                <span class="num strong">{{ formatBRL(r.amountCents ?? 0) }}</span>
+                <StatusBadge kind="pending" label="Aprovar" />
+              </span>
+              <span aria-hidden="true" class="chev">›</span>
+            </router-link>
+            <p v-if="toConfirm.length + recurringToApprove.length === 0" class="empty">
+              Contas variáveis aparecem aqui no dia 1 para você confirmar o valor; cadastros fixos de {{ partnerFirstName }}, para aprovar.
+            </p>
+            <p v-if="recurringWaiting.length > 0" class="hint">
+              {{ recurringWaiting.length }} {{ recurringWaiting.length === 1 ? 'cadastro seu aguarda' : 'cadastros seus aguardam' }}
+              a aprovação de {{ partnerFirstName }}.
+            </p>
           </section>
 
           <p class="note">Pendentes já contam no saldo, destacados. Aprovar ou recusar funciona offline e sincroniza depois.</p>
@@ -95,6 +128,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthName } from '@/domain/calendar';
+import TypeBadge from '@/components/TypeBadge.vue';
+import { watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
 import { badgeFor, flagLabel, flagsFor } from '@/services/expenseView';
@@ -138,6 +173,28 @@ const waiting = computed(() =>
   items.value.filter((e) => e.status === 'pending_approval' && e.createdBy === myUid.value),
 );
 const returned = computed(() => items.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value));
+const toConfirm = computed(() =>
+  items.value.filter((e) => e.status === 'awaiting_confirmation' && e.createdBy === myUid.value),
+);
+
+// Cadastros de contas recorrentes (fixos) aguardando aprovação.
+const recurrings = ref<RecurringDoc[]>([]);
+let stopRecurring: (() => void) | null = null;
+watch(
+  () => group.value?.id,
+  (groupId) => {
+    stopRecurring?.();
+    stopRecurring = groupId ? watchRecurring(groupId, (l) => (recurrings.value = l), () => undefined) : null;
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopRecurring?.());
+const recurringToApprove = computed(() =>
+  recurrings.value.filter((r) => r.active && r.status === 'pending_approval' && r.createdBy !== myUid.value),
+);
+const recurringWaiting = computed(() =>
+  recurrings.value.filter((r) => r.active && r.status === 'pending_approval' && r.createdBy === myUid.value),
+);
 
 /** "Bia · 15/10 · sem comprovante" (+ mês quando não é o atual, + avisos da nota/foto). */
 function subtitle(e: Expense): string {

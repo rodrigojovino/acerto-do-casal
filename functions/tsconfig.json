@@ -10,8 +10,10 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "outDir": "lib",
-    "rootDir": "src"
+    // Raiz do projeto: as Functions importam as regras de cálculo de src/domain
+    // (sem duplicar). O compilado fica em lib/functions/src e lib/src/domain.
+    "rootDir": ".."
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.spec.ts"]
+  "include": ["src", "../src/domain"],
+  "exclude": ["src/**/*.spec.ts", "../src/domain/**/*.spec.ts"]
 }

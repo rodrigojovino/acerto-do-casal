@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
 import { authorStatus } from './expenseData';
-import { badgeFor, canContest, debtView, originLabel, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
+import { badgeFor, canContest, debtView, originLabel, typeBadges, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -146,9 +146,26 @@ describe('badgeFor', () => {
   });
 
   it('automático (sem aprovação ou "nfce") e validado (aprovação de pessoa)', () => {
-    expect(badgeFor(expense({ status: 'confirmed' }), B).kind).toBe('auto');
+    const nfce = { type: 'nfce' as const, nfceKey: '3'.repeat(44), nfceStatus: 'unchecked' as const };
+    expect(badgeFor(expense({ status: 'confirmed', receipt: nfce }), B)).toEqual({ kind: 'auto', label: 'Automático' });
     expect(badgeFor(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), B).kind).toBe('auto');
     expect(badgeFor(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), A)).toEqual({ kind: 'validated', label: 'Validado' });
+  });
+
+  it('automático só para QR (qualquer estado); foto = "Foto do recibo"; fixo gerado = "Recorrente aprovado"', () => {
+    const photo = { type: 'photo' as const, photoPath: 'p', photoUploaded: true };
+    const nfce = { type: 'nfce' as const, nfceKey: '3'.repeat(44), nfceStatus: 'ok' as const };
+    expect(badgeFor(expense({ status: 'confirmed', receipt: photo }), B)).toEqual({ kind: 'photo', label: 'Foto do recibo' });
+    expect(badgeFor(expense({ status: 'confirmed', receipt: nfce }), B)).toEqual({ kind: 'auto', label: 'Automático' });
+    expect(badgeFor({ ...expense({ status: 'confirmed' }), recurringId: 'r1' }, B)).toEqual({
+      kind: 'recurring',
+      label: 'Recorrente aprovado',
+    });
+    // Validado por pessoa prevalece sobre a origem.
+    expect(badgeFor(expense({ status: 'confirmed', receipt: photo, approval: { byUid: B, at: null } }), A).kind).toBe('validated');
+    expect(badgeFor({ ...expense({ status: 'confirmed', approval: { byUid: B, at: null } }), recurringId: 'r1' }, A).kind).toBe(
+      'validated',
+    );
   });
 
   it('devolvido: na lista "Devolvido"; no Detalhe, "Contestado" ou "Recusado"', () => {
@@ -177,11 +194,28 @@ describe('originLabel', () => {
     expect(originLabel(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), nameOf)).toBe('Automático · nota conferida');
     expect(
       originLabel(expense({ status: 'confirmed', receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }), nameOf),
-    ).toBe('Automático · foto');
-    expect(originLabel({ ...expense({ status: 'confirmed' }), recurringId: 'r1' }, nameOf)).toBe('Automático · recorrente');
+    ).toBe('Confirmado pela foto do recibo');
+    expect(originLabel({ ...expense({ status: 'confirmed' }), recurringId: 'r1' }, nameOf)).toBe('Gerado do recorrente fixo aprovado');
   });
 
   it('sem origem quando não está confirmado', () => {
     expect(originLabel(expense({ status: 'pending_approval' }), nameOf)).toBeNull();
+  });
+});
+
+describe('typeBadges', () => {
+  it('parcela e recorrente aparecem ao lado do status', () => {
+    expect(typeBadges({ ...expense({ status: 'confirmed' }), installment: { index: 3, count: 10 } })).toEqual(['Parcela 3/10']);
+    expect(typeBadges({ ...expense({ status: 'awaiting_confirmation' }), recurringId: 'r1' })).toEqual(['Recorrente']);
+    expect(typeBadges(expense({ status: 'confirmed' }))).toEqual([]);
+  });
+
+  it('sem "Recorrente" ao lado de "Recorrente aprovado" (redundante)', () => {
+    expect(typeBadges({ ...expense({ status: 'confirmed' }), recurringId: 'r1' })).toEqual([]);
+    // Fixo editado (pendente) ou validado continua identificado como recorrente.
+    expect(typeBadges({ ...expense({ status: 'pending_approval' }), recurringId: 'r1' })).toEqual(['Recorrente']);
+    expect(typeBadges({ ...expense({ status: 'confirmed', approval: { byUid: B, at: null } }), recurringId: 'r1' })).toEqual([
+      'Recorrente',
+    ]);
   });
 });

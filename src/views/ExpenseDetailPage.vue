@@ -20,11 +20,12 @@
           <section class="summary">
             <span class="badge-row">
               <StatusBadge v-bind="badgeFor(expense, myUid, true)" />
+              <TypeBadge v-for="t in typeBadges(expense)" :key="t" :label="t" />
               <span v-if="origin" class="origin">{{ origin }}</span>
             </span>
             <span v-if="statusText" class="hint">{{ statusText }}</span>
             <h2>{{ expense.description }}</h2>
-            <p class="value num">{{ formatBRL(expense.totalCents) }}</p>
+            <p class="value num">{{ expense.status === 'awaiting_confirmation' ? 'Valor a confirmar' : formatBRL(expense.totalCents) }}</p>
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
           </section>
 
@@ -112,6 +113,12 @@
               <p class="hint">O gasto volta para {{ creatorLabel }} corrigir ou excluir; a correção passa pela sua aprovação.</p>
             </template>
 
+            <!-- Recorrente variável: quem paga confirma o valor -->
+            <template v-else-if="isCreator && expense.status === 'awaiting_confirmation'">
+              <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">Confirmar valor</router-link>
+              <p class="hint">Sem comprovante, vai para a aprovação de {{ partnerFirstName }}; com foto ou QR, já entra confirmado.</p>
+            </template>
+
             <!-- Quem lançou -->
             <template v-else-if="isCreator">
               <router-link
@@ -180,7 +187,8 @@ import {
   watchExpense,
   type Expense,
 } from '@/services/expenses';
-import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor } from '@/services/expenseView';
+import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
+import TypeBadge from '@/components/TypeBadge.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
 import { closedMonths } from '@/services/months';
 import { formatCnpj } from '@/services/nfce';

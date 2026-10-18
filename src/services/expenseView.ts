@@ -100,22 +100,33 @@ export function debtView(
 }
 
 /** Tipos de selo de status (cor + ícone + texto). */
-export type BadgeKind = 'pending' | 'auto' | 'validated' | 'returned' | 'awaiting';
+export type BadgeKind = 'pending' | 'auto' | 'photo' | 'recurring' | 'validated' | 'returned' | 'awaiting' | 'forecast';
 
 export interface Badge {
   kind: BadgeKind;
   label: string;
 }
 
+type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt'> & { recurringId?: string };
+
+/**
+ * Selo do confirmado automático, pela origem: QR (qualquer estado) = Automático;
+ * foto = Foto do recibo; recorrente fixo gerado = Recorrente aprovado. Os três
+ * são validáveis e contestáveis.
+ */
+function autoBadge(expense: Pick<BadgeSource, 'approval' | 'receipt' | 'recurringId'>): Badge {
+  if (expense.receipt.type === 'photo') return { kind: 'photo', label: 'Foto do recibo' };
+  if (expense.receipt.type === 'none' && expense.recurringId && expense.approval?.byUid !== NFCE_APPROVER) {
+    return { kind: 'recurring', label: 'Recorrente aprovado' };
+  }
+  return { kind: 'auto', label: 'Automático' };
+}
+
 /**
  * Selo de status do ponto de vista de quem olha. `detailed`: no Detalhe, o
  * devolvido diz se foi contestado ou recusado.
  */
-export function badgeFor(
-  expense: Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection'>,
-  viewerUid: string,
-  detailed = false,
-): Badge {
+export function badgeFor(expense: BadgeSource, viewerUid: string, detailed = false): Badge {
   switch (expense.status) {
     case 'pending_approval':
       return { kind: 'pending', label: expense.createdBy === viewerUid ? 'Pendente' : 'Aprovar' };
@@ -125,13 +136,13 @@ export function badgeFor(
     case 'awaiting_confirmation':
       return { kind: 'awaiting', label: 'A confirmar' };
     default:
-      return isAutoConfirmed(expense) ? { kind: 'auto', label: 'Automático' } : { kind: 'validated', label: 'Validado' };
+      return isAutoConfirmed(expense) ? autoBadge(expense) : { kind: 'validated', label: 'Validado' };
   }
 }
 
 /**
  * Origem da confirmação, para o Detalhe: "Validado por Bia", "Automático · nota
- * conferida", "Automático · foto", "Automático · recorrente".
+ * conferida", "Confirmado pela foto do recibo", "Gerado do recorrente fixo aprovado".
  */
 export function originLabel(
   expense: Pick<Expense, 'status' | 'approval' | 'receipt'> & { recurringId?: string },
@@ -142,7 +153,27 @@ export function originLabel(
   const r = expense.receipt;
   if (expense.approval?.byUid === NFCE_APPROVER || (r.type === 'nfce' && r.nfceStatus === 'ok')) return 'Automático · nota conferida';
   if (r.type === 'nfce') return 'Automático · nota fiscal';
-  if (r.type === 'photo') return 'Automático · foto';
-  if (expense.recurringId) return 'Automático · recorrente';
+  if (r.type === 'photo') return 'Confirmado pela foto do recibo';
+  if (expense.recurringId) return 'Gerado do recorrente fixo aprovado';
   return 'Automático';
+}
+
+/** Selo de status de um recorrente previsto (calculado, ainda não gerado). */
+export const FORECAST_BADGE: Badge = { kind: 'forecast', label: 'Previsto' };
+
+/**
+ * Selos de tipo, ao lado (não no lugar) do selo de status. "Recorrente" some
+ * quando o status já é "Recorrente aprovado" (redundante).
+ */
+export function typeBadges(
+  expense: Pick<Expense, 'status' | 'approval' | 'receipt'> & {
+    recurringId?: string;
+    installment?: { index: number; count: number };
+  },
+): string[] {
+  const badges: string[] = [];
+  if (expense.installment) badges.push(`Parcela ${expense.installment.index}/${expense.installment.count}`);
+  const recurringStatus = expense.status === 'confirmed' && isAutoConfirmed(expense) && autoBadge(expense).kind === 'recurring';
+  if (expense.recurringId && !recurringStatus) badges.push('Recorrente');
+  return badges;
 }

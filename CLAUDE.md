@@ -85,12 +85,17 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
   | selo | quando | visual |
   | --- | --- | --- |
   | Pendente / Aprovar (para o outro) | `pending_approval` | âmbar claro, relógio |
-  | Automático | `confirmed` sem aprovação de pessoa | branco com contorno azul tracejado, raio |
+  | Automático | confirmado automático por QR Code (qualquer estado) | branco com contorno azul tracejado, raio |
+  | Foto do recibo | confirmado automático por foto | lilás claro com contorno roxo tracejado, câmera |
+  | Recorrente aprovado | recorrente fixo gerado no mês (confirmado automático) | verde-azulado médio, contorno contínuo, calendário com check |
   | Validado | `confirmed` aprovado/validado por pessoa | verde escuro preenchido, check |
   | Devolvido (Detalhe: Contestado ou Recusado) | `returned` | vermelho médio, seta de retorno |
   | A confirmar | `awaiting_confirmation` | cinza médio, calendário |
+  | Previsto | recorrente ainda não gerado, num mês futuro (não é gasto) | branco com contorno cinza tracejado |
 
-  O Detalhe mostra a origem (`originLabel`): "Validado por [nome]", "Automático · nota conferida", "Automático · foto" ou "Automático · recorrente".
+  As cores diferem também em claridade, não só no tom (confirmados, do mais claro ao mais escuro: Automático → Foto do recibo → Recorrente aprovado → Validado). Automático, Foto do recibo e Recorrente aprovado se comportam igual: o outro valida ou contesta.
+  O Detalhe mostra a origem (`originLabel`): "Validado por [nome]", "Automático · nota conferida", "Automático · nota fiscal", "Confirmado pela foto do recibo" ou "Gerado do recorrente fixo aprovado".
+- **Selos de tipo** (`typeBadges`, componente `TypeBadge`), ao lado do selo de status: "Parcela N/M" e "Recorrente". O "Recorrente" não aparece ao lado de "Recorrente aprovado" (redundante); fica nos variáveis, nos previstos e no fixo editado ou validado.
 - **QR:** a conferência na SEFAZ (só SP) apenas registra ok, falha ou valor divergente (aviso), e nunca muda o status.
 - Só quem lançou edita ou exclui o gasto.
 - A mesma regra de edição vale para recorrentes fixos e séries de parcelas.
@@ -104,7 +109,13 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 ### Recorrentes
 
-- Valor fixo ou variável. Uma Cloud Function agendada diária cria o gasto no dia configurado como `awaiting_confirmation`.
+- Cadastro em Ajustes > Contas recorrentes: descrição, fixo ou variável, valor (só fixo), dia do vencimento, quem paga, divisão, mês inicial, mês final opcional, ativa.
+- **Fixo** passa pela aprovação do outro membro uma vez. Mudar valor, quem paga, divisão ou tipo exige nova aprovação; descrição, dia, mês final e ativa não. **Variável** não precisa de aprovação.
+- Só quem cadastrou edita; qualquer um dos dois desativa.
+- **Geração**: todos os recorrentes ativos e aprovados são gerados no **dia 1** do mês (execução às 6h de São Paulo), com `date` = dia do vencimento (29–31 viram o último dia nos meses curtos). A Function `generateRecurringDaily` roda todo dia para gerar no dia seguinte os cadastrados ou aprovados no meio do mês e recuperar execuções perdidas. Idempotente: id do gasto `rec-{recurringId}-{YYYY-MM}` e `lastGeneratedMonth` no cadastro, em transação; gasto excluído não é recriado.
+- Gasto gerado: fixo nasce `confirmed` (automático, contestável; editar → `pending_approval`); variável nasce `awaiting_confirmation` com valor 0 e `createdBy` = quem paga, que confirma o valor (depois vale a regra do comprovante). `recurringId` só a Function grava.
+- **Previsão**: só nos meses futuros navegáveis (o mês atual já foi gerado), o Painel mostra os recorrentes ativos ainda não gerados, calculados na hora (`forecastRecurring` em `src/domain/recurrence.ts`, nada gravado), com selo "Previsto" e "Recorrente"; variável com valor "a definir". Fora do saldo; o cartão mostra "Previsto em recorrentes" (só fixos). A previsão **não** estende o limite de navegação.
+- Pendências: "Recorrentes para confirmar" (variáveis aguardando o seu valor e cadastros fixos do outro para aprovar).
 
 ### Mês (competência)
 
@@ -173,17 +184,22 @@ groups/{groupId}/expenses/{expenseId}
   createdBy, createdAt, updatedAt
 
 groups/{groupId}/recurring/{recurringId}
-  description, kind: 'fixed' | 'variable', amountCents?, dayOfMonth, payerUid, payerSharePct, active
+  description, kind: 'fixed' | 'variable', amountCents?, dayOfMonth, payerUid, payerSharePct
+  startMonth: 'YYYY-MM', endMonth?, active
+  status: 'pending_approval' | 'approved' | 'returned', approval?, rejection?
+  lastGeneratedMonth?            // só a Function grava
+  createdBy, createdAt, updatedAt
 ```
 
 Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
 
 Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
 - `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
-- **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, sempre `status: 'pending_approval'`, sem `approval`/`rejection` (a edição apaga as anteriores). Comprovante: foto no caminho do próprio gasto (não enviada na criação); QR com chave de 44 dígitos e modelo 65: de SP só `'pending'` com a URL canônica da própria chave, de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
-- **Outro membro**: só aprova (`pending_approval` → `confirmed`, `approval.byUid` = ele; com foto, só depois de enviada) ou recusa (`→ returned`, motivo opcional). Não toca em valores nem no comprovante.
-- **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; grava `nfceStatus`/`nfceData`; confirma com `approval.byUid: 'nfce'` só se o valor lançado for igual ao da nota. `resolveNfce` (callable) só pré-preenche o formulário.
-- Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura (fechamento na Fase 6). Subcoleções sem regra própria (ex.: `recurring`) ficam fechadas.
+- **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status` conforme a regra do comprovante e da edição (tabelas acima), sem `approval`/`rejection` (a edição apaga as anteriores); `recurringId` nunca na criação e inalterado na edição. Comprovante: foto no caminho do próprio gasto (não enviada na criação); QR com chave de 44 dígitos e modelo 65: de SP só `'pending'` com a URL canônica da própria chave, de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
+- **Outro membro**: em `pending_approval` aprova (`→ confirmed`, `approval.byUid` = ele) ou recusa (`→ returned`, motivo opcional); em automático valida (grava `approval` sem mudar o status) ou contesta (`→ returned`, motivo obrigatório). Não toca em valores nem no comprovante.
+- **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; só grava `nfceStatus`/`nfceData`, nunca muda o status. `resolveNfce` (callable) só pré-preenche o formulário.
+- `recurring`: só membros leem. Quem cadastrou cria e edita com o status exigido (variável `approved`; fixo novo, recusado ou com mudança de valor/pagador/divisão/tipo `pending_approval`); o outro aprova ou recusa o fixo pendente; qualquer um desativa; só quem cadastrou exclui. `lastGeneratedMonth` só pelo Admin SDK.
+- Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura (fechamento na Fase 6). Subcoleções sem regra própria ficam fechadas.
 - Storage: só quem lançou o gasto (tipo foto) envia/troca/apaga a foto, JPEG até 1 MB; membros leem. Cada regra faz uma única leitura no Firestore (por isso o app apaga a foto antes do documento). Exige a permissão do agente do Storage para ler o Firestore (papel "Firebase Rules Firestore Service Agent").
 - `src/services/expenseData.ts` monta os documentos (gasto, edição, aprovação, recusa) como o app grava; os testes de regras usam as mesmas funções.
 

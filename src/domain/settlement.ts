@@ -203,6 +203,8 @@ export interface PendingSummary {
   awaitingMyApproval: number;
   /** Devolvidos a quem olha para corrigir. */
   returnedToMe: number;
+  /** Recorrentes variáveis aguardando quem olha confirmar o valor. */
+  awaitingMine: number;
 }
 
 /** Contagem do aviso de pendências do Painel, do ponto de vista de quem olha. */
@@ -210,7 +212,7 @@ export function pendingSummary(
   expenses: readonly Pick<SettlementExpense & { createdBy: string }, 'status' | 'createdBy'>[],
   viewerUid: string,
 ): PendingSummary {
-  const summary: PendingSummary = { open: 0, awaitingMyApproval: 0, returnedToMe: 0 };
+  const summary: PendingSummary = { open: 0, awaitingMyApproval: 0, returnedToMe: 0, awaitingMine: 0 };
   for (const { status, createdBy } of expenses) {
     if (status === 'pending_approval') {
       summary.open++;
@@ -218,6 +220,8 @@ export function pendingSummary(
     } else if (status === 'returned') {
       summary.open++;
       if (createdBy === viewerUid) summary.returnedToMe++;
+    } else if (status === 'awaiting_confirmation' && createdBy === viewerUid) {
+      summary.awaitingMine++;
     }
   }
   return summary;

@@ -6,7 +6,7 @@
           <button class="icon-btn" type="button" aria-label="Voltar" @click="goBack">
             <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
-          <h1>{{ isEdit ? 'Editar gasto' : 'Novo gasto' }}</h1>
+          <h1>{{ confirmingValue ? 'Confirmar valor' : isEdit ? 'Editar gasto' : 'Novo gasto' }}</h1>
         </header>
 
         <p v-if="blocked" class="alert-error" role="alert">{{ blocked }}</p>
@@ -163,6 +163,8 @@ const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
 const attachQr = route.query.anexar === 'qr';
 
 const ready = ref(!isEdit);
+/** Recorrente variável aguardando quem paga confirmar o valor. */
+const confirmingValue = ref(false);
 const blocked = ref<string | null>(null);
 let editing: Expense | null = null;
 let stopWatch: (() => void) | null = null;
@@ -198,6 +200,7 @@ if (editId && group.value) {
         blocked.value = 'Este gasto é de um mês fechado e não pode mais ser alterado.';
       } else {
         editing = expense;
+        confirmingValue.value = expense.status === 'awaiting_confirmation';
         totalCents.value = expense.totalCents;
         personalCents.value = expense.personalCents;
         description.value = expense.description;
