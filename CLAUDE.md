@@ -62,20 +62,27 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 | status | conta no saldo | quando |
 | --- | --- | --- |
-| `confirmed` | sim | aprovado pelo outro membro, ou QR Code conferido pela SEFAZ com valor igual ao lançado |
-| `pending_approval` | sim, destacado | todo gasto nasce assim (sem comprovante, com foto ou com QR) |
-| `returned` | sim, destacado | recusado pelo outro; volta para quem lançou corrigir |
-| `awaiting_confirmation` | não | recorrente gerado automaticamente, aguardando quem paga confirmar o valor |
+| `confirmed` | sim | criado com comprovante (foto ou QR), recorrente fixo gerado, ou aprovado pelo outro membro |
+| `pending_approval` | sim, destacado | criado sem comprovante, ou qualquer gasto confirmado/devolvido que foi editado |
+| `returned` | sim, destacado | recusado (pendente) ou contestado (confirmado automático) pelo outro; volta para quem lançou corrigir ou excluir |
+| `awaiting_confirmation` | não | recorrente variável gerado, aguardando quem paga confirmar o valor |
 
-- **Quem lança nunca grava `confirmed`.** Só confirmam: o outro membro (aprovação) e a Function de conferência do QR. As regras do Firestore garantem isso.
-- **Sem comprovante:** nasce `pending_approval`; o outro aprova ou recusa (motivo opcional).
-- **Foto:** nasce `pending_approval`. O outro só pode aprovar depois que a foto foi enviada (`receipt.photoUploaded: true`); antes disso, "Aprovar" fica bloqueado com o aviso "Foto ainda não enviada", e as regras também barram.
-- **QR Code da NFC-e (qualquer estado):** vale como comprovante. A chave (44 dígitos, modelo 65, dígito verificador) é validada e dela saem UF, CNPJ do emitente e ano/mês; descrição e data podem vir pré-preenchidas, o valor é digitado. Nasce `pending_approval`, online ou offline.
-  - **SP:** o gatilho da Function consulta a SEFAZ-SP e marca `confirmed` quando a nota é conferida e o valor lançado é igual ao da nota. Se a consulta falhar ou o valor divergir, continua `pending_approval` com o aviso, para o outro aprovar.
-  - **Outros estados:** sem consulta online (`nfceStatus: 'unchecked'`); vai para a aprovação do outro, como uma foto. O Detalhe mostra "Nota de [UF]: conferência automática só para SP".
-- **Anexar comprovante a um pendente:** só um QR conferido dispensa a aprovação; anexar foto mantém pendente.
-- **Editar um gasto confirmado** o devolve a `pending_approval` (o gatilho reconfirma se o QR continuar conferindo). Trocar o QR zera a conferência (`nfceStatus: 'pending'`).
-- Só quem lançou edita ou exclui o gasto. O outro só aprova ou recusa.
+**Quem lança grava o status (as regras exigem exatamente este):**
+
+| situação | status |
+| --- | --- |
+| criar sem comprovante | `pending_approval` |
+| criar com foto ou QR (qualquer estado) | `confirmed` (confirmado automático) |
+| editar um confirmado (automático ou aprovado) | `pending_approval` |
+| editar um devolvido (recusado ou contestado) | `pending_approval` |
+| editar um pendente sem comprovante | `pending_approval` |
+| pendente + "Anexar comprovante e dispensar aprovação" | `confirmed` (único caso de edição que confirma: o gasto nunca foi aprovado) |
+
+- **Só a criação com comprovante confirma automaticamente.** Quem lança nunca grava aprovação nem recusa; editar descarta a aprovação/recusa anterior.
+- **O outro membro:** num pendente, aprova ou recusa (`rejection.kind: 'reject'`, motivo opcional); num confirmado automático, **contesta** (`kind: 'contest'`, motivo obrigatório), até o fechamento do mês. Confirmado automático = `confirmed` sem `approval` (ou com `approval.byUid: 'nfce'`, dos gastos da versão anterior). Gasto aprovado manualmente não é contestável.
+- **QR:** a conferência na SEFAZ (só SP) apenas registra ok, falha ou valor divergente (aviso), e nunca muda o status.
+- Só quem lançou edita ou exclui o gasto.
+- A mesma regra de edição vale para recorrentes fixos e séries de parcelas.
 
 ### Parcelados
 
@@ -91,7 +98,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 ### Mês (competência)
 
 - Fecha só sem gastos `pending_approval`, `returned` ou `awaiting_confirmation`, e com o pagamento do acerto registrado (comprovante PIX ou "pago em dinheiro").
-- Fecha só sem foto de comprovante pendente de envio (`receipt.type: 'photo'` com `photoUploaded: false`).
+- Fecha só sem foto de comprovante pendente de envio (`receipt.type: 'photo'` com `photoUploaded: false`); a aprovação não depende da foto ter chegado.
 - Fechar e reabrir exigem conexão. Reabrir exige aprovação do outro membro.
 - Gasto lançado com data de um mês fechado entra na competência do mês aberto, mantendo a `date` original.
 - Gastos de mês fechado são imutáveis (garantir também nas regras do Firestore).

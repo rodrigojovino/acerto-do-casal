@@ -148,12 +148,15 @@ service cloud.firestore {
       }
 
       // ---- Quem lança (autor) ----
-      // O status segue o comprovante: sem comprovante, pendente de aprovação;
-      // com foto ou QR, confirmado (contestável pelo outro membro). Correção de
-      // devolvido (recusado ou contestado) sempre volta para aprovação explícita.
+      // Só a criação com comprovante confirma automaticamente:
+      // - criar: sem comprovante, pendente; com foto ou QR, confirmado (contestável);
+      // - editar um confirmado (automático ou aprovado) ou um devolvido: pendente,
+      //   com aprovação explícita do outro membro;
+      // - editar um pendente: continua pendente, exceto ao anexar comprovante
+      //   (o gasto nunca foi aprovado), que o confirma.
       // Nunca grava aprovação nem recusa.
       function authorStatus(data, isNew) {
-        return !isNew && resource.data.status == 'returned' || data.receipt.type == 'none'
+        return !isNew && resource.data.status in ['confirmed', 'returned'] || data.receipt.type == 'none'
           ? 'pending_approval'
           : 'confirmed';
       }

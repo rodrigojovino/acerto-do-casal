@@ -121,7 +121,7 @@
                   {{ expense.status === 'returned' ? 'Corrigir' : 'Editar' }}
                 </router-link>
               </div>
-              <p v-if="expense.status === 'confirmed' && expense.receipt.type === 'none'" class="hint">
+              <p v-if="expense.status === 'confirmed'" class="hint">
                 Editar este gasto faz ele voltar para a aprovação de {{ partnerFirstName }}.
               </p>
               <p v-else-if="expense.status === 'returned'" class="hint">A correção vai para a aprovação de {{ partnerFirstName }}.</p>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
+import { authorStatus } from './expenseData';
 import { canContest, debtView, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
@@ -114,5 +115,26 @@ describe('isAutoConfirmed e canContest', () => {
     expect(canContest(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), B)).toBe(false);
     expect(canContest(expense({ status: 'pending_approval' }), B)).toBe(false);
     expect(canContest(expense({ status: 'confirmed' }), A)).toBe(false);
+  });
+});
+
+describe('authorStatus (status que quem lança grava)', () => {
+  const none = { type: 'none' as const };
+  const photo = { type: 'photo' as const, replaced: true };
+
+  it('criação: sem comprovante pendente, com comprovante confirmado', () => {
+    expect(authorStatus(none)).toBe('pending_approval');
+    expect(authorStatus(photo)).toBe('confirmed');
+  });
+
+  it('editar um confirmado (automático ou aprovado) ou um devolvido vai para aprovação', () => {
+    expect(authorStatus(photo, 'confirmed')).toBe('pending_approval');
+    expect(authorStatus(none, 'confirmed')).toBe('pending_approval');
+    expect(authorStatus(photo, 'returned')).toBe('pending_approval');
+  });
+
+  it('pendente continua pendente; com comprovante anexado, confirma', () => {
+    expect(authorStatus(none, 'pending_approval')).toBe('pending_approval');
+    expect(authorStatus(photo, 'pending_approval')).toBe('confirmed');
   });
 });

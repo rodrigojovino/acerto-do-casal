@@ -8,10 +8,11 @@ import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
  * campo entram por parâmetro, o que permite aos testes de regras usar estas
  * mesmas funções.
  *
- * Status pelo comprovante: sem comprovante, `pending_approval`; com foto ou
- * QR, `confirmed` (o outro membro pode contestar até o fechamento do mês).
- * Correção de um devolvido (recusado ou contestado) sempre volta para
- * aprovação explícita. Quem lança nunca grava aprovação nem recusa.
+ * Só a criação com comprovante confirma automaticamente (o outro membro pode
+ * contestar até o fechamento do mês). Editar um confirmado (automático ou
+ * aprovado) ou um devolvido volta para aprovação explícita; editar um pendente
+ * o mantém pendente, exceto ao anexar comprovante, que o confirma. Quem lança
+ * nunca grava aprovação nem recusa.
  */
 
 /** O que o formulário informa. Competência, status e autoria são calculados à parte. */
@@ -96,10 +97,13 @@ function fields(input: ExpenseInput, competence: Competence) {
   };
 }
 
-/** Status que quem lança grava (as regras exigem exatamente este). */
+/**
+ * Status que quem lança grava (as regras exigem exatamente este).
+ * `currentStatus` ausente = criação.
+ */
 export function authorStatus(receipt: ReceiptChoice, currentStatus?: ExpenseStatus): 'pending_approval' | 'confirmed' {
-  if (currentStatus === 'returned' || receipt.type === 'none') return 'pending_approval';
-  return 'confirmed';
+  if (currentStatus === 'confirmed' || currentStatus === 'returned') return 'pending_approval';
+  return receipt.type === 'none' ? 'pending_approval' : 'confirmed';
 }
 
 /** Gasto novo: pendente sem comprovante; confirmado com foto ou QR. */
@@ -115,8 +119,9 @@ export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: 
 }
 
 /**
- * Edição de quem lançou: status pelo comprovante (devolvido corrigido vai para
- * aprovação) e descarta aprovação ou recusa anteriores.
+ * Edição de quem lançou: confirmado ou devolvido vai para aprovação; pendente
+ * continua pendente, ou é confirmado ao receber comprovante. Descarta aprovação
+ * ou recusa anteriores.
  */
 export function expenseUpdateData<T, D>(
   input: ExpenseInput,

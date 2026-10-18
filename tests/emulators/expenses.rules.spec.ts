@@ -346,12 +346,41 @@ describe('status pelo comprovante (quem lança)', () => {
     await assertSucceeds(edit(A, 'a-qr', { receipt: { type: 'none' }, status: 'pending_approval', approval: removeField() }));
   });
 
-  it('editar o confirmado pela conferência antiga mantém confirmado e tira a aprovação "nfce"', async () => {
-    await assertSucceeds(edit(A, 'a-qr', { description: 'Mercado do mês', approval: removeField() }));
+  it('editar um confirmado pelo comprovante vai para aprovação, mesmo mantendo o comprovante', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-foto-ok')).set(
+        seeded({ receipt: { type: 'photo', photoPath: photoPath('a-foto-ok'), photoUploaded: true } }),
+      );
+    });
+    await assertFails(edit(A, 'a-foto-ok', { description: 'Mercado do mês' })); // continuaria confirmado
+    await assertSucceeds(edit(A, 'a-foto-ok', { description: 'Mercado do mês', status: 'pending_approval' }));
   });
 
-  it('editar mantendo uma aprovação é recusado', async () => {
-    await assertFails(edit(A, 'a-qr', { description: 'Outro nome' }));
+  it('editar um confirmado pela conferência antiga do QR vai para aprovação e tira a aprovação "nfce"', async () => {
+    await assertFails(edit(A, 'a-qr', { description: 'Mercado do mês', approval: removeField() }));
+    await assertSucceeds(edit(A, 'a-qr', { description: 'Mercado do mês', status: 'pending_approval', approval: removeField() }));
+  });
+
+  it('editar um gasto aprovado manualmente vai para aprovação e tira a aprovação', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-aprovado')).set(seeded({ status: 'confirmed', approval: { byUid: B, at: new Date() } }));
+    });
+    await assertFails(edit(A, 'a-aprovado', { description: 'Outro nome' })); // mantém a aprovação
+    await assertFails(edit(A, 'a-aprovado', { description: 'Outro nome', approval: removeField() })); // continuaria confirmado
+    await assertSucceeds(edit(A, 'a-aprovado', { description: 'Outro nome', status: 'pending_approval', approval: removeField() }));
+  });
+
+  it('anexar comprovante a um aprovado não o mantém confirmado', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-aprovado')).set(seeded({ status: 'confirmed', approval: { byUid: B, at: new Date() } }));
+    });
+    await assertFails(edit(A, 'a-aprovado', { receipt: nfcePending, approval: removeField() }));
+    await assertSucceeds(edit(A, 'a-aprovado', { receipt: nfcePending, status: 'pending_approval', approval: removeField() }));
+  });
+
+  it('editar um pendente sem comprovante o mantém pendente', async () => {
+    await assertSucceeds(edit(A, 'a-atual', { description: 'Mercado do mês' }));
+    await assertFails(edit(A, 'a-atual', { description: 'Mercado', status: 'confirmed' }));
   });
 
   it('não aprova, recusa nem contesta o próprio gasto', async () => {
@@ -590,12 +619,20 @@ describe('documentos montados pelo app', () => {
     await assertSucceeds(reject(B, 'a-atual'));
     await assertSucceeds(db(A).doc(path('a-atual')).update(update('returned')));
 
+    // Confirmado editado (mesmo QR): o app grava pendente, e as regras aceitam.
     const keepQr = { ...input, totalCents: 20000, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
-    await assertSucceeds(
-      db(A).doc(path('a-qr')).update(
-        expenseUpdateData(keepQr, CURRENT, ids('a-qr'), { receipt: nfceOk as never, status: 'confirmed' }, serverTime(), removeField()),
-      ),
-    );
+    const qrUpdate = expenseUpdateData(keepQr, CURRENT, ids('a-qr'), { receipt: nfceOk as never, status: 'confirmed' }, serverTime(), removeField());
+    if (qrUpdate.status !== 'pending_approval') throw new Error('o app manteria confirmado um gasto editado');
+    await assertSucceeds(db(A).doc(path('a-qr')).update(qrUpdate));
+
+    // Pendente que recebe comprovante: o app grava confirmado, e as regras aceitam.
+    const withPhoto = { ...input, receipt: { type: 'photo' as const, replaced: true } };
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-anexar')).set(seeded());
+    });
+    const attach = expenseUpdateData(withPhoto, CURRENT, ids('a-anexar'), { receipt: { type: 'none' }, status: 'pending_approval' }, serverTime(), removeField());
+    if (attach.status !== 'confirmed') throw new Error('anexar comprovante a um pendente deveria confirmar');
+    await assertSucceeds(db(A).doc(path('a-anexar')).update(attach));
   });
 
   it('contestação do app passa nas regras e exige motivo', async () => {
