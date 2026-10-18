@@ -1,4 +1,6 @@
 import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestEnv } from './setup';
 
@@ -10,6 +12,8 @@ const A = 'uid-a';
 const B = 'uid-b';
 const GROUP = 'group-1';
 const KEY = '3'.repeat(44);
+// URL fictícia no formato da SEFAZ-SP (as regras exigem esse domínio na edição pelo app).
+const SP_URL = `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${KEY}|2|1|1|${'A'.repeat(40)}`;
 const path = (id: string) => `groups/${GROUP}/expenses/${id}`;
 
 let env: RulesTestEnvironment;
@@ -110,5 +114,38 @@ describe('checkNfce', () => {
     await write('fechado', nfceExpense({ nfceStatus: 'ok', nfceData: okData(5548) }));
     await new Promise((r) => setTimeout(r, 3000));
     expect((await read('fechado'))?.status).toBe('pending_approval');
+  });
+
+  it('editar um gasto confirmado pelo QR volta a pendente e o gatilho confere de novo', async () => {
+    await write('editado', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }));
+    await waitFor('editado', (x) => x.status === 'confirmed');
+
+    // Edição de quem lançou, pelas regras (como o app): só a descrição muda.
+    const db = env.authenticatedContext(A).firestore();
+    await db.doc(path('editado')).update({
+      description: 'Mercado do mês',
+      status: 'pending_approval',
+      approval: firebase.firestore.FieldValue.delete(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    const d = await waitFor('editado', (x) => x.status === 'confirmed' && x.description === 'Mercado do mês');
+    expect(d?.status).toBe('confirmed');
+    expect((d?.approval as { byUid: string }).byUid).toBe('nfce');
+  });
+
+  it('editar o valor de um gasto confirmado pelo QR deixa pendente (diverge da nota)', async () => {
+    await write('valor', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }));
+    await waitFor('valor', (x) => x.status === 'confirmed');
+    const db = env.authenticatedContext(A).firestore();
+    await db.doc(path('valor')).update({
+      totalCents: 6000,
+      status: 'pending_approval',
+      approval: firebase.firestore.FieldValue.delete(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await new Promise((r) => setTimeout(r, 3000));
+    const d = await read('valor');
+    expect(d?.status).toBe('pending_approval');
+    expect(d?.approval).toBeUndefined();
   });
 });

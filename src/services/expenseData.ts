@@ -119,3 +119,25 @@ export function expenseUpdateData<T, D>(
     updatedAt: now,
   };
 }
+
+/** Limite do motivo de recusa (o mesmo das regras). */
+export const MAX_REJECTION_REASON = 200;
+
+/** Aprovação pelo outro membro: confirma o gasto. Só vale para gasto pendente. */
+export function approvalData<T>(uid: string, now: T) {
+  return {
+    status: 'confirmed' as const,
+    approval: { byUid: uid, at: now },
+    updatedAt: now,
+  };
+}
+
+/** Recusa pelo outro membro: devolve o gasto para correção, com motivo opcional. */
+export function rejectionData<T>(uid: string, reason: string | undefined, now: T) {
+  const trimmed = reason?.trim().slice(0, MAX_REJECTION_REASON);
+  return {
+    status: 'returned' as const,
+    rejection: { byUid: uid, at: now, ...(trimmed ? { reason: trimmed } : {}) },
+    updatedAt: now,
+  };
+}

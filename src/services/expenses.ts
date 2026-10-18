@@ -17,7 +17,14 @@ import { resolveCompetence, type IsoDate } from '@/domain/calendar';
 import type { Competence, ExpenseStatus, SettlementExpense } from '@/domain/settlement';
 import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { receiptPhotoPath } from '@/domain/image';
-import { expenseUpdateData, newExpenseData, type ExpenseInput, type StoredReceipt } from './expenseData';
+import {
+  approvalData,
+  expenseUpdateData,
+  newExpenseData,
+  rejectionData,
+  type ExpenseInput,
+  type StoredReceipt,
+} from './expenseData';
 import { db, storage } from './firebase';
 import { discardQueuedPhoto, queuePhoto } from './photoQueue';
 import { trackWrite } from './sync';
@@ -196,4 +203,20 @@ export async function deleteExpense(groupId: string, expense: Pick<Expense, 'id'
     await Promise.race([photo, timeout]);
   }
   trackWrite(deleteDoc(doc(expensesCol(groupId), expense.id)), 'Não foi possível excluir o gasto.');
+}
+
+/** Aprovação pelo outro membro. Funciona offline (sincroniza depois). */
+export function approveExpense(groupId: string, id: string, uid: string): void {
+  trackWrite(
+    updateDoc(doc(expensesCol(groupId), id), approvalData(uid, serverTimestamp())),
+    'Não foi possível aprovar o gasto.',
+  );
+}
+
+/** Recusa pelo outro membro, com motivo opcional. Funciona offline. */
+export function rejectExpense(groupId: string, id: string, uid: string, reason?: string): void {
+  trackWrite(
+    updateDoc(doc(expensesCol(groupId), id), rejectionData(uid, reason, serverTimestamp())),
+    'Não foi possível recusar o gasto.',
+  );
 }

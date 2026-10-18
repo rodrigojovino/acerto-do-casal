@@ -82,7 +82,33 @@ service cloud.firestore {
               || (data.competence > dateMonth && isClosed(dateMonth)));
       }
 
-      function validExpense(data) {
+      function photoPath(expenseId) {
+        return 'groups/' + groupId + '/receipts/' + expenseId + '.jpg';
+      }
+
+      // Comprovante gravado pelo app. `isNew`: criação (foto ainda não enviada).
+      // QR: o app só grava 'pending' e nunca os dados da nota; só a Function
+      // grava 'ok'/'failed' e nfceData. Na edição, o QR pode ser mantido como
+      // está (inclusive já conferido) ou trocado/reconsultado como 'pending'.
+      function validReceipt(r, expenseId, isNew) {
+        return r.type == 'none' && r.keys().hasOnly(['type'])
+          || r.type == 'photo'
+            && r.keys().hasOnly(['type', 'photoPath', 'photoUploaded'])
+            && r.photoPath == photoPath(expenseId)
+            && r.photoUploaded is bool
+            && (!isNew || r.photoUploaded == false)
+          || r.type == 'nfce'
+            && r.keys().hasOnly(['type', 'nfceKey', 'nfceUrl', 'nfceStatus', 'nfceData', 'nfceError'])
+            && r.nfceKey is string && r.nfceKey.matches('^[0-9]{44}$')
+            && r.nfceUrl is string && r.nfceUrl.size() <= 600
+            && r.nfceUrl.matches('^https://www[.]nfce[.]fazenda[.]sp[.]gov[.]br/.*')
+            && (
+              r.nfceStatus == 'pending' && !r.keys().hasAny(['nfceData', 'nfceError'])
+              || !isNew && r == resource.data.receipt
+            );
+      }
+
+      function validExpense(data, expenseId, isNew) {
         return data.description is string
           && data.description.trim().size() >= 1
           && data.description.size() <= 80
@@ -100,8 +126,8 @@ service cloud.firestore {
           && withinLimit(data.date)
           && data.competence is string
           && data.competence.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
-          // Comprovante chega na Fase 4: por enquanto só "sem comprovante".
-          && data.receipt == { 'type': 'none' }
+          && data.receipt is map
+          && validReceipt(data.receipt, expenseId, isNew)
           && validCompetence(data);
       }
 
@@ -110,33 +136,80 @@ service cloud.firestore {
                 'date', 'competence', 'receipt', 'status', 'createdBy', 'createdAt', 'updatedAt'];
       }
 
+      // ---- Quem lança (autor) ----
+      // Nunca grava `confirmed` nem aprovação/recusa: só a aprovação do outro
+      // membro ou a Function (QR conferido) confirmam.
+      function isAuthorWrite() {
+        return request.resource.data.keys().hasOnly(expenseKeys())
+          && request.resource.data.keys().hasAll(expenseKeys())
+          && request.resource.data.status == 'pending_approval'
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      // Marca de foto enviada (fila de fotos): só vira photoUploaded para true,
+      // sem tocar em mais nada, inclusive o status (vale para devolvido também).
+      function isPhotoUploadedMark() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receipt', 'updatedAt'])
+          && resource.data.receipt.type == 'photo'
+          && request.resource.data.receipt.diff(resource.data.receipt).affectedKeys().hasOnly(['photoUploaded'])
+          && request.resource.data.receipt.photoUploaded == true
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      // ---- Quem aprova ou recusa (o outro membro) ----
+      // Mexe só em status, approval/rejection e updatedAt, e só em gasto pendente.
+      function isReviewWrite() {
+        return resource.data.createdBy != request.auth.uid
+          && resource.data.status == 'pending_approval'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'approval', 'rejection', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && (isApproval() || isRejection());
+      }
+
+      // Aprovar: foto só depois de enviada.
+      function isApproval() {
+        return request.resource.data.status == 'confirmed'
+          && request.resource.data.approval == { 'byUid': request.auth.uid, 'at': request.time }
+          && !request.resource.data.keys().hasAny(['rejection'])
+          && (resource.data.receipt.type != 'photo' || resource.data.receipt.photoUploaded == true);
+      }
+
+      // Recusar: motivo opcional, até 200 caracteres.
+      function isRejection() {
+        let r = request.resource.data.rejection;
+        return request.resource.data.status == 'returned'
+          && !request.resource.data.keys().hasAny(['approval'])
+          && r.keys().hasAll(['byUid', 'at'])
+          && r.keys().hasOnly(['byUid', 'at', 'reason'])
+          && r.byUid == request.auth.uid
+          && r.at == request.time
+          && (!r.keys().hasAny(['reason']) || r.reason is string && r.reason.size() <= 200);
+      }
+
       match /expenses/{expenseId} {
         allow read: if isMember(groupId);
 
-        // Sem comprovante, o gasto nasce pendente de aprovação.
+        // Todo gasto nasce pendente de aprovação, com qualquer comprovante.
         allow create: if isMember(groupId)
-          && request.resource.data.keys().hasOnly(expenseKeys())
-          && request.resource.data.keys().hasAll(expenseKeys())
+          && isAuthorWrite()
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt == request.time
-          && request.resource.data.updatedAt == request.time
-          && request.resource.data.status == 'pending_approval'
-          && validExpense(request.resource.data);
+          && validExpense(request.resource.data, expenseId, true);
 
-        // Só quem lançou edita, e nunca em mês fechado (nem de origem nem de destino).
-        // O status não muda pela edição, exceto devolvido → pendente (corrigido).
+        // Autor: edita (volta a pendente, descarta aprovação/recusa).
+        // Outro membro: aprova ou recusa. Nunca em mês fechado.
         allow update: if isMember(groupId)
-          && resource.data.createdBy == request.auth.uid
           && !isClosed(resource.data.competence)
-          && request.resource.data.keys().hasOnly(expenseKeys())
-          && request.resource.data.keys().hasAll(expenseKeys())
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.createdAt == resource.data.createdAt
-          && request.resource.data.updatedAt == request.time
-          && (request.resource.data.status == resource.data.status
-              || (resource.data.status == 'returned'
-                  && request.resource.data.status == 'pending_approval'))
-          && validExpense(request.resource.data);
+          && (
+            resource.data.createdBy == request.auth.uid
+              && isAuthorWrite()
+              && request.resource.data.createdBy == resource.data.createdBy
+              && request.resource.data.createdAt == resource.data.createdAt
+              && validExpense(request.resource.data, expenseId, false)
+            || resource.data.createdBy == request.auth.uid && isPhotoUploadedMark()
+            || isReviewWrite()
+          );
 
         allow delete: if isMember(groupId)
           && resource.data.createdBy == request.auth.uid

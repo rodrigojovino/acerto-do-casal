@@ -6,7 +6,13 @@ import {
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
-import { expenseUpdateData, newExpenseData, type ExpenseInput } from '../../src/services/expenseData';
+import {
+  approvalData,
+  expenseUpdateData,
+  newExpenseData,
+  rejectionData,
+  type ExpenseInput,
+} from '../../src/services/expenseData';
 import { createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
@@ -27,7 +33,21 @@ const TOO_FAR = month(2);
 const CLOSED = month(-2);
 const OPEN_PAST = month(-1);
 
+// Chave e URL fictícias (nenhuma nota real).
+const NFCE_KEY = '3'.repeat(44);
+const NFCE_URL = `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${NFCE_KEY}|2|1|1|${'A'.repeat(40)}`;
+
 const serverTime = () => firebase.firestore.FieldValue.serverTimestamp();
+const removeField = () => firebase.firestore.FieldValue.delete();
+const photoPath = (id: string) => `groups/${GROUP}/receipts/${id}.jpg`;
+const nfcePending = { type: 'nfce', nfceKey: NFCE_KEY, nfceUrl: NFCE_URL, nfceStatus: 'pending' };
+const nfceOk = {
+  type: 'nfce',
+  nfceKey: NFCE_KEY,
+  nfceUrl: NFCE_URL,
+  nfceStatus: 'ok',
+  nfceData: { issuerName: 'LOJA TESTE LTDA', totalCents: 20000, date: `${CURRENT}-05` },
+};
 
 function expense(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -45,6 +65,11 @@ function expense(overrides: Record<string, unknown> = {}): Record<string, unknow
     updatedAt: serverTime(),
     ...overrides,
   };
+}
+
+/** Versão já gravada (sem marcadores de horário do servidor), para semear. */
+function seeded(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return expense({ createdAt: new Date(), updatedAt: new Date(), ...overrides });
 }
 
 let env: RulesTestEnvironment;
@@ -69,19 +94,36 @@ beforeEach(async () => {
       defaultSplitPct: 50,
     });
     await db.doc(`groups/${GROUP}/months/${CLOSED}`).set({ status: 'closed' });
-    // Gasto de A no mês atual e gasto de A num mês fechado.
-    await db.doc(path('a-atual')).set(expense({ createdAt: new Date(), updatedAt: new Date() }));
-    await db
-      .doc(path('a-fechado'))
-      .set(expense({ date: `${CLOSED}-10`, competence: CLOSED, createdAt: new Date(), updatedAt: new Date() }));
+    await db.doc(path('a-atual')).set(seeded());
+    await db.doc(path('a-fechado')).set(seeded({ date: `${CLOSED}-10`, competence: CLOSED }));
+    // Gastos lançados por B, para A revisar.
+    await db.doc(path('b-sem')).set(seeded({ createdBy: B, payerUid: B }));
+    await db.doc(path('b-foto')).set(
+      seeded({ createdBy: B, payerUid: B, receipt: { type: 'photo', photoPath: photoPath('b-foto'), photoUploaded: false } }),
+    );
+    await db.doc(path('b-foto-ok')).set(
+      seeded({ createdBy: B, payerUid: B, receipt: { type: 'photo', photoPath: photoPath('b-foto-ok'), photoUploaded: true } }),
+    );
+    await db.doc(path('b-fechado')).set(seeded({ createdBy: B, payerUid: B, date: `${CLOSED}-10`, competence: CLOSED }));
+    // Gasto de A confirmado pela conferência do QR (gravado pela Function).
+    await db.doc(path('a-qr')).set(seeded({ receipt: nfceOk, status: 'confirmed', approval: { byUid: 'nfce', at: new Date() } }));
   });
 });
 
 const db = (uid: string) => env.authenticatedContext(uid).firestore();
 
-/** Edição como o app faz: todos os campos, updatedAt do servidor. */
+/** Edição parcial como o app faz: updatedAt do servidor. */
 function edit(uid: string, id: string, changes: Record<string, unknown>) {
   return db(uid).doc(path(id)).update({ ...changes, updatedAt: serverTime() });
+}
+
+/** Aprovação e recusa exatamente como o app grava (approvalData/rejectionData). */
+function approve(uid: string, id: string, byUid = uid) {
+  return db(uid).doc(path(id)).update(approvalData(byUid, serverTime()));
+}
+
+function reject(uid: string, id: string, reason?: string) {
+  return db(uid).doc(path(id)).update(rejectionData(uid, reason, serverTime()));
 }
 
 describe('leitura', () => {
@@ -146,15 +188,10 @@ describe('criação', () => {
   });
 
   it('recusa campo extra ou faltando', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ approvedBy: A })));
+    await assertFails(db(A).doc(path('x')).set(expense({ extra: true })));
     const missing = expense();
     delete missing.personalCents;
     await assertFails(db(A).doc(path('x')).set(missing));
-  });
-
-  it('não pula a aprovação: nasce pendente e sem comprovante', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ status: 'confirmed' })));
-    await assertFails(db(A).doc(path('x')).set(expense({ receipt: { type: 'photo', photoPath: 'x.jpg' } })));
   });
 
   it('exige horário do servidor', async () => {
@@ -184,18 +221,196 @@ describe('criação', () => {
   });
 });
 
+describe('comprovante na criação', () => {
+  it('foto: caminho do próprio gasto e ainda não enviada', async () => {
+    const photo = { type: 'photo', photoPath: photoPath('f1'), photoUploaded: false };
+    await assertSucceeds(db(A).doc(path('f1')).set(expense({ receipt: photo })));
+  });
+
+  it('foto: recusa caminho de outro gasto e "já enviada" na criação', async () => {
+    await assertFails(db(A).doc(path('f2')).set(expense({ receipt: { type: 'photo', photoPath: photoPath('outro'), photoUploaded: false } })));
+    await assertFails(db(A).doc(path('f3')).set(expense({ receipt: { type: 'photo', photoPath: photoPath('f3'), photoUploaded: true } })));
+  });
+
+  it('QR: só pendente e sem dados da nota', async () => {
+    await assertSucceeds(db(A).doc(path('q1')).set(expense({ receipt: nfcePending })));
+  });
+
+  it('QR: recusa forjar nfceStatus ok ou os dados da nota', async () => {
+    await assertFails(db(A).doc(path('q2')).set(expense({ receipt: nfceOk })));
+    await assertFails(db(A).doc(path('q3')).set(expense({ receipt: { ...nfcePending, nfceStatus: 'ok' } })));
+    await assertFails(db(A).doc(path('q4')).set(expense({ receipt: { ...nfcePending, nfceData: nfceOk.nfceData } })));
+  });
+
+  it('QR: recusa chave mal formada e URL fora da SEFAZ-SP', async () => {
+    await assertFails(db(A).doc(path('q5')).set(expense({ receipt: { ...nfcePending, nfceKey: '123' } })));
+    await assertFails(db(A).doc(path('q6')).set(expense({ receipt: { ...nfcePending, nfceUrl: 'https://evil.example.com/x' } })));
+  });
+
+  it('tipo desconhecido ou campos extras no comprovante são recusados', async () => {
+    await assertFails(db(A).doc(path('x')).set(expense({ receipt: { type: 'pix' } })));
+    await assertFails(db(A).doc(path('x')).set(expense({ receipt: { type: 'none', extra: 1 } })));
+  });
+});
+
+describe('quem lança nunca confirma', () => {
+  it('não cria já confirmado, com nenhum comprovante', async () => {
+    await assertFails(db(A).doc(path('x')).set(expense({ status: 'confirmed' })));
+    await assertFails(
+      db(A).doc(path('x')).set(expense({ status: 'confirmed', receipt: { type: 'photo', photoPath: photoPath('x'), photoUploaded: false } })),
+    );
+    await assertFails(db(A).doc(path('x')).set(expense({ status: 'confirmed', receipt: nfcePending })));
+  });
+
+  it('não cria com aprovação, nem a da conferência do QR', async () => {
+    await assertFails(db(A).doc(path('x')).set(expense({ approval: { byUid: A, at: serverTime() } })));
+    await assertFails(db(A).doc(path('x')).set(expense({ approval: { byUid: 'nfce', at: serverTime() } })));
+  });
+
+  it('não marca confirmed depois de anexar QR', async () => {
+    await assertFails(edit(A, 'a-atual', { receipt: nfcePending, status: 'confirmed' }));
+    await assertSucceeds(edit(A, 'a-atual', { receipt: nfcePending }));
+    await assertFails(edit(A, 'a-atual', { status: 'confirmed' }));
+    await assertFails(edit(A, 'a-atual', { status: 'confirmed', approval: { byUid: 'nfce', at: serverTime() } }));
+  });
+
+  it('não aprova o próprio gasto (nem como "nfce")', async () => {
+    await assertFails(approve(A, 'a-atual'));
+    await assertFails(approve(A, 'a-atual', 'nfce'));
+  });
+
+  it('não recusa o próprio gasto', async () => {
+    await assertFails(reject(A, 'a-atual'));
+  });
+
+  it('editar um gasto confirmado pelo QR volta a pendente e descarta a aprovação', async () => {
+    // Igual ao que o app grava: mesmo QR (conferência mantida), aprovação removida.
+    await assertSucceeds(
+      db(A).doc(path('a-qr')).update({
+        description: 'Mercado do mês',
+        status: 'pending_approval',
+        approval: removeField(),
+        updatedAt: serverTime(),
+      }),
+    );
+  });
+
+  it('editar um confirmado sem voltar a pendente é recusado', async () => {
+    await assertFails(edit(A, 'a-qr', { description: 'Outro nome' }));
+    await assertFails(edit(A, 'a-qr', { description: 'Outro nome', status: 'pending_approval' }));
+  });
+
+  it('não forja a conferência do QR numa edição', async () => {
+    await assertFails(edit(A, 'a-atual', { receipt: nfceOk }));
+    await assertFails(edit(A, 'a-atual', { receipt: { ...nfcePending, nfceStatus: 'failed' } }));
+  });
+});
+
+describe('aprovação e recusa pelo outro membro', () => {
+  it('aprova gasto sem comprovante', async () => {
+    await assertSucceeds(approve(A, 'b-sem'));
+  });
+
+  it('aprovar com foto ainda não enviada é recusado', async () => {
+    await assertFails(approve(A, 'b-foto'));
+    await assertSucceeds(approve(A, 'b-foto-ok'));
+  });
+
+  it('aprovação em nome de outro ou como "nfce" é recusada', async () => {
+    await assertFails(approve(A, 'b-sem', B));
+    await assertFails(approve(A, 'b-sem', 'nfce'));
+  });
+
+  it('aprovação sem horário do servidor é recusada', async () => {
+    await assertFails(
+      db(A).doc(path('b-sem')).update({ status: 'confirmed', approval: { byUid: A, at: new Date() }, updatedAt: serverTime() }),
+    );
+  });
+
+  it('recusa com e sem motivo', async () => {
+    await assertSucceeds(reject(A, 'b-sem', 'Anexe a nota, por favor'));
+    await assertSucceeds(reject(A, 'b-foto'));
+  });
+
+  it('motivo longo demais é recusado (o app corta em 200)', async () => {
+    const long = { status: 'returned', rejection: { byUid: A, at: serverTime(), reason: 'x'.repeat(201) }, updatedAt: serverTime() };
+    await assertFails(db(A).doc(path('b-sem')).update(long));
+    await assertSucceeds(reject(A, 'b-sem', 'x'.repeat(250)));
+  });
+
+  it('quem aprova não altera valores nem o comprovante', async () => {
+    const base = { status: 'confirmed', approval: { byUid: A, at: serverTime() }, updatedAt: serverTime() };
+    await assertFails(db(A).doc(path('b-sem')).update({ ...base, totalCents: 1 }));
+    await assertFails(db(A).doc(path('b-sem')).update({ ...base, payerSharePct: 0 }));
+    await assertFails(db(A).doc(path('b-foto')).update({ ...base, 'receipt.photoUploaded': true }));
+    await assertFails(db(A).doc(path('b-sem')).update({ ...base, receipt: nfceOk }));
+  });
+
+  it('quem revisa não edita nem exclui o gasto do outro', async () => {
+    await assertFails(edit(A, 'b-sem', { description: 'Outro' }));
+    await assertFails(db(A).doc(path('b-sem')).delete());
+  });
+
+  it('não aprova o que não está pendente', async () => {
+    await assertSucceeds(reject(A, 'b-sem'));
+    await assertFails(approve(A, 'b-sem')); // devolvido
+    await assertSucceeds(approve(A, 'b-foto-ok'));
+    await assertFails(reject(A, 'b-foto-ok')); // já confirmado
+  });
+
+  it('terceiro não aprova nem recusa', async () => {
+    await assertFails(approve(C, 'b-sem'));
+    await assertFails(reject(C, 'b-sem'));
+  });
+
+  it('nada muda em mês fechado', async () => {
+    await assertFails(approve(A, 'b-fechado'));
+    await assertFails(reject(A, 'b-fechado'));
+  });
+});
+
+describe('devolvido e correção', () => {
+  it('quem lançou corrige o devolvido: volta a pendente e a recusa sai', async () => {
+    await assertSucceeds(reject(B, 'a-atual', 'Valor errado'));
+    await assertSucceeds(
+      db(A).doc(path('a-atual')).update({
+        totalCents: 19000,
+        status: 'pending_approval',
+        rejection: removeField(),
+        updatedAt: serverTime(),
+      }),
+    );
+  });
+
+  it('não corrige mantendo a recusa nem pula para confirmado', async () => {
+    await assertSucceeds(reject(B, 'a-atual'));
+    await assertFails(edit(A, 'a-atual', { totalCents: 19000, status: 'pending_approval' }));
+    await assertFails(edit(A, 'a-atual', { status: 'confirmed', rejection: removeField() }));
+  });
+
+  it('a fila de fotos marca photoUploaded mesmo com o gasto devolvido, sem mexer em mais nada', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('a-foto')).set(
+        seeded({
+          receipt: { type: 'photo', photoPath: photoPath('a-foto'), photoUploaded: false },
+          status: 'returned',
+          rejection: { byUid: B, at: new Date() },
+        }),
+      );
+    });
+    await assertSucceeds(edit(A, 'a-foto', { 'receipt.photoUploaded': true }));
+    await assertFails(edit(A, 'a-foto', { 'receipt.photoUploaded': false }));
+    await assertFails(edit(A, 'a-foto', { 'receipt.photoUploaded': true, status: 'confirmed' }));
+    await assertFails(edit(B, 'a-foto', { 'receipt.photoUploaded': true }));
+  });
+});
+
 describe('edição', () => {
   it('quem lançou edita', async () => {
     await assertSucceeds(edit(A, 'a-atual', { totalCents: 25000, description: 'Mercado do mês' }));
   });
 
-  it('o outro membro e terceiros não editam', async () => {
-    await assertFails(edit(B, 'a-atual', { totalCents: 1 }));
-    await assertFails(edit(C, 'a-atual', { totalCents: 1 }));
-  });
-
-  it('não aprova o próprio gasto nem troca o autor', async () => {
-    await assertFails(edit(A, 'a-atual', { status: 'confirmed' }));
+  it('não troca o autor nem a data de criação', async () => {
     await assertFails(edit(A, 'a-atual', { createdBy: B }));
     await assertFails(edit(A, 'a-atual', { createdAt: new Date() }));
   });
@@ -204,13 +419,6 @@ describe('edição', () => {
     await assertFails(edit(A, 'a-atual', { personalCents: 30000 }));
     await assertFails(edit(A, 'a-atual', { payerUid: C }));
     await assertFails(edit(A, 'a-atual', { extra: true }));
-  });
-
-  it('gasto devolvido volta a pendente ao ser corrigido', async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(path('a-atual')).update({ status: 'returned' });
-    });
-    await assertSucceeds(edit(A, 'a-atual', { status: 'pending_approval', totalCents: 19000 }));
   });
 
   it('gasto de mês fechado é imutável', async () => {
@@ -248,21 +456,26 @@ describe('documentos montados pelo app', () => {
     date: `${CURRENT}-14`,
     receipt: { type: 'none' },
   };
-  const removeField = () => firebase.firestore.FieldValue.delete();
+  const ids = (expenseId: string) => ({ groupId: GROUP, expenseId });
 
-  it('o gasto novo do app passa nas regras', async () => {
-    const ids = { groupId: GROUP, expenseId: 'app-1' };
-    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, ids, serverTime())));
+  it('gasto novo do app passa nas regras, com cada comprovante', async () => {
+    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, ids('app-1'), serverTime())));
+    const photo = { ...input, receipt: { type: 'photo' as const, replaced: true } };
+    await assertSucceeds(db(A).doc(path('app-2')).set(newExpenseData(photo, A, CURRENT, ids('app-2'), serverTime())));
+    const qr = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
+    await assertSucceeds(db(A).doc(path('app-3')).set(newExpenseData(qr, A, CURRENT, ids('app-3'), serverTime())));
   });
 
-  it('a edição do app passa nas regras, inclusive devolvido corrigido', async () => {
+  it('edição do app passa nas regras, inclusive devolvido corrigido e confirmado pelo QR', async () => {
     const changed = { ...input, totalCents: 9000 };
-    const ids = { groupId: GROUP, expenseId: 'a-atual' };
-    const update = () => expenseUpdateData(changed, CURRENT, ids, { type: 'none' }, serverTime(), removeField());
+    const update = () => expenseUpdateData(changed, CURRENT, ids('a-atual'), { type: 'none' }, serverTime(), removeField());
     await assertSucceeds(db(A).doc(path('a-atual')).update(update()));
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(path('a-atual')).update({ status: 'returned' });
-    });
+    await assertSucceeds(reject(B, 'a-atual'));
     await assertSucceeds(db(A).doc(path('a-atual')).update(update()));
+
+    const keepQr = { ...input, totalCents: 20000, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
+    await assertSucceeds(
+      db(A).doc(path('a-qr')).update(expenseUpdateData(keepQr, CURRENT, ids('a-qr'), nfceOk as never, serverTime(), removeField())),
+    );
   });
 });
