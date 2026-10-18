@@ -277,6 +277,8 @@ function save(): void {
     payerUid: payerUid.value,
     payerSharePct: payerSharePct.value,
     date: date.value,
+    // Seção de comprovante chega com as telas da Fase 4; por ora mantém o que o gasto já tem.
+    receipt: editing?.receipt.type === 'photo' ? { type: 'photo' as const, replaced: false } : { type: 'none' as const },
   };
   // Não espera o servidor: offline, a gravação sincroniza depois.
   const result = editing

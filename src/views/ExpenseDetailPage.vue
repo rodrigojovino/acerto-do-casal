@@ -207,7 +207,7 @@ async function confirmDelete(): Promise<void> {
   const { role } = await alert.onDidDismiss();
   if (role !== 'destructive') return;
   // Não espera o servidor: offline, a exclusão sincroniza depois.
-  deleteExpense(group.value.id, e.id);
+  await deleteExpense(group.value.id, e);
   router.replace({ name: 'painel', query: { mes: e.competence } });
 }
 

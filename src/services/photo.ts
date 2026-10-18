@@ -1,0 +1,58 @@
+import { Camera } from '@capacitor/camera';
+import { compressToLimit, type CompressedImage, type JpegEncoder } from '@/domain/image';
+
+/** Erro de foto com mensagem pronta para exibir. */
+export class PhotoError extends Error {}
+
+export type PhotoSource = 'camera' | 'gallery';
+
+/**
+ * Tira ou escolhe a foto do comprovante e comprime no aparelho (JPEG < 500 KB).
+ * Retorna `null` se a pessoa cancelar.
+ */
+export async function pickReceiptPhoto(source: PhotoSource): Promise<CompressedImage | null> {
+  let webPath: string | undefined;
+  try {
+    if (source === 'camera') {
+      const result = await Camera.takePhoto({ quality: 90, correctOrientation: true, webUseInput: true });
+      webPath = result.webPath;
+    } else {
+      const { results } = await Camera.chooseFromGallery({ limit: 1, quality: 90, correctOrientation: true, webUseInput: true });
+      webPath = results[0]?.webPath;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message.toLowerCase() : '';
+    if (message.includes('cancel')) return null;
+    throw new PhotoError('Não foi possível abrir a câmera ou a galeria.');
+  }
+  if (!webPath) return null;
+
+  try {
+    const original = await (await fetch(webPath)).blob();
+    return await compressImage(original);
+  } catch {
+    throw new PhotoError('Não foi possível preparar a foto. Tente outra.');
+  }
+}
+
+/** Comprime uma imagem com canvas, respeitando a orientação EXIF. */
+export async function compressImage(original: Blob): Promise<CompressedImage> {
+  const bitmap = await createImageBitmap(original, { imageOrientation: 'from-image' });
+  try {
+    const canvas = document.createElement('canvas');
+    const encode: JpegEncoder = async (size, quality) => {
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvas indisponível');
+      ctx.drawImage(bitmap, 0, 0, size.width, size.height);
+      const data = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('falha ao gerar JPEG'))), 'image/jpeg', quality),
+      );
+      return { bytes: data.size, data };
+    };
+    return await compressToLimit({ width: bitmap.width, height: bitmap.height }, encode);
+  } finally {
+    bitmap.close();
+  }
+}

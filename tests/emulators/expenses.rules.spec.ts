@@ -246,22 +246,23 @@ describe('documentos montados pelo app', () => {
     payerUid: B,
     payerSharePct: 50,
     date: `${CURRENT}-14`,
+    receipt: { type: 'none' },
   };
+  const removeField = () => firebase.firestore.FieldValue.delete();
 
   it('o gasto novo do app passa nas regras', async () => {
-    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, serverTime())));
+    const ids = { groupId: GROUP, expenseId: 'app-1' };
+    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, ids, serverTime())));
   });
 
   it('a edição do app passa nas regras, inclusive devolvido corrigido', async () => {
     const changed = { ...input, totalCents: 9000 };
-    await assertSucceeds(
-      db(A).doc(path('a-atual')).update(expenseUpdateData(changed, 'pending_approval', CURRENT, serverTime())),
-    );
+    const ids = { groupId: GROUP, expenseId: 'a-atual' };
+    const update = () => expenseUpdateData(changed, CURRENT, ids, { type: 'none' }, serverTime(), removeField());
+    await assertSucceeds(db(A).doc(path('a-atual')).update(update()));
     await env.withSecurityRulesDisabled(async (ctx) => {
       await ctx.firestore().doc(path('a-atual')).update({ status: 'returned' });
     });
-    await assertSucceeds(
-      db(A).doc(path('a-atual')).update(expenseUpdateData(changed, 'returned', CURRENT, serverTime())),
-    );
+    await assertSucceeds(db(A).doc(path('a-atual')).update(update()));
   });
 });

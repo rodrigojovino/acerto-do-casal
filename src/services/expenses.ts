@@ -2,6 +2,7 @@ import {
   Timestamp,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   onSnapshot,
   query,
@@ -14,17 +15,26 @@ import {
 } from 'firebase/firestore';
 import { resolveCompetence, type IsoDate } from '@/domain/calendar';
 import type { Competence, ExpenseStatus, SettlementExpense } from '@/domain/settlement';
-import { expenseUpdateData, newExpenseData, type ExpenseInput } from './expenseData';
-import { db } from './firebase';
+import { deleteObject, ref as storageRef } from 'firebase/storage';
+import { receiptPhotoPath } from '@/domain/image';
+import { expenseUpdateData, newExpenseData, type ExpenseInput, type StoredReceipt } from './expenseData';
+import { db, storage } from './firebase';
+import { discardQueuedPhoto, queuePhoto } from './photoQueue';
 import { trackWrite } from './sync';
 
-export type { ExpenseInput } from './expenseData';
+export type { ExpenseInput, ReceiptChoice } from './expenseData';
 
-export interface Receipt {
-  type: 'photo' | 'nfce' | 'none';
-  photoPath?: string;
-  nfceKey?: string;
-  nfceStatus?: 'pending' | 'ok' | 'failed';
+export type Receipt = StoredReceipt;
+
+export interface Approval {
+  byUid: string;
+  at: Date | null;
+}
+
+export interface Rejection {
+  byUid: string;
+  reason?: string;
+  at: Date | null;
 }
 
 export interface Expense extends SettlementExpense {
@@ -36,6 +46,8 @@ export interface Expense extends SettlementExpense {
   createdBy: string;
   createdAt: Date | null;
   updatedAt: Date | null;
+  approval?: Approval;
+  rejection?: Rejection;
   /** Gravado no aparelho e ainda não confirmado pelo servidor. */
   pendingWrite: boolean;
 }
@@ -65,6 +77,10 @@ function toExpense(snap: DocumentSnapshot): Expense {
     createdBy: data.createdBy,
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
+    approval: data.approval ? { byUid: data.approval.byUid, at: toDate(data.approval.at) } : undefined,
+    rejection: data.rejection
+      ? { byUid: data.rejection.byUid, reason: data.rejection.reason, at: toDate(data.rejection.at) }
+      : undefined,
     pendingWrite: snap.metadata.hasPendingWrites,
   };
 }
@@ -123,7 +139,7 @@ export function watchExpense(
 /**
  * Lança um gasto. Sem transação e sem esperar o servidor: offline, a gravação
  * fica no cache e sincroniza depois. Se a regra recusar na sincronização,
- * `trackWrite` avisa.
+ * `trackWrite` avisa. A foto (se houver) vai para a fila e sobe quando der.
  */
 export function createExpense(
   groupId: string,
@@ -131,35 +147,53 @@ export function createExpense(
   uid: string,
   closedMonths: ReadonlySet<Competence>,
   today: IsoDate,
+  photo?: Blob,
 ): WriteResult {
   const ref = doc(expensesCol(groupId));
+  const ids = { groupId, expenseId: ref.id };
   const competence = resolveCompetence(input.date, closedMonths, today);
   trackWrite(
-    setDoc(ref, newExpenseData(input, uid, competence, serverTimestamp())),
+    setDoc(ref, newExpenseData(input, uid, competence, ids, serverTimestamp())),
     'Não foi possível salvar o gasto.',
   );
+  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, ref.id, photo);
   return { id: ref.id, competence };
 }
 
-/** Edita um gasto de quem lançou. Devolvido volta a pendente ao ser corrigido. */
+/** Edita um gasto de quem lançou. Volta a pendente e descarta aprovação ou recusa anteriores. */
 export function updateExpense(
   groupId: string,
-  current: Pick<Expense, 'id' | 'status'>,
+  current: Pick<Expense, 'id' | 'receipt'>,
   input: ExpenseInput,
   closedMonths: ReadonlySet<Competence>,
   today: IsoDate,
+  photo?: Blob,
 ): WriteResult {
+  const ids = { groupId, expenseId: current.id };
   const competence = resolveCompetence(input.date, closedMonths, today);
   trackWrite(
     updateDoc(
       doc(expensesCol(groupId), current.id),
-      expenseUpdateData(input, current.status, competence, serverTimestamp()),
+      expenseUpdateData(input, competence, ids, current.receipt, serverTimestamp(), deleteField()),
     ),
     'Não foi possível salvar a alteração.',
   );
+  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, current.id, photo);
+  else if (input.receipt.type !== 'photo') void discardQueuedPhoto(groupId, current.id);
   return { id: current.id, competence };
 }
 
-export function deleteExpense(groupId: string, id: string): void {
-  trackWrite(deleteDoc(doc(expensesCol(groupId), id)), 'Não foi possível excluir o gasto.');
+/**
+ * Exclui o gasto. Com foto enviada e conexão, apaga a foto antes do documento
+ * (a regra do Storage confere o autor no gasto). Offline, a foto fica órfã no
+ * Storage: é pequena e nunca é exibida sem o gasto.
+ */
+export async function deleteExpense(groupId: string, expense: Pick<Expense, 'id' | 'receipt'>): Promise<void> {
+  void discardQueuedPhoto(groupId, expense.id);
+  if (expense.receipt.type === 'photo' && expense.receipt.photoUploaded && navigator.onLine) {
+    const photo = deleteObject(storageRef(storage, receiptPhotoPath(groupId, expense.id))).catch(() => undefined);
+    const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
+    await Promise.race([photo, timeout]);
+  }
+  trackWrite(deleteDoc(doc(expensesCol(groupId), expense.id)), 'Não foi possível excluir o gasto.');
 }

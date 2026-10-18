@@ -1,21 +1,35 @@
 rules_version = '2';
 
-// Comprovantes: só membros do grupo, só JPEG (comprimido no aparelho), até 5 MB.
-// A lista de membros vem do Firestore.
+// Comprovantes: groups/{groupId}/receipts/{expenseId}.jpg
+// - membros do grupo leem;
+// - só quem lançou o gasto envia, troca ou apaga a foto, e só se o gasto
+//   tiver comprovante do tipo foto;
+// - só JPEG (comprimido no aparelho abaixo de 500 KB), até 1 MB.
+// Cada operação faz uma única leitura no Firestore.
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function isMember(groupId) {
-      return request.auth != null
-        && request.auth.uid in firestore.get(/databases/(default)/documents/groups/$(groupId)).data.members;
+    function groupDoc(groupId) {
+      return firestore.get(/databases/(default)/documents/groups/$(groupId));
+    }
+
+    function expenseDoc(groupId, fileName) {
+      return firestore.get(/databases/(default)/documents/groups/$(groupId)/expenses/$(fileName.split('[.]')[0]));
     }
 
     match /groups/{groupId}/receipts/{fileName} {
-      allow read, delete: if isMember(groupId);
-      allow create, update: if isMember(groupId)
+      allow read: if request.auth != null
+        && request.auth.uid in groupDoc(groupId).data.members;
+
+      allow create, update: if request.auth != null
         && fileName.matches('[A-Za-z0-9_-]{1,64}[.]jpg')
         && request.resource.contentType == 'image/jpeg'
-        && request.resource.size < 5 * 1024 * 1024;
+        && request.resource.size < 1024 * 1024
+        && expenseDoc(groupId, fileName).data.createdBy == request.auth.uid
+        && expenseDoc(groupId, fileName).data.receipt.type == 'photo';
+
+      allow delete: if request.auth != null
+        && expenseDoc(groupId, fileName).data.createdBy == request.auth.uid;
     }
   }
 }
