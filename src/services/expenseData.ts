@@ -28,12 +28,29 @@ export interface ExpenseInput {
 export type ReceiptChoice =
   | { type: 'none' }
   /** `replaced`: foto nova escolhida agora (precisa ser enviada de novo). */
-  | { type: 'photo'; replaced: boolean };
+  | { type: 'photo'; replaced: boolean }
+  /** QR Code da NFC-e lido no aparelho: a conferência é feita pela Function. */
+  | { type: 'nfce'; nfceKey: string; nfceUrl: string };
+
+export interface NfceData {
+  issuerName: string;
+  totalCents: Cents;
+  date: IsoDate;
+}
 
 /** Comprovante como fica gravado no gasto. */
 export type StoredReceipt =
   | { type: 'none' }
-  | { type: 'photo'; photoPath: string; photoUploaded: boolean };
+  | { type: 'photo'; photoPath: string; photoUploaded: boolean }
+  | {
+      type: 'nfce';
+      nfceKey: string;
+      nfceUrl: string;
+      /** Gravado como 'pending' pelo app; só a Function grava 'ok' ou 'failed'. */
+      nfceStatus: 'pending' | 'ok' | 'failed';
+      nfceData?: NfceData;
+      nfceError?: string;
+    };
 
 export interface ExpenseIds {
   groupId: string;
@@ -48,6 +65,11 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
       photoPath: receiptPhotoPath(ids.groupId, ids.expenseId),
       photoUploaded: keepUpload,
     };
+  }
+  if (choice.type === 'nfce') {
+    // Mesmo QR: mantém a conferência já feita. QR novo: a Function consulta de novo.
+    if (current?.type === 'nfce' && current.nfceKey === choice.nfceKey) return { ...current };
+    return { type: 'nfce', nfceKey: choice.nfceKey, nfceUrl: choice.nfceUrl, nfceStatus: 'pending' };
   }
   return { type: 'none' };
 }
