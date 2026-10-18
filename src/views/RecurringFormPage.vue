@@ -276,7 +276,9 @@ function splitText(terms: RecurringTerms): string {
 const approvedSummary = computed(() => {
   const c = current.value;
   if (!c) return '';
-  return `${termsAmountLabel(c).toLowerCase()}, ${firstNameOf(c.payerUid)} paga, divisão ${splitText(c)}`;
+  const amount = termsAmountLabel(c);
+  const payer = c.payerUid === myUid.value ? 'você' : firstNameOf(c.payerUid);
+  return `${amount[0].toLowerCase()}${amount.slice(1)}, ${payer} paga, divisão ${splitText(c)}`;
 });
 
 /** O que muda no reajuste (para o outro membro aprovar). */

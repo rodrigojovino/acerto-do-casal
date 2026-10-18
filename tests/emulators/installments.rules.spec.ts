@@ -160,6 +160,16 @@ describe('lançar a série', () => {
     await assertFails(createBatch(A, [mine[4]])); // parcela 1 existe, mas é de B
   });
 
+  it('valor de cada parcela tem de bater com o total da compra (resto na primeira)', async () => {
+    const parcels = series({ totalCents: 100005 }, 10);
+    const withTotal = (i: number, totalCents: number) => ({ ...parcels[i], data: { ...parcels[i].data, totalCents } });
+    await assertFails(createBatch(A, [withTotal(0, 10000), ...parcels.slice(1)])); // resto fora da primeira
+    await assertFails(createBatch(A, [parcels[0], withTotal(1, 10005), ...parcels.slice(2)]));
+    const otherPurchase = parcels.map((p) => ({ ...p, data: { ...p.data, installment: { ...p.data.installment, purchaseCents: 200000 } } }));
+    await assertFails(createBatch(A, otherPurchase));
+    await assertSucceeds(createBatch(A, parcels));
+  });
+
   it('id, competência e limites da série são conferidos', async () => {
     const parcels = series({}, 10);
     const tamper = (i: number, patch: Record<string, unknown>, id = parcels[i].id) => [

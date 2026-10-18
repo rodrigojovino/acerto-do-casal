@@ -26,11 +26,15 @@
             <span v-if="statusText" class="hint">{{ statusText }}</span>
             <h2>{{ expense.description }}</h2>
             <p class="value num">{{ expense.status === 'awaiting_confirmation' ? 'Valor a confirmar' : formatBRL(expense.totalCents) }}</p>
+            <p v-if="expense.installment" class="hint big">
+              parcela {{ expense.installment.index }} de {{ expense.installment.count }} · total da compra
+              <span class="num">{{ formatBRL(purchaseCents) }}</span>
+            </p>
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
           </section>
 
           <div v-if="expense.installment" class="card series">
-            <p class="strong">Compra parcelada · {{ expense.installment.count }} parcelas</p>
+            <p class="strong">Compra parcelada</p>
             <p class="hint">{{ seriesText }}</p>
           </div>
 
@@ -95,15 +99,15 @@
               <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
               <input id="motivo" v-model="reason" class="input" maxlength="200" placeholder="Ex.: anexe a nota, por favor" />
               <div class="grid-2">
-                <button class="btn outline" type="button" @click="reject">Recusar</button>
-                <button class="btn primary" type="button" @click="approve">Aprovar</button>
+                <button class="btn outline" type="button" @click="reject">{{ actionLabel('Recusar') }}</button>
+                <button class="btn primary" type="button" @click="approve">{{ actionLabel('Aprovar') }}</button>
               </div>
               <p v-if="seriesNote('approve')" class="hint">{{ seriesNote('approve') }}</p>
             </template>
 
             <!-- Outro membro: validar ou contestar um confirmado automaticamente -->
             <template v-else-if="contestable">
-              <button class="btn primary" type="button" @click="validate">Validar</button>
+              <button class="btn primary" type="button" @click="validate">{{ actionLabel('Validar') }}</button>
               <p class="hint">Validar confirma que está tudo certo: o gasto não poderá mais ser contestado.</p>
               <label for="contestacao" class="label">Ou conteste, com o motivo</label>
               <input
@@ -115,7 +119,7 @@
                 :aria-invalid="contestTried && !reason.trim()"
               />
               <p v-if="contestTried && !reason.trim()" class="field-error">Informe o motivo para contestar.</p>
-              <button class="btn outline" type="button" @click="contest">Contestar</button>
+              <button class="btn outline" type="button" @click="contest">{{ actionLabel('Contestar') }}</button>
               <p class="hint">O gasto volta para {{ creatorLabel }} corrigir ou excluir; a correção passa pela sua aprovação.</p>
               <p v-if="seriesNote('contest')" class="hint">{{ seriesNote('contest') }}</p>
             </template>
@@ -198,6 +202,7 @@ import {
   type Expense,
 } from '@/services/expenses';
 import { seriesTargets, type SeriesAction } from '@/services/series';
+import { installmentSummary } from '@/domain/installments';
 import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -278,24 +283,22 @@ function seriesNote(action: SeriesAction): string | null {
   return n > 1 ? `Vale para a compra inteira: ${n} parcelas de meses abertos.` : null;
 }
 
-/** Valor da compra inteira (soma das parcelas), quando a série está carregada. */
-const purchaseCents = computed(() => {
-  const e = expense.value;
-  if (!e?.installment || seriesParcels.value.length !== e.installment.count) return e?.totalCents ?? 0;
-  return seriesParcels.value.reduce((s, p) => s + p.totalCents, 0);
+/** Valor da compra inteira (gravado em cada parcela). */
+const purchaseCents = computed(() => expense.value?.installment?.purchaseCents ?? expense.value?.totalCents ?? 0);
+
+/** "10x de R$ 214,00 · out/2026 a jul/2027". */
+const seriesText = computed(() => {
+  const i = expense.value?.installment;
+  if (!i) return '';
+  const short = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
+  const { values, firstMonth, lastMonth } = installmentSummary(i, formatBRL);
+  return `${values} · ${short(firstMonth)} a ${short(lastMonth)}`;
 });
 
-const seriesText = computed(() => {
-  const e = expense.value;
-  const i = e?.installment;
-  if (!e || !i) return '';
-  const short = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
-  const last = seriesParcels.value.length > 0 ? seriesParcels.value[seriesParcels.value.length - 1].competence : null;
-  const total = seriesParcels.value.length === i.count ? `Total ${formatBRL(purchaseCents.value)}` : null;
-  return [`Esta é a parcela ${i.index} de ${i.count}`, total, last ? `de ${short(i.firstMonth)} a ${short(last)}` : null]
-    .filter(Boolean)
-    .join(' · ');
-});
+/** Numa série, o botão diz o que está sendo decidido: "Aprovar compra de R$ 2.140,00". */
+function actionLabel(verb: string): string {
+  return expense.value?.installment ? `${verb} compra de ${formatBRL(purchaseCents.value)}` : verb;
+}
 
 // ---- Foto ----
 const photoUrl = ref<string | null>(null);
@@ -368,13 +371,17 @@ const receiptTitle = computed(() => {
   const r = expense.value?.receipt;
   if (!r || r.type === 'none') return 'Nenhum comprovante anexado';
   if (r.type === 'photo') return isCreator.value ? 'Foto pendente de envio' : 'Foto ainda não enviada';
-  if (r.nfceStatus === 'unchecked') return `Nota de ${nfceUf.value}: conferência automática só para SP`;
-  if (r.nfceStatus === 'pending') return 'Nota fiscal: consultando a SEFAZ…';
-  if (r.nfceStatus === 'failed') return 'Nota fiscal: não foi possível conferir';
+  if (r.nfceStatus === 'unchecked') {
+    return r.nfceKey.slice(20, 22) === '55'
+      ? `NF-e de ${nfceUf.value}: sem conferência automática`
+      : `NFC-e de ${nfceUf.value}: conferência automática só para SP`;
+  }
+  if (r.nfceStatus === 'pending') return 'NFC-e: consultando a SEFAZ…';
+  if (r.nfceStatus === 'failed') return 'NFC-e: não foi possível conferir';
   if (r.nfceData && expense.value && r.nfceData.totalCents !== purchaseCents.value) {
     return `Valor diferente da nota: ${formatBRL(r.nfceData.totalCents)}`;
   }
-  return 'Nota fiscal conferida pela SEFAZ';
+  return 'NFC-e conferida pela SEFAZ';
 });
 
 const receiptDetail = computed(() => {
@@ -382,7 +389,10 @@ const receiptDetail = computed(() => {
   const r = e?.receipt;
   if (!e || !r) return null;
   if (r.type === 'none') {
-    return e.status === 'confirmed' ? null : `Por isso este gasto precisa da aprovação de ${isCreator.value ? partnerFirstName.value : 'você'}.`;
+    if (e.status === 'confirmed') return null;
+    return isCreator.value
+      ? `Por isso este gasto precisa da aprovação de ${partnerFirstName.value}.`
+      : 'Por isso este gasto precisa da sua aprovação.';
   }
   if (r.type === 'photo') {
     return isCreator.value
@@ -394,11 +404,15 @@ const receiptDetail = computed(() => {
     const access = parseAccessKey(r.nfceKey);
     const [y, m] = access.yearMonth.split('-');
     parts.push(`CNPJ ${formatCnpj(access.cnpj)} · emitida em ${m}/${y}.`);
-    parts.push('O QR vale como comprovante.');
+    parts.push(
+      access.model === '55'
+        ? 'A chave vale como comprovante; a consulta de NF-e exige captcha, então o valor é o digitado.'
+        : 'A chave vale como comprovante.',
+    );
   }
   if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
   if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
-  if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante.');
+  if (r.nfceStatus === 'failed') parts.push('A chave continua valendo como comprovante.');
   if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== purchaseCents.value) {
     parts.push(`O valor lançado (${formatBRL(purchaseCents.value)}) não bate com a nota.`);
   }

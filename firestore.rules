@@ -91,12 +91,16 @@ service cloud.firestore {
       }
 
       // Comprovante gravado pelo app. `isNew`: criação (foto ainda não enviada).
-      // QR (NFC-e de qualquer estado, chave de 44 dígitos e modelo 65; o dígito
-      // verificador é conferido no app e na Function):
-      // - SP: só 'pending', com a URL canônica da SEFAZ-SP da própria chave;
-      // - outros estados: só 'unchecked', sem URL (sem conferência automática).
-      // O app nunca grava 'ok'/'failed' nem nfceData. Na edição, o QR pode ser
-      // mantido exatamente como está (inclusive já conferido).
+      // Chave de documento fiscal (tipo 'nfce'): NF-e (modelo 55) ou NFC-e (65)
+      // de qualquer estado, lida (QR ou código de barras) ou digitada (`entry`).
+      // O dígito verificador é conferido no app e na Function (as regras não
+      // calculam o módulo 11):
+      // - NFC-e de SP: só 'pending', com a URL de consulta montada da própria
+      //   chave (`...?p=chave|3|1`), igual para QR, código de barras e digitada;
+      // - NF-e (qualquer estado) e NFC-e de outros estados: só 'unchecked', sem
+      //   URL (sem conferência automática; a consulta de NF-e exige captcha).
+      // O app nunca grava 'ok'/'failed' nem nfceData. Na edição, o comprovante
+      // pode ser mantido exatamente como está (inclusive já conferido).
       // `ownerId`: o gasto (ou, numa parcela, a série) dono da foto.
       function validReceipt(r, ownerId, isNew) {
         return r.type == 'none' && r.keys().hasOnly(['type'])
@@ -109,24 +113,26 @@ service cloud.firestore {
             && (
               !isNew && r == resource.data.receipt
               || r.nfceKey is string
-                && r.nfceKey.matches('^[0-9]{20}65[0-9]{22}$')
+                && r.nfceKey.matches('^[0-9]{20}(55|65)[0-9]{22}$')
+                && r.get('entry', null) in ['read', 'typed']
                 && (
-                  r.keys().hasOnly(['type', 'nfceKey', 'nfceUrl', 'nfceStatus'])
+                  r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceUrl', 'nfceStatus'])
                     && r.nfceStatus == 'pending'
-                    && r.nfceKey.matches('^35[0-9]{42}$')
-                    && r.nfceUrl is string && r.nfceUrl.size() <= 600
-                    && r.nfceUrl.matches('^https://www[.]nfce[.]fazenda[.]sp[.]gov[.]br/NFCeConsultaPublica/Paginas/ConsultaQRCode[.]aspx[?]p='
-                         + r.nfceKey + '([|][0-9A-Za-z|.]*)?$')
-                  || r.keys().hasOnly(['type', 'nfceKey', 'nfceStatus'])
+                    && r.nfceKey.matches('^35[0-9]{18}65[0-9]{22}$')
+                    && r.nfceUrl == 'https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p='
+                         + r.nfceKey + '|3|1'
+                  || r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceStatus'])
                     && r.nfceStatus == 'unchecked'
-                    && !r.nfceKey.matches('^35[0-9]{42}$')
+                    && !r.nfceKey.matches('^35[0-9]{18}65[0-9]{22}$')
                 )
             );
       }
 
       // ---- Parcelas ----
       // Cada parcela é um gasto com installment { seriesId, index, count,
-      // firstMonth }; a parcela 1 tem o id da série, as outras `{série}-{índice}`.
+      // firstMonth, purchaseCents }; a parcela 1 tem o id da série, as outras
+      // `{série}-{índice}`. O valor da parcela é floor(total / n), com o resto
+      // dos centavos na primeira.
       // O comprovante da compra (foto da série) vale para todas. Exceção ao
       // limite de datas só dentro de série válida: o primeiro mês respeita o
       // limite, a competência é a do índice e, na criação, a parcela 1 da mesma
@@ -143,12 +149,16 @@ service cloud.firestore {
       function validInstallment(data, expenseId, isNew) {
         let i = data.installment;
         return i is map
-          && i.keys().hasAll(['seriesId', 'index', 'count', 'firstMonth'])
-          && i.keys().hasOnly(['seriesId', 'index', 'count', 'firstMonth'])
+          && i.keys().hasAll(['seriesId', 'index', 'count', 'firstMonth', 'purchaseCents'])
+          && i.keys().hasOnly(['seriesId', 'index', 'count', 'firstMonth', 'purchaseCents'])
           && i.seriesId is string && i.seriesId.matches('^[A-Za-z0-9]{1,40}$')
           && i.count is int && i.count >= 2 && i.count <= 48
           && i.index is int && i.index >= 1 && i.index <= i.count
           && i.firstMonth is string && i.firstMonth.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
+          && i.purchaseCents is int && i.purchaseCents >= i.count
+          && data.totalCents == (i.index == 1
+               ? i.purchaseCents - math.floor(i.purchaseCents / i.count) * (i.count - 1)
+               : math.floor(i.purchaseCents / i.count))
           && withinLimit(i.firstMonth)
           && monthIndex(data.competence) == monthIndex(i.firstMonth) + i.index - 1
           && expenseId == (i.index == 1 ? i.seriesId : i.seriesId + '-' + string(i.index))
@@ -157,7 +167,8 @@ service cloud.firestore {
 
       function firstInstallmentMatches(i) {
         let first = getAfter(/databases/$(database)/documents/groups/$(groupId)/expenses/$(i.seriesId)).data;
-        return first.get('installment', null) == { 'seriesId': i.seriesId, 'index': 1, 'count': i.count, 'firstMonth': i.firstMonth }
+        return first.get('installment', null)
+            == { 'seriesId': i.seriesId, 'index': 1, 'count': i.count, 'firstMonth': i.firstMonth, 'purchaseCents': i.purchaseCents }
           && first.createdBy == request.auth.uid;
       }
 
@@ -241,7 +252,9 @@ service cloud.firestore {
           && old.type == 'nfce'
           && old.nfceStatus == 'failed'
           && old.keys().hasAny(['nfceUrl'])
-          && request.resource.data.receipt == { 'type': 'nfce', 'nfceKey': old.nfceKey, 'nfceUrl': old.nfceUrl, 'nfceStatus': 'pending' }
+          && request.resource.data.receipt.diff(old).affectedKeys().hasOnly(['nfceStatus', 'nfceData', 'nfceError'])
+          && request.resource.data.receipt.nfceStatus == 'pending'
+          && !request.resource.data.receipt.keys().hasAny(['nfceData', 'nfceError'])
           && request.resource.data.updatedAt == request.time;
       }
 

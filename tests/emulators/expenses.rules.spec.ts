@@ -5,7 +5,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   approvalData,
   contestData,
@@ -15,7 +15,7 @@ import {
   rejectionData,
   type ExpenseInput,
 } from '../../src/services/expenseData';
-import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
+import { SEFAZ_SP_CANONICAL, checkDigit, parseFiscalCode, parseTypedKey } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
@@ -43,16 +43,18 @@ const keyFor = (ufCode: string) => {
 };
 const NFCE_KEY = keyFor('35');
 const NFCE_KEY_MG = keyFor('31');
-const NFCE_URL = `${SEFAZ_SP_CANONICAL}${NFCE_KEY}|2|1|1|${'A'.repeat(40)}`;
-const nfceUnchecked = { type: 'nfce', nfceKey: NFCE_KEY_MG, nfceStatus: 'unchecked' };
+// URL de consulta montada da chave (formato do QR versão 3), igual para QR, código de barras e digitada.
+const NFCE_URL = `${SEFAZ_SP_CANONICAL}${NFCE_KEY}|3|1`;
+const nfceUnchecked = { type: 'nfce', nfceKey: NFCE_KEY_MG, entry: 'read', nfceStatus: 'unchecked' };
 
 const serverTime = () => firebase.firestore.FieldValue.serverTimestamp();
 const removeField = () => firebase.firestore.FieldValue.delete();
 const photoPath = (id: string) => `groups/${GROUP}/receipts/${id}.jpg`;
-const nfcePending = { type: 'nfce', nfceKey: NFCE_KEY, nfceUrl: NFCE_URL, nfceStatus: 'pending' };
+const nfcePending = { type: 'nfce', nfceKey: NFCE_KEY, entry: 'read', nfceUrl: NFCE_URL, nfceStatus: 'pending' };
 const nfceOk = {
   type: 'nfce',
   nfceKey: NFCE_KEY,
+  entry: 'read',
   nfceUrl: NFCE_URL,
   nfceStatus: 'ok',
   nfceData: { issuerName: 'LOJA TESTE LTDA', totalCents: 20000, date: `${CURRENT}-05` },
@@ -275,7 +277,7 @@ describe('comprovante na criação', () => {
     await assertFails(db(A).doc(path('q4')).set(expense({ receipt: { ...nfcePending, nfceData: nfceOk.nfceData } })));
   });
 
-  it('QR: recusa chave mal formada, de NF-e (modelo 55) e URL fora da canônica de SP', async () => {
+  it('QR: recusa chave mal formada, NF-e pedindo consulta e URL fora da montada da chave', async () => {
     await assertFails(db(A).doc(path('q5')).set(expense({ receipt: { ...nfcePending, nfceKey: '123' } })));
     const nfe = NFCE_KEY.slice(0, 20) + '55' + NFCE_KEY.slice(22);
     await assertFails(
@@ -287,6 +289,30 @@ describe('comprovante na criação', () => {
         expense({ receipt: { ...nfcePending, nfceUrl: `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${NFCE_KEY}|2|1` } }),
       ),
     );
+    // Com o hash do QR versão 2: o comprovante guarda só a URL montada da chave.
+    await assertFails(
+      db(A).doc(path('q7b')).set(
+        expense({ receipt: { ...nfcePending, nfceUrl: `${SEFAZ_SP_CANONICAL}${NFCE_KEY}|2|1|1|${'A'.repeat(40)}` } }),
+      ),
+    );
+  });
+
+  it('NF-e (modelo 55) de qualquer estado vale como "unchecked", lida ou digitada, sem consulta', async () => {
+    const model = (key: string, m: string) => key.slice(0, 20) + m + key.slice(22);
+    const nfe = (key: string, entry: string) => ({ type: 'nfce', nfceKey: key, entry, nfceStatus: 'unchecked' });
+    await assertSucceeds(db(A).doc(path('nfe1')).set(expense({ receipt: nfe(model(NFCE_KEY, '55'), 'read') })));
+    await assertSucceeds(db(A).doc(path('nfe2')).set(expense({ receipt: nfe(model(NFCE_KEY, '55'), 'typed') })));
+    await assertSucceeds(db(A).doc(path('nfe3')).set(expense({ receipt: nfe(model(NFCE_KEY_MG, '55'), 'read') })));
+    // Outro modelo (ex.: 57, CT-e) não é comprovante.
+    await assertFails(db(A).doc(path('cte')).set(expense({ receipt: nfe(model(NFCE_KEY, '57'), 'read') })));
+  });
+
+  it('origem da chave obrigatória: lida ou digitada', async () => {
+    const withoutEntry: Record<string, unknown> = { ...nfcePending };
+    delete withoutEntry.entry;
+    await assertFails(db(A).doc(path('e1')).set(expense({ receipt: withoutEntry })));
+    await assertFails(db(A).doc(path('e2')).set(expense({ receipt: { ...nfcePending, entry: 'colada' } })));
+    await assertSucceeds(db(A).doc(path('e3')).set(expense({ receipt: { ...nfcePending, entry: 'typed' } })));
   });
 
   it('QR: a URL de SP precisa ser da própria chave', async () => {
@@ -308,7 +334,9 @@ describe('comprovante na criação', () => {
     );
     await assertFails(db(A).doc(path('mg4')).set(expense({ receipt: { ...nfceUnchecked, nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } })));
     await assertFails(
-      db(A).doc(path('sp-unchecked')).set(expense({ receipt: { type: 'nfce', nfceKey: NFCE_KEY, nfceStatus: 'unchecked' } })),
+      db(A).doc(path('sp-unchecked')).set(
+        expense({ receipt: { type: 'nfce', nfceKey: NFCE_KEY, entry: 'read', nfceStatus: 'unchecked' } }),
+      ),
     );
   });
 
@@ -655,10 +683,26 @@ describe('documentos montados pelo app', () => {
     await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, ids('app-1'), serverTime())));
     const photo = { ...input, receipt: { type: 'photo' as const, replaced: true } };
     await assertSucceeds(db(A).doc(path('app-2')).set(newExpenseData(photo, A, CURRENT, ids('app-2'), serverTime())));
-    const qr = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
+    const qr = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, entry: 'read' as const } };
     await assertSucceeds(db(A).doc(path('app-3')).set(newExpenseData(qr, A, CURRENT, ids('app-3'), serverTime())));
-    const qrMg = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY_MG, nfceUrl: null } };
+    const qrMg = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY_MG, entry: 'read' as const } };
     await assertSucceeds(db(A).doc(path('app-4')).set(newExpenseData(qrMg, A, CURRENT, ids('app-4'), serverTime())));
+  });
+
+  it('QR e código de barras da mesma nota: mesmo comprovante; digitada de SP também vai para a consulta', async () => {
+    const asReceipt = (key: string, entry: 'read' | 'typed') =>
+      newExpenseData({ ...input, receipt: { type: 'nfce', nfceKey: key, entry } }, A, CURRENT, ids('x'), serverTime()).receipt;
+    const fromQr = parseFiscalCode(`https://www.nfce.fazenda.sp.gov.br/qrcode?p=${NFCE_KEY}|2|1|1|${'A'.repeat(40)}`);
+    const fromBarcode = parseFiscalCode(NFCE_KEY);
+    expect(asReceipt(fromQr.key, 'read')).toEqual(asReceipt(fromBarcode.key, 'read'));
+
+    const typed = parseTypedKey(NFCE_KEY.replace(/(\d{4})(?=\d)/g, '$1 '));
+    expect(asReceipt(typed.key, 'typed')).toMatchObject({ nfceStatus: 'pending', nfceUrl: NFCE_URL, entry: 'typed' });
+    const typedInput = { ...input, receipt: { type: 'nfce' as const, nfceKey: typed.key, entry: 'typed' as const } };
+    await assertSucceeds(db(A).doc(path('app-typed')).set(newExpenseData(typedInput, A, CURRENT, ids('app-typed'), serverTime())));
+
+    // Dígito verificador inválido: recusado ao digitar, antes de gravar (as regras não calculam o módulo 11).
+    expect(() => parseTypedKey(NFCE_KEY.slice(0, 43) + ((Number(NFCE_KEY[43]) + 1) % 10))).toThrow(/dígito verificador/);
   });
 
   it('edição do app passa nas regras: pendente, devolvido corrigido e confirmado pelo QR', async () => {
@@ -670,7 +714,7 @@ describe('documentos montados pelo app', () => {
     await assertSucceeds(db(A).doc(path('a-atual')).update(update('returned')));
 
     // Confirmado editado (mesmo QR): o app grava pendente, e as regras aceitam.
-    const keepQr = { ...input, totalCents: 20000, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
+    const keepQr = { ...input, totalCents: 20000, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, entry: 'read' as const } };
     const qrUpdate = expenseUpdateData(keepQr, CURRENT, ids('a-qr'), { receipt: nfceOk as never, status: 'confirmed' }, serverTime(), removeField());
     if (qrUpdate.status !== 'pending_approval') throw new Error('o app manteria confirmado um gasto editado');
     await assertSucceeds(db(A).doc(path('a-qr')).update(qrUpdate));

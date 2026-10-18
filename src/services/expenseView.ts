@@ -143,9 +143,16 @@ export function badgeFor(expense: BadgeSource, viewerUid: string, detailed = fal
   }
 }
 
+/** "NF-e · chave lida", "NFC-e · chave digitada" (modelo e origem da chave). */
+export function fiscalKeyLabel(receipt: { nfceKey: string; entry?: 'read' | 'typed' }): string {
+  const doc = receipt.nfceKey.slice(20, 22) === '55' ? 'NF-e' : 'NFC-e';
+  return `${doc} · chave ${receipt.entry === 'typed' ? 'digitada' : 'lida'}`;
+}
+
 /**
- * Origem da confirmação, para o Detalhe: "Validado por Bia", "Automático · nota
- * conferida", "Confirmado pela foto do recibo", "Gerado do recorrente fixo aprovado".
+ * Origem da confirmação, para o Detalhe: "Validado por Bia", "NFC-e · chave
+ * lida · conferida", "NF-e · chave digitada", "Confirmado pela foto do recibo",
+ * "Gerado do recorrente fixo aprovado".
  */
 export function originLabel(
   expense: Pick<Expense, 'status' | 'approval' | 'receipt'> & { recurringId?: string },
@@ -154,8 +161,11 @@ export function originLabel(
   if (expense.status !== 'confirmed') return null;
   if (!isAutoConfirmed(expense)) return `Validado por ${nameOf(expense.approval!.byUid)}`;
   const r = expense.receipt;
-  if (expense.approval?.byUid === NFCE_APPROVER || (r.type === 'nfce' && r.nfceStatus === 'ok')) return 'Automático · nota conferida';
-  if (r.type === 'nfce') return 'Automático · nota fiscal';
+  if (r.type === 'nfce') {
+    const conferred = expense.approval?.byUid === NFCE_APPROVER || r.nfceStatus === 'ok';
+    return `${fiscalKeyLabel(r)}${conferred ? ' · conferida' : ''}`;
+  }
+  if (expense.approval?.byUid === NFCE_APPROVER) return 'Automático · nota conferida';
   if (r.type === 'photo') return 'Confirmado pela foto do recibo';
   if (expense.recurringId) return 'Gerado do recorrente fixo aprovado';
   return 'Automático';

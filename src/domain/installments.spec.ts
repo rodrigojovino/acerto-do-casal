@@ -4,6 +4,7 @@ import {
   firstMonthRange,
   installmentExpenseId,
   installmentPreview,
+  installmentSummary,
   lastInstallmentMonth,
   navigationLastMonth,
   planInstallments,
@@ -47,6 +48,18 @@ describe('ids, prévia e meses', () => {
   it('prévia: primeira com o resto, demais iguais', () => {
     expect(installmentPreview(100005, 10)).toEqual({ firstCents: 10005, otherCents: 10000 });
     expect(installmentPreview(9000, 3)).toEqual({ firstCents: 3000, otherCents: 3000 });
+  });
+
+  it('resumo da série: valores e meses', () => {
+    const brl = (c: number) => `R$ ${(c / 100).toFixed(2)}`;
+    expect(installmentSummary({ count: 10, firstMonth: '2026-10', purchaseCents: 214000 }, brl)).toEqual({
+      values: '10x de R$ 214.00',
+      firstMonth: '2026-10',
+      lastMonth: '2027-07',
+    });
+    expect(installmentSummary({ count: 10, firstMonth: '2026-10', purchaseCents: 100005 }, brl).values).toBe(
+      '1ª de R$ 100.05 + 9x de R$ 100.00',
+    );
   });
 
   it('mês da última parcela', () => {

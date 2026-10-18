@@ -10,7 +10,7 @@ function parcel(index: number, overrides: Partial<SeriesParcel> = {}): SeriesPar
     competence: `2026-${String(8 + index).padStart(2, '0')}`,
     status: 'pending_approval',
     createdBy: A,
-    installment: { seriesId: 's1', index, count: 4, firstMonth: '2026-09' },
+    installment: { seriesId: 's1', index, count: 4, firstMonth: '2026-09', purchaseCents: 40000 },
     ...overrides,
   };
 }

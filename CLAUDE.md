@@ -12,7 +12,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
   - Regiões: Firestore e Functions em `southamerica-east1`; Storage em `us-east1` (bucket `acerto-do-casal.firebasestorage.app`, faixa gratuita).
   - Firestore com proteção contra exclusão ativada.
 - Login Google: `@capacitor-firebase/authentication` com `skipNativeAuth` (o idToken nativo vai para o Firebase JS SDK); na web, popup com redirect de reserva. No aparelho o Auth usa `initializeAuth` + IndexedDB.
-- Câmera e QR Code: plugin Capacitor com ML Kit
+- Câmera, QR Code e código de barras: plugin Capacitor com ML Kit
 - Testes: Vitest (domínio, `npm test`) e emuladores do Firebase para regras e Functions (`npm run test:emulators`, projeto `demo-acerto`)
 - Build: GitHub Actions gera o APK assinado e publica no Release (`release.yml`, tag `vX.Y.Z`). `ci.yml` roda os testes e compila um APK de debug a cada push. Instalação por download direto do GitHub.
 
@@ -63,7 +63,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 | status | conta no saldo | quando |
 | --- | --- | --- |
-| `confirmed` | sim | criado com comprovante (foto ou QR), recorrente fixo gerado, ou aprovado pelo outro membro |
+| `confirmed` | sim | criado com comprovante (foto ou chave de NF-e/NFC-e), recorrente fixo gerado, ou aprovado pelo outro membro |
 | `pending_approval` | sim, destacado | criado sem comprovante, ou qualquer gasto confirmado/devolvido que foi editado |
 | `returned` | sim, destacado | recusado (pendente) ou contestado (confirmado automático) pelo outro; volta para quem lançou corrigir ou excluir |
 | `awaiting_confirmation` | não | recorrente variável gerado, aguardando quem paga confirmar o valor |
@@ -73,7 +73,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 | situação | status |
 | --- | --- |
 | criar sem comprovante | `pending_approval` |
-| criar com foto ou QR (qualquer estado) | `confirmed` (confirmado automático) |
+| criar com foto ou chave de NF-e/NFC-e (QR, código de barras ou digitada; qualquer estado) | `confirmed` (confirmado automático) |
 | editar um confirmado (automático ou aprovado) | `pending_approval` |
 | editar um devolvido (recusado ou contestado) | `pending_approval` |
 | editar um pendente sem comprovante | `pending_approval` |
@@ -86,7 +86,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
   | selo | quando | visual |
   | --- | --- | --- |
   | Pendente / Aprovar (para o outro) | `pending_approval` | âmbar claro, relógio |
-  | Automático | confirmado automático por QR Code (qualquer estado) | branco com contorno azul tracejado, raio |
+  | Automático | confirmado automático por chave de NF-e ou NFC-e (QR, código de barras ou digitada; qualquer estado) | branco com contorno azul tracejado, raio |
   | Foto do recibo | confirmado automático por foto | lilás claro com contorno roxo tracejado, câmera |
   | Recorrente aprovado | recorrente fixo gerado no mês (confirmado automático) | verde-azulado médio, contorno contínuo, calendário com check |
   | Validado | `confirmed` aprovado/validado por pessoa | verde escuro preenchido, check |
@@ -97,7 +97,8 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
   As cores diferem também em claridade, não só no tom (confirmados, do mais claro ao mais escuro: Automático → Foto do recibo → Recorrente aprovado → Validado). Automático, Foto do recibo e Recorrente aprovado se comportam igual: o outro valida ou contesta.
   O Detalhe mostra a origem (`originLabel`): "Validado por [nome]", "Automático · nota conferida", "Automático · nota fiscal", "Confirmado pela foto do recibo" ou "Gerado do recorrente fixo aprovado".
 - **Selos de tipo** (`typeBadges`, componente `TypeBadge`), ao lado do selo de status: "Parcela N/M" e "Recorrente". O "Recorrente" não aparece ao lado de "Recorrente aprovado" (redundante); fica nos variáveis, nos previstos e no fixo editado ou validado.
-- **QR:** a conferência na SEFAZ (só SP) apenas registra ok, falha ou valor divergente (aviso), e nunca muda o status.
+- **Documento fiscal:** NF-e (modelo 55) ou NFC-e (65), identificado pela chave de 44 dígitos: lida pelo leitor (QR Code da NFC-e ou código de barras Code 128 da chave) ou digitada (aceita os espaços entre os blocos; o app confere dígito verificador e modelo). QR e código de barras da mesma nota dão o mesmo comprovante. Só NFC-e de SP é conferida na SEFAZ, e a conferência apenas registra ok, falha ou valor divergente (aviso), nunca muda o status. NF-e não tem consulta (exige captcha): a chave preenche emitente (CNPJ) e mês, o valor é digitado. Origem no Detalhe: "NF-e · chave lida", "NFC-e · chave digitada", com " · conferida" quando a SEFAZ conferiu.
+- Seção de comprovante do formulário: Foto, Ler QR ou código de barras (só Android), Digitar chave e Sem comprovante.
 - Só quem lançou edita ou exclui o gasto.
 - A mesma regra de edição vale para recorrentes fixos e séries de parcelas.
 
@@ -108,11 +109,11 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 - Parte pessoal por arredondamento acumulado: a parte pessoal acumulada até a parcela *i* é `floor(totalAcumulado_i * personal / total)`, e a da parcela é a diferença para a anterior. A soma bate exatamente com o pessoal informado e nenhuma parcela tem parte pessoal maior que o próprio valor (caso extremo testado: R$ 0,10 com R$ 0,09 pessoal em 10 parcelas). Não usar a regra floor + resto na parte pessoal: nesse caso daria R$ 0,09 pessoal numa parcela de R$ 0,01.
 - O comprovante da compra vale para todas as parcelas.
 - Lançamento pelo formulário de novo gasto, opção "Compra parcelada": 2 a 48 parcelas e mês da primeira (do mês da compra, no máximo 6 meses atrás, até o mês seguinte ao atual; nunca um mês fechado). O valor digitado é o total da compra; a prévia mostra o valor de cada parcela. Funções puras em `src/domain/installments.ts`.
-- Cada parcela é um gasto com `installment { seriesId, index, count, firstMonth }`; a parcela 1 tem o id da série, as outras `{seriesId}-{index}`. Data de cada parcela: o dia da compra no mês dela (29–31 viram o último dia nos meses curtos). Todas são gravadas num único lote (offline também).
+- Cada parcela é um gasto com `installment { seriesId, index, count, firstMonth, purchaseCents }` (`purchaseCents` = total da compra; as regras conferem o valor de cada parcela contra ele); a parcela 1 tem o id da série, as outras `{seriesId}-{index}`. Data de cada parcela: o dia da compra no mês dela (29–31 viram o último dia nos meses curtos). Todas são gravadas num único lote (offline também).
 - Status pela regra do comprovante, igual para a série: sem comprovante, todas pendentes (a série é aprovada uma vez); com foto ou QR, todas confirmadas. A foto fica em `receipts/{seriesId}.jpg`; a fila marca todas as parcelas como enviadas. A NFC-e é consultada só pela parcela 1, que repassa o resultado às outras; a comparação de valor usa o total da compra.
 - **Ações valem para a série inteira**, nas parcelas de meses abertos (`seriesTargets` em `src/services/series.ts`), num lote: aprovar e recusar (as pendentes), validar e contestar (as confirmadas automaticamente).
 - **Edição da série** (só quem lançou, parcelas de meses abertos): descrição, quem pagou, divisão e comprovante; parcela confirmada editada volta para pendente (mesma regra de edição). Valor, parte pessoal, data, número de parcelas e primeiro mês não mudam: exclui a compra e lança de novo.
-- Selo de tipo "Parcela N/M" em toda parcela, ao lado do selo de status. Em Pendências, uma linha por série.
+- Selo de tipo "Parcela N/M" em toda parcela, ao lado do selo de status. Em Pendências, uma linha por série, com o total da compra e "10x de R$ 214,00 · out/2026 a jul/2027". No Detalhe, o valor grande é o da parcela, com "parcela 1 de 10 · total da compra R$ 2.140,00" logo abaixo; os botões dizem o que se decide ("Aprovar compra de R$ 2.140,00", idem Recusar, Validar e Contestar).
 
 ### Recorrentes
 
@@ -184,13 +185,15 @@ groups/{groupId}/expenses/{expenseId}
   receipt:
     { type: 'none' }
     | { type: 'photo', photoPath: 'groups/{g}/receipts/{id}.jpg', photoUploaded: bool }
-    | { type: 'nfce', nfceKey (44 dígitos), nfceUrl? (só SP: URL canônica), nfceStatus: 'pending' | 'ok' | 'failed' | 'unchecked',
-        nfceData?: { issuerName, totalCents, date }, nfceError? }
-        // app grava 'pending' (SP) ou 'unchecked' (outros estados); ok/failed e nfceData: só a Function
+    | { type: 'nfce', nfceKey (44 dígitos; NF-e modelo 55 ou NFC-e 65), entry: 'read' | 'typed',
+        nfceUrl? (só NFC-e de SP: `...ConsultaQRCode.aspx?p={chave}|3|1`, montada da chave),
+        nfceStatus: 'pending' | 'ok' | 'failed' | 'unchecked', nfceData?: { issuerName, totalCents, date }, nfceError? }
+        // app grava 'pending' (NFC-e de SP) ou 'unchecked' (NF-e e outros estados); ok/failed e nfceData: só a Function
+        // gastos anteriores ao bloco D da Fase 5 não têm `entry` (lidos por QR) e guardam a URL com o hash do QR
   status: 'confirmed' | 'pending_approval' | 'returned' | 'awaiting_confirmation'
   approval?: { byUid, at }        // byUid 'nfce' = confirmado pela conferência da nota (só a Function grava)
   rejection?: { byUid, reason? (até 200), at }
-  recurringId?, installment?: { seriesId, index, count, firstMonth }
+  recurringId?, installment?: { seriesId, index, count, firstMonth, purchaseCents }
   createdBy, createdAt, updatedAt
 
 groups/{groupId}/recurring/{recurringId}
@@ -206,7 +209,7 @@ Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no 
 
 Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
 - `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
-- **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status` conforme a regra do comprovante e da edição (tabelas acima), sem `approval`/`rejection` (a edição apaga as anteriores); `recurringId` nunca na criação e inalterado na edição. Comprovante: foto no caminho do próprio gasto (não enviada na criação); QR com chave de 44 dígitos e modelo 65: de SP só `'pending'` com a URL canônica da própria chave, de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
+- **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status` conforme a regra do comprovante e da edição (tabelas acima), sem `approval`/`rejection` (a edição apaga as anteriores); `recurringId` nunca na criação e inalterado na edição. Comprovante: foto no caminho do próprio gasto (não enviada na criação); chave de 44 dígitos, modelo 55 ou 65, com `entry` 'read' ou 'typed': NFC-e de SP só `'pending'` com a URL montada da própria chave (`p=chave|3|1`), NF-e e NFC-e de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
 - **Outro membro**: em `pending_approval` aprova (`→ confirmed`, `approval.byUid` = ele) ou recusa (`→ returned`, motivo opcional); em automático valida (grava `approval` sem mudar o status) ou contesta (`→ returned`, motivo obrigatório). Não toca em valores nem no comprovante.
 - **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; só grava `nfceStatus`/`nfceData`, nunca muda o status. Numa série, só a parcela 1 consulta e grava em todas. `resolveNfce` (callable) só pré-preenche o formulário.
 - **Nova consulta** ("Tentar conferir de novo"): exceção estreita para quem lançou voltar uma NFC-e de SP `failed` para `pending`, sem mexer em mais nada (nem no status).
@@ -218,11 +221,14 @@ Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators
 
 Comprovantes no app:
 - Foto: câmera ou galeria (`@capacitor/camera`), comprimida no aparelho para JPEG < 500 KB (`src/domain/image.ts`) e guardada numa fila no IndexedDB (`src/services/photoQueue.ts`) até subir; só sobe depois que o gasto existe no servidor.
-- QR: leitor do Google (ML Kit, só Android, sem permissão de câmera); lido no aparelho com o mesmo parser das Functions (`parseNfceQr` em `functions/src/nfce.ts`). Aceita QR de qualquer SEFAZ (`p=` das versões 2 e 3, `chNFe=` da versão 1, ou a chave no texto) e as variações da URL de SP (http/https, com ou sem www, `/qrcode` ou `ConsultaQRCode.aspx`). Para SP monta a URL canônica `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=…`; a rede só é acessada nela, nunca no endereço lido, e sem seguir redirecionamentos.
+- Leitor: o do Google (ML Kit, só Android, sem permissão de câmera), para QR Code e código de barras Code 128; lido no aparelho com o mesmo parser das Functions (`parseFiscalCode`, `parseNfceQr` e `parseTypedKey` em `functions/src/nfce.ts`). Aceita QR de qualquer SEFAZ (`p=` das versões 2 e 3, `chNFe=` da versão 1, ou a chave no texto), as variações da URL de SP (http/https, com ou sem www, `/qrcode` ou `ConsultaQRCode.aspx`) e os 44 dígitos do código de barras. Para NFC-e de SP monta a URL de consulta só da chave (`spConsultUrl`: `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p={chave}|3|1`, formato do QR versão 3); a rede só é acessada nela, nunca no endereço lido, e sem seguir redirecionamentos.
+- Chave digitada: funciona também na versão web.
 
 ## Risco conhecido: NFC-e
 
-O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o portal da SEFAZ, que pode ter captcha. Só SP tem consulta automática; notas de outros estados valem como comprovante sem consulta e vão para aprovação. Plano B (SP, se a consulta falhar): o QR preenche data, emitente e chave; o valor é digitado e o QR continua valendo como comprovante.
+O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o portal da SEFAZ, que pode ter captcha. Só NFC-e de SP tem consulta automática; NF-e (a consulta exige captcha) e notas de outros estados valem como comprovante sem consulta. Plano B (SP, se a consulta falhar): a chave preenche data, emitente e mês; o valor é digitado e a chave continua valendo como comprovante.
+
+Consulta pela URL montada da chave (`chave|3|1`, sem o hash do QR versão 2): adotada no bloco D da Fase 5 para que QR, código de barras e chave digitada deem o mesmo comprovante. Validado em 2026-10-18 com 9 notas reais (8 com QR versão 2, 1 com versão 3) por `scripts/sefaz-poc/testar-chave-v3.ts`, que lê as URLs de um arquivo `*.local.txt`: as 9 consultadas pela chave, com os mesmos dados do QR original nas 8 em que ele também funcionou (na 9ª, o hash do QR estava inválido). A consulta pela chave dispensa o hash: confere a nota pela chave, não a autenticidade do QR. Com VPN ligada no PC, a SEFAZ recusa qualquer consulta ("Formato de QR-Code não suportado"): desligar antes de testar.
 
 Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HTML da página e não tem CORS, então a consulta roda numa Function. Confirmado na nuvem na Fase 4 (6 de 6 notas a partir de `southamerica-east1`). Detalhes em `scripts/sefaz-poc/PARECER.md`.
 
@@ -237,6 +243,11 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 7. [ ] Notificações, exportação Excel/PDF, versão web
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
    - Pendência herdada da Fase 4 (prioridade baixa): reduzir o tamanho do APK (de ~6 MB para ~31,5 MB com a leitura de QR); avaliar o modelo de QR via Google Play Services em vez do embutido no APK.
+   - Pendência da Fase 5: itens da NFC-e de SP.
+     - Botão "Ver itens da nota" no Detalhe, só para NFC-e de SP conferida: descrição, quantidade, valor unitário e total de cada item, descontos e forma de pagamento.
+     - Os itens são extraídos e guardados pela Function no momento da conferência (disponíveis offline). Falha na leitura dos itens não afeta a conferência do valor.
+     - Em parcelados, os itens ficam na parcela 1 e aparecem na série toda.
+     - Reconsulta única para as notas já conferidas antes da implementação.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.

@@ -188,9 +188,17 @@ describe('originLabel', () => {
     expect(originLabel(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), nameOf)).toBe('Validado por Bia');
   });
 
-  it('automático: nota conferida, foto ou recorrente', () => {
-    const nfceOk = { type: 'nfce' as const, nfceKey: '3'.repeat(44), nfceStatus: 'ok' as const };
-    expect(originLabel(expense({ status: 'confirmed', receipt: nfceOk }), nameOf)).toBe('Automático · nota conferida');
+  it('automático: documento fiscal (modelo e origem da chave), foto ou recorrente', () => {
+    const nfce = '3'.repeat(20) + '65' + '3'.repeat(22);
+    const nfe = '3'.repeat(20) + '55' + '3'.repeat(22);
+    const nfceOk = { type: 'nfce' as const, nfceKey: nfce, nfceStatus: 'ok' as const };
+    expect(originLabel(expense({ status: 'confirmed', receipt: nfceOk }), nameOf)).toBe('NFC-e · chave lida · conferida');
+    expect(
+      originLabel(expense({ status: 'confirmed', receipt: { type: 'nfce', nfceKey: nfe, entry: 'read', nfceStatus: 'unchecked' } }), nameOf),
+    ).toBe('NF-e · chave lida');
+    expect(
+      originLabel(expense({ status: 'confirmed', receipt: { type: 'nfce', nfceKey: nfce, entry: 'typed', nfceStatus: 'pending' } }), nameOf),
+    ).toBe('NFC-e · chave digitada');
     expect(originLabel(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), nameOf)).toBe('Automático · nota conferida');
     expect(
       originLabel(expense({ status: 'confirmed', receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }), nameOf),

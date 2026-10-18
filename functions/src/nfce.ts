@@ -1,6 +1,8 @@
 /**
- * NFC-e a partir do QR Code: leitura da chave (qualquer estado) e consulta
- * pública na SEFAZ-SP (só SP tem conferência automática).
+ * Documento fiscal (NFC-e modelo 65 ou NF-e modelo 55) a partir do QR Code, do
+ * código de barras da chave ou da chave digitada: leitura da chave (qualquer
+ * estado) e consulta pública na SEFAZ-SP (só NFC-e de SP tem conferência
+ * automática; a consulta de NF-e exige captcha).
  * Parser vindo da prova de conceito (scripts/sefaz-poc), agora com testes.
  *
  * Funções puras + `fetchNfce`, a única que acessa a rede. O QR pode vir de
@@ -108,13 +110,67 @@ export function brlToCents(text: string): number {
   return Number(m[1].replace(/\./g, '') + m[2]);
 }
 
-/** Valida a chave: UF existente, modelo 65 (NFC-e) e dígito verificador. */
-export function validateKey(key: string): AccessKey {
+/** Modelos aceitos como comprovante: NF-e (55) e NFC-e (65). */
+export type FiscalModel = '55' | '65';
+
+/** Valida a chave de NF-e ou NFC-e: UF existente, modelo 55 ou 65 e dígito verificador. */
+export function validateFiscalKey(key: string): AccessKey & { model: FiscalModel } {
   const access = parseAccessKey(key);
   if (!access.uf) throw new NfceError('invalid_key', 'A chave desta nota não é válida (UF desconhecida).');
-  if (access.model !== '65') throw new NfceError('invalid_key', 'Este QR Code não é de uma NFC-e (cupom fiscal).');
+  if (access.model !== '55' && access.model !== '65') {
+    throw new NfceError('invalid_key', `Esta chave não é de NF-e nem de NFC-e (modelo ${access.model}).`);
+  }
   if (!access.checkDigitOk) throw new NfceError('invalid_key', 'A chave desta nota não é válida (dígito verificador).');
+  return access as AccessKey & { model: FiscalModel };
+}
+
+/** Valida a chave de uma NFC-e (modelo 65): a única com consulta pública sem captcha. */
+export function validateKey(key: string): AccessKey {
+  const access = validateFiscalKey(key);
+  if (access.model !== '65') throw new NfceError('invalid_key', 'Esta chave não é de uma NFC-e (cupom fiscal).');
   return access;
+}
+
+/**
+ * URL de consulta na SEFAZ-SP montada só da chave, no formato do QR versão 3
+ * (`chave|3|1`: ambiente de produção, sem hash). Só NFC-e de SP; `null` nas
+ * demais. QR, código de barras e chave digitada da mesma nota dão a mesma URL.
+ */
+export function spConsultUrl(key: string): string | null {
+  return /^35\d{18}65\d{22}$/.test(key) ? `${SEFAZ_SP_CANONICAL}${key}|3|1` : null;
+}
+
+/** Chave de NF-e ou NFC-e lida (QR ou código de barras) ou digitada. */
+export interface FiscalCode {
+  key: string;
+  access: AccessKey & { model: FiscalModel };
+  spUrl: string | null;
+}
+
+/**
+ * Lê o conteúdo do leitor: código de barras (Code 128 com os 44 dígitos da
+ * chave, NF-e ou NFC-e) ou QR Code de NFC-e (ver `parseNfceQr`).
+ */
+export function parseFiscalCode(raw: string): FiscalCode {
+  const text = raw.trim();
+  if (/^\d{44}$/.test(text)) {
+    return { key: text, access: validateFiscalKey(text), spUrl: spConsultUrl(text) };
+  }
+  const qr = parseNfceQr(text);
+  return { key: qr.key, access: qr.access as AccessKey & { model: FiscalModel }, spUrl: qr.spUrl };
+}
+
+/**
+ * Chave digitada (como vem impressa, em blocos de 4 com espaços): só dígitos,
+ * 44 deles, modelo 55 ou 65 e dígito verificador.
+ */
+export function parseTypedKey(input: string): FiscalCode {
+  const digits = input.replace(/[\s.-]/g, '');
+  if (!/^\d*$/.test(digits)) throw new NfceError('invalid_key', 'Digite só os números da chave.');
+  if (digits.length !== 44) {
+    throw new NfceError('invalid_key', `A chave tem 44 dígitos (foram digitados ${digits.length}).`);
+  }
+  return { key: digits, access: validateFiscalKey(digits), spUrl: spConsultUrl(digits) };
 }
 
 /**
@@ -123,7 +179,7 @@ export function validateKey(key: string): AccessKey {
  *   /qrcode ou ConsultaQRCode.aspx);
  * - `chNFe=chave` (versão 1);
  * - em último caso, uma sequência de 44 dígitos no texto.
- * Para SP com `p`, monta a URL canônica de consulta. Nunca usa o endereço lido.
+ * Para SP, monta a URL de consulta a partir da chave (`spConsultUrl`). Nunca usa o endereço lido.
  *
  * Versão 2 do `p`: online = chave|versão|ambiente|idCSC|hash (5 partes);
  * offline = chave|versão|ambiente|dia|vNF|digVal|idCSC|hash (8 partes).
@@ -147,10 +203,8 @@ export function parseNfceQr(raw: string): QrData {
 
   const access = validateKey(key);
   const parts = p?.split('|') ?? [];
-  // Só dígitos, letras e pipes seguem para a URL canônica.
-  const spUrl = access.uf === 'SP' && p && /^[0-9A-Za-z|.]+$/.test(p) ? SEFAZ_SP_CANONICAL + p : null;
 
-  const data: QrData = { key, access, spUrl };
+  const data: QrData = { key, access, spUrl: spConsultUrl(key) };
   if (parts[1] === '2' && parts.length === 8 && /^\d+(\.\d{1,2})?$/.test(parts[4])) {
     const [reais, cents = ''] = parts[4].split('.');
     data.offline = { day: parts[3], totalCents: Number(reais) * 100 + Number(cents.padEnd(2, '0')) };

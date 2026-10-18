@@ -20,9 +20,10 @@
               <span class="item-main">
                 <span class="item-name">{{ e.description }}</span>
                 <span class="item-sub">{{ subtitle(e) }}</span>
+                <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
               </span>
               <span class="side">
-                <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
                 <StatusBadge v-bind="badgeFor(e, myUid)" />
                 <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
               </span>
@@ -39,9 +40,10 @@
                 <span class="item-main">
                   <span class="item-name">{{ e.description }}</span>
                   <span class="item-sub">{{ subtitle(e) }}</span>
+                <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
                 </span>
                 <span class="side">
-                  <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                  <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
                   <StatusBadge v-bind="badgeFor(e, myUid)" />
                 <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
                 </span>
@@ -65,7 +67,7 @@
                 </span>
               </span>
               <span class="side">
-                <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
                 <StatusBadge v-bind="badgeFor(e, myUid)" />
                 <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
               </span>
@@ -134,6 +136,7 @@ import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthName } from '@/domain/calendar';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { collapseSeries } from '@/services/series';
+import { installmentSummary } from '@/domain/installments';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import { formatBRL } from '@/domain/money';
@@ -182,6 +185,15 @@ const waiting = computed(() =>
 const returned = computed(() =>
   collapseSeries(items.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value)),
 );
+
+/** "10x de R$ 214,00 · out/2026 a jul/2027". */
+function seriesLine(e: Expense): string {
+  if (!e.installment) return '';
+  const { values, firstMonth, lastMonth } = installmentSummary(e.installment, formatBRL);
+  return `${values} · ${shortMonth(firstMonth)} a ${shortMonth(lastMonth)}`;
+}
+
+const shortMonth = (m: string) => `${monthName(m).slice(0, 3)}/${m.slice(0, 4)}`;
 
 function seriesLabel(e: Expense & { seriesSize?: number }): string {
   if (!e.installment) return '';

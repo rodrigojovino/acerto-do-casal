@@ -146,6 +146,17 @@ describe('checkNfce: só registra, nunca muda o status', () => {
   });
 });
 
+describe('checkNfce: NF-e', () => {
+  it('chave de NF-e (modelo 55) não dispara consulta: fica "unchecked"', async () => {
+    const nfe = KEY.slice(0, 20) + '55' + KEY.slice(22);
+    const data = nfceExpense({ nfceKey: nfe, entry: 'typed', nfceStatus: 'unchecked' }, { status: 'confirmed' });
+    delete (data.receipt as Record<string, unknown>).nfceUrl;
+    await write('nfe', data);
+    await new Promise((r) => setTimeout(r, 3000));
+    expect((await read('nfe'))?.receipt).toEqual({ type: 'nfce', nfceKey: nfe, entry: 'typed', nfceStatus: 'unchecked' });
+  });
+});
+
 describe('checkNfce: compra parcelada', () => {
   it('só a parcela 1 consulta; o resultado vale para todas as parcelas da série', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
@@ -156,7 +167,7 @@ describe('checkNfce: compra parcelada', () => {
           ctx.firestore().doc(path(id)),
           nfceExpense(
             { nfceStatus: 'pending' },
-            { status: 'confirmed', installment: { seriesId: 'serie', index, count: 3, firstMonth: '2026-10' } },
+            { status: 'confirmed', installment: { seriesId: 'serie', index, count: 3, firstMonth: '2026-10', purchaseCents: 16644 } },
           ),
         );
       }
@@ -174,7 +185,10 @@ describe('checkNfce: compra parcelada', () => {
   it('parcela que não é a 1 não consulta sozinha', async () => {
     await write(
       'avulsa-2',
-      nfceExpense({ nfceStatus: 'pending' }, { installment: { seriesId: 'avulsa', index: 2, count: 3, firstMonth: '2026-10' } }),
+      nfceExpense(
+        { nfceStatus: 'pending' },
+        { installment: { seriesId: 'avulsa', index: 2, count: 3, firstMonth: '2026-10', purchaseCents: 16644 } },
+      ),
     );
     await new Promise((r) => setTimeout(r, 3000));
     expect(((await read('avulsa-2'))?.receipt as { nfceStatus: string }).nfceStatus).toBe('pending');

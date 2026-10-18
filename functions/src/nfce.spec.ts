@@ -5,8 +5,11 @@ import {
   brlToCents,
   checkDigit,
   parseAccessKey,
+  parseFiscalCode,
   parseNfceQr,
   parsePage,
+  parseTypedKey,
+  spConsultUrl,
   toResult,
 } from './nfce';
 
@@ -19,6 +22,8 @@ const KEY_MG = keyFor('31'); // MG
 const HASH = 'A'.repeat(40);
 const P = `${KEY}|2|1|1|${HASH}`;
 const CANONICAL = SEFAZ_SP_CANONICAL + P;
+/** URL de consulta montada só da chave (formato do QR versão 3). */
+const FROM_KEY = `${SEFAZ_SP_CANONICAL}${KEY}|3|1`;
 
 function page(overrides: { total?: string; date?: string; cnpj?: string; issuer?: string; extra?: string } = {}): string {
   const { total = '1.234,56', date = '05/10/2026 11:56:22', cnpj = '11.222.333/0001-81', issuer = 'LOJA TESTE LTDA', extra = '' } = overrides;
@@ -63,13 +68,13 @@ describe('parseNfceQr: São Paulo', () => {
     for (const v of variants) {
       const qr = parseNfceQr(v);
       expect(qr.key, v).toBe(KEY);
-      expect(qr.spUrl, v).toBe(CANONICAL);
+      expect(qr.spUrl, v).toBe(FROM_KEY);
     }
   });
 
   it('nunca usa o endereço lido: domínio estranho com chave de SP vira a URL canônica', () => {
-    expect(parseNfceQr(`https://evil.example.com/qrcode?p=${P}`).spUrl).toBe(CANONICAL);
-    expect(parseNfceQr(`http://169.254.169.254/qrcode?p=${P}`).spUrl).toBe(CANONICAL);
+    expect(parseNfceQr(`https://evil.example.com/qrcode?p=${P}`).spUrl).toBe(FROM_KEY);
+    expect(parseNfceQr(`http://169.254.169.254/qrcode?p=${P}`).spUrl).toBe(FROM_KEY);
   });
 
   it('QR versão 3 (sem hash)', () => {
@@ -77,10 +82,10 @@ describe('parseNfceQr: São Paulo', () => {
     expect(qr.spUrl).toBe(`${SEFAZ_SP_CANONICAL}${KEY}|3|1`);
   });
 
-  it('p com caracteres inesperados não vira URL de consulta', () => {
+  it('p com caracteres inesperados não vai para a URL: ela é montada só da chave', () => {
     const qr = parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?p=${KEY}|2|1|1|<script>`);
     expect(qr.key).toBe(KEY);
-    expect(qr.spUrl).toBeNull();
+    expect(qr.spUrl).toBe(FROM_KEY);
   });
 
   it('lê dia e valor do QR de contingência offline', () => {
@@ -104,8 +109,44 @@ describe('parseNfceQr: outros estados', () => {
     expect(parseNfceQr(`Chave: ${keyFor('41')}`).access.uf).toBe('PR');
   });
 
-  it('chave de SP sem p (versão 1) vale, mas sem consulta automática', () => {
-    expect(parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?chNFe=${KEY}`).spUrl).toBeNull();
+  it('chave de SP sem p (versão 1) também tem consulta, pela URL montada da chave', () => {
+    expect(parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?chNFe=${KEY}`).spUrl).toBe(FROM_KEY);
+  });
+});
+
+describe('código de barras e chave digitada', () => {
+  const NFE_SP = keyFor('35', '55');
+  const spaced = (key: string) => key.replace(/(\d{4})(?=\d)/g, '$1 ');
+
+  it('código de barras e QR da mesma NFC-e dão a mesma chave e a mesma URL de consulta', () => {
+    const fromQr = parseFiscalCode(CANONICAL);
+    const fromBarcode = parseFiscalCode(KEY);
+    expect(fromBarcode).toEqual(fromQr);
+    expect(fromBarcode.spUrl).toBe(FROM_KEY);
+  });
+
+  it('NF-e (modelo 55) vale, por código de barras ou digitada, sem consulta', () => {
+    const scanned = parseFiscalCode(NFE_SP);
+    expect(scanned.access.model).toBe('55');
+    expect(scanned.spUrl).toBeNull();
+    expect(spConsultUrl(NFE_SP)).toBeNull();
+    expect(parseTypedKey(spaced(NFE_SP)).key).toBe(NFE_SP);
+  });
+
+  it('chave digitada aceita os espaços entre os blocos e, de SP, segue para a consulta', () => {
+    const typed = parseTypedKey(` ${spaced(KEY)} `);
+    expect(typed.key).toBe(KEY);
+    expect(typed.spUrl).toBe(FROM_KEY);
+    expect(parseTypedKey(spaced(KEY_MG)).spUrl).toBeNull();
+  });
+
+  it('chave digitada com dígito verificador inválido, tamanho errado, letras ou outro modelo é recusada', () => {
+    const badDv = KEY.slice(0, 43) + ((Number(KEY[43]) + 1) % 10);
+    expect(() => parseTypedKey(badDv)).toThrow(/dígito verificador/);
+    expect(() => parseTypedKey(KEY.slice(0, 40))).toThrow(/44 dígitos \(foram digitados 40\)/);
+    expect(() => parseTypedKey(`${KEY.slice(0, 43)}X`)).toThrow(/só os números/);
+    expect(() => parseTypedKey(keyFor('35', '57'))).toThrow(/modelo 57/);
+    expect(() => parseFiscalCode(keyFor('35', '57'))).toThrow(/modelo 57/);
   });
 });
 

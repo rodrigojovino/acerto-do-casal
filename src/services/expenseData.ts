@@ -1,6 +1,7 @@
 import type { IsoDate } from '@/domain/calendar';
 import { receiptPhotoPath } from '@/domain/image';
 import { installmentExpenseId, planInstallments } from '@/domain/installments';
+import { spConsultUrl } from '../../functions/src/nfce';
 import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
 
 /**
@@ -33,10 +34,14 @@ export type ReceiptChoice =
   /** `replaced`: foto nova escolhida agora (precisa ser enviada de novo). */
   | { type: 'photo'; replaced: boolean }
   /**
-   * QR Code da NFC-e lido no aparelho (qualquer estado). Com `nfceUrl` (SP), a
-   * Function confere a nota; sem ela (outros estados), o gasto vai para aprovação.
+   * Chave de NF-e (modelo 55) ou NFC-e (65), de qualquer estado: lida (QR ou
+   * código de barras) ou digitada. NFC-e de SP é conferida na SEFAZ pela
+   * Function; as demais valem como comprovante sem conferência.
    */
-  | { type: 'nfce'; nfceKey: string; nfceUrl: string | null };
+  | { type: 'nfce'; nfceKey: string; entry: KeyEntry };
+
+/** Como a chave chegou: lida pelo leitor (QR ou código de barras) ou digitada. */
+export type KeyEntry = 'read' | 'typed';
 
 export interface NfceData {
   issuerName: string;
@@ -49,9 +54,12 @@ export type StoredReceipt =
   | { type: 'none' }
   | { type: 'photo'; photoPath: string; photoUploaded: boolean }
   | {
+      /** NF-e ou NFC-e (o modelo está na chave, posições 21–22). */
       type: 'nfce';
       nfceKey: string;
-      /** URL canônica da SEFAZ-SP; ausente em notas de outros estados. */
+      /** Ausente em gastos anteriores ao bloco D: chave lida pelo QR. */
+      entry?: KeyEntry;
+      /** URL de consulta da SEFAZ-SP montada da chave (`spConsultUrl`); só NFC-e de SP. */
       nfceUrl?: string;
       /**
        * O app grava 'pending' (SP, a conferir) ou 'unchecked' (outros estados,
@@ -77,11 +85,13 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
     };
   }
   if (choice.type === 'nfce') {
-    // Mesmo QR: mantém a conferência já feita. QR novo: a Function consulta de novo.
+    // Mesma chave: mantém a conferência já feita. Chave nova: a Function consulta de novo.
     if (current?.type === 'nfce' && current.nfceKey === choice.nfceKey) return { ...current };
-    return choice.nfceUrl
-      ? { type: 'nfce', nfceKey: choice.nfceKey, nfceUrl: choice.nfceUrl, nfceStatus: 'pending' }
-      : { type: 'nfce', nfceKey: choice.nfceKey, nfceStatus: 'unchecked' };
+    // QR e código de barras da mesma nota dão o mesmo comprovante (URL montada da chave).
+    const nfceUrl = spConsultUrl(choice.nfceKey);
+    return nfceUrl
+      ? { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceUrl, nfceStatus: 'pending' }
+      : { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceStatus: 'unchecked' };
   }
   return { type: 'none' };
 }
@@ -235,7 +245,13 @@ export function newInstallmentSeriesData<T>(
       competence: p.competence,
       receipt,
       status,
-      installment: { seriesId: ids.seriesId, index: p.index, count: p.count, firstMonth: choice.firstMonth },
+      installment: {
+        seriesId: ids.seriesId,
+        index: p.index,
+        count: p.count,
+        firstMonth: choice.firstMonth,
+        purchaseCents: input.totalCents,
+      },
       createdBy: uid,
       createdAt: now,
       updatedAt: now,

@@ -193,7 +193,7 @@ import {
   lastInstallmentMonth,
 } from '@/domain/installments';
 import { seriesTargets } from '@/services/series';
-import { formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
+import { fiscalDocName, formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -309,8 +309,9 @@ async function loadReceipt(expense: Expense): Promise<void> {
     const url = group.value ? await receiptPhotoUrl(group.value.id, expense) : null;
     if (receipt.value.type === 'photo' && !receipt.value.data) receipt.value = { type: 'photo', previewUrl: url };
   } else if (r.type === 'nfce') {
-    const label = r.nfceData ? `Nota de ${r.nfceData.issuerName}` : 'Nota fiscal anexada (QR Code)';
-    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl ?? null, label };
+    const doc = fiscalDocName(r.nfceKey.slice(20, 22));
+    const label = r.nfceData ? `${doc} de ${r.nfceData.issuerName}` : `${doc} anexada (chave ${r.entry === 'typed' ? 'digitada' : 'lida'})`;
+    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry ?? 'read', spUrl: r.nfceUrl ?? null, label };
   }
 }
 
@@ -319,10 +320,11 @@ onIonViewDidEnter(() => {
   if (!isEdit && attachQr) void picker.value?.scanQr();
 });
 
-// ---- QR Code: pré-preenchimento pela SEFAZ (online) ----
+// ---- Chave lida ou digitada: pré-preenchimento (NFC-e de SP pela SEFAZ, online) ----
 async function onScanned(scanned: ScannedNfce): Promise<void> {
-  // Pela chave (qualquer estado, sem rede): descrição e mês de emissão.
-  if (description.value.trim() === '') description.value = `Nota fiscal ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
+  // Pela chave (qualquer estado, sem rede): emitente (CNPJ) e mês de emissão.
+  const doc = fiscalDocName(scanned.model);
+  if (description.value.trim() === '') description.value = `${doc} ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
   if (!dateTouched.value && monthOf(date.value) !== scanned.yearMonth) {
     // A chave traz só o mês: usa o último dia dele (ou hoje, se for o mês atual) e pede para conferir o dia.
     const [y, m] = scanned.yearMonth.split('-').map(Number);
@@ -334,7 +336,10 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   if (!scanned.spUrl) {
     nfceMessage.value = {
       kind: 'warn',
-      text: `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP.`,
+      text:
+        scanned.model === '55'
+          ? 'NF-e: digite o valor e confira a data. Não há conferência automática (a consulta de NF-e exige captcha).'
+          : `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP.`,
     };
     return;
   }
@@ -352,7 +357,7 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   // Preenche só o que ainda não foi digitado; nunca sobrescreve. A descrição
   // provisória da chave ("Nota fiscal SP · CNPJ …") é trocada pelo emitente.
   if (totalCents.value === 0) totalCents.value = nota.totalCents;
-  if (description.value.trim() === '' || description.value.startsWith('Nota fiscal SP · CNPJ')) {
+  if (description.value.trim() === '' || description.value.startsWith('NFC-e SP · CNPJ')) {
     description.value = nota.issuerName.slice(0, 80);
   }
   if (!dateTouched.value && nota.date >= minDate.value && nota.date <= maxDate.value) date.value = nota.date;
@@ -457,9 +462,7 @@ const installmentText = computed(() => {
 const seriesSummary = computed(() => {
   const e = editing;
   if (!e?.installment) return '';
-  const total = seriesParcels.value.reduce((s, p) => s + p.totalCents, 0);
-  const totalText = seriesParcels.value.length === e.installment.count ? ` · total ${formatBRL(total)}` : '';
-  return `Parcela ${e.installment.index}/${e.installment.count} · ${formatBRL(e.totalCents)}${totalText}`;
+  return `Parcela ${e.installment.index}/${e.installment.count} · ${formatBRL(e.totalCents)} · total da compra ${formatBRL(e.installment.purchaseCents)}`;
 });
 
 // ---- Validação ----
@@ -527,7 +530,7 @@ function save(): void {
 function receiptChoice(): ReceiptChoice {
   const r = receipt.value;
   if (r.type === 'photo') return { type: 'photo', replaced: r.data !== undefined };
-  if (r.type === 'nfce') return { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl };
+  if (r.type === 'nfce') return { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry };
   return { type: 'none' };
 }
 

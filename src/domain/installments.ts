@@ -18,6 +18,8 @@ export interface InstallmentInfo {
   count: number;
   /** Mês da primeira parcela. */
   firstMonth: Competence;
+  /** Valor total da compra (as regras conferem o valor de cada parcela contra ele). */
+  purchaseCents: Cents;
 }
 
 export interface PlannedInstallment {
@@ -65,6 +67,22 @@ export function planInstallments(input: {
 export function installmentPreview(totalCents: Cents, count: number): { firstCents: Cents; otherCents: Cents } {
   const otherCents = Math.floor(totalCents / count);
   return { firstCents: totalCents - otherCents * (count - 1), otherCents };
+}
+
+/**
+ * Resumo da série: "10x de R$ 214,00" (ou "1ª de R$ 100,05 + 9x de R$ 100,00"),
+ * com os meses da primeira e da última parcela.
+ */
+export function installmentSummary(
+  info: Pick<InstallmentInfo, 'count' | 'firstMonth' | 'purchaseCents'>,
+  format: (cents: Cents) => string,
+): { values: string; firstMonth: Competence; lastMonth: Competence } {
+  const { firstCents, otherCents } = installmentPreview(info.purchaseCents, info.count);
+  const values =
+    firstCents === otherCents
+      ? `${info.count}x de ${format(otherCents)}`
+      : `1ª de ${format(firstCents)} + ${info.count - 1}x de ${format(otherCents)}`;
+  return { values, firstMonth: info.firstMonth, lastMonth: lastInstallmentMonth(info) };
 }
 
 /** Mês da última parcela da série. */
