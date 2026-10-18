@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(firebase deploy*)",
+      "Bash(npx firebase deploy*)",
+      "Bash(npx firebase-tools deploy*)",
+      "Bash(npm run deploy*)",
+      "PowerShell(firebase deploy*)",
+      "PowerShell(npx firebase deploy*)",
+      "PowerShell(npx firebase-tools deploy*)",
+      "PowerShell(npm run deploy*)",
+      "Bash(git tag*)",
+      "Bash(git push* v*)",
+      "Bash(git push*--tags*)",
+      "Bash(git push*--follow-tags*)",
+      "PowerShell(git tag*)",
+      "PowerShell(git push* v*)",
+      "PowerShell(git push*--tags*)",
+      "PowerShell(git push*--follow-tags*)"
+    ]
+  }
+}

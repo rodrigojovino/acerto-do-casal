@@ -19,6 +19,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 
 ## Comandos e cuidados do Firebase
 
+- **Regra obrigatória de deploy:** só depois que o CI do commit passar nos dois jobs (`tests` e `android-debug`), e sempre com confirmação explícita do Rodrigo antes de executar, mesmo em modo automático. O mesmo vale para criar e enviar tags de versão (`vX.Y.Z`). O `.claude/settings.json` do projeto marca esses comandos como "ask" (sempre pedem aprovação).
 - `npm run emulators` sobe Auth, Firestore, Functions e Storage locais; o app usa os emuladores em dev com `VITE_USE_EMULATORS=true`.
 - `npm run recorrentes:gerar -- [YYYY-MM | YYYY-MM-DD]` dispara a geração de recorrentes no emulador simulando o dia 1 do mês (padrão: mês atual) ou um dia qualquer. O agendamento não roda no emulador.
 - Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
