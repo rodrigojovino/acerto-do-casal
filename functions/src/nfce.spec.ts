@@ -1,20 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   NfceError,
+  SEFAZ_SP_CANONICAL,
   brlToCents,
   checkDigit,
   parseAccessKey,
+  parseNfceQr,
   parsePage,
-  parseQrUrl,
   toResult,
 } from './nfce';
 
 // Dados 100% fictícios: CNPJ inventado, nenhuma nota real.
 const CNPJ = '11222333000181';
-const BASE = `352610${CNPJ}65001000000123112345678`; // 43 dígitos
-const KEY = BASE + checkDigit(BASE);
+const withDv = (base43: string) => base43 + checkDigit(base43);
+const keyFor = (ufCode: string, model = '65') => withDv(`${ufCode}2610${CNPJ}${model}001000000123112345678`);
+const KEY = keyFor('35'); // SP
+const KEY_MG = keyFor('31'); // MG
 const HASH = 'A'.repeat(40);
-const URL_OK = `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${KEY}|2|1|1|${HASH}`;
+const P = `${KEY}|2|1|1|${HASH}`;
+const CANONICAL = SEFAZ_SP_CANONICAL + P;
 
 function page(overrides: { total?: string; date?: string; cnpj?: string; issuer?: string; extra?: string } = {}): string {
   const { total = '1.234,56', date = '05/10/2026 11:56:22', cnpj = '11.222.333/0001-81', issuer = 'LOJA TESTE LTDA', extra = '' } = overrides;
@@ -34,52 +38,100 @@ function page(overrides: { total?: string; date?: string; cnpj?: string; issuer?
 describe('chave de acesso', () => {
   it('decodifica UF, mês, CNPJ e confere o dígito verificador', () => {
     const k = parseAccessKey(KEY);
-    expect(k).toMatchObject({ uf: '35', yearMonth: '2026-10', cnpj: CNPJ, model: '65', series: 1, number: 123 });
+    expect(k).toMatchObject({ ufCode: '35', uf: 'SP', yearMonth: '2026-10', cnpj: CNPJ, model: '65', series: 1, number: 123 });
     expect(k.checkDigitOk).toBe(true);
+    expect(parseAccessKey(KEY_MG).uf).toBe('MG');
   });
 
   it('detecta dígito verificador errado', () => {
-    const wrong = BASE + ((checkDigit(BASE) + 1) % 10);
+    const wrong = KEY.slice(0, 43) + ((Number(KEY[43]) + 1) % 10);
     expect(parseAccessKey(wrong).checkDigitOk).toBe(false);
   });
 });
 
-describe('parseQrUrl', () => {
-  it('aceita a URL da SEFAZ-SP', () => {
-    expect(parseQrUrl(URL_OK)).toMatchObject({ key: KEY, version: '2', production: true });
-  });
-
-  it('recusa outros endereços (a Function nunca busca URL arbitrária)', () => {
-    const cases = [
-      'http://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/x?p=' + KEY,
-      'https://evil.example.com/NFCeConsultaPublica/x?p=' + KEY,
-      'https://www.nfce.fazenda.sp.gov.br.evil.com/NFCeConsultaPublica/x?p=' + KEY,
-      'https://www.nfce.fazenda.sp.gov.br/outra/coisa?p=' + KEY,
-      'https://169.254.169.254/latest/meta-data',
-      'não é url',
+describe('parseNfceQr: São Paulo', () => {
+  it('aceita as variações da URL de SP e sempre monta a URL canônica', () => {
+    const variants = [
+      `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${P}`,
+      `http://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${P}`,
+      `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${P}`,
+      `http://www.nfce.fazenda.sp.gov.br/qrcode?p=${P}`,
+      `https://nfce.fazenda.sp.gov.br/qrcode?p=${P}`,
+      `http://nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${P}`,
+      `  https://www.nfce.fazenda.sp.gov.br/qrcode?p=${encodeURIComponent(P)}  `,
     ];
-    for (const c of cases) expect(() => parseQrUrl(c), c).toThrow(NfceError);
+    for (const v of variants) {
+      const qr = parseNfceQr(v);
+      expect(qr.key, v).toBe(KEY);
+      expect(qr.spUrl, v).toBe(CANONICAL);
+    }
   });
 
-  it('recusa chave inválida, de outra UF ou de outro modelo', () => {
-    const otherUf = '33' + BASE.slice(2);
-    const otherModel = BASE.slice(0, 20) + '55' + BASE.slice(22);
-    for (const base of [otherUf, otherModel]) {
-      const url = URL_OK.replace(KEY, base + checkDigit(base));
-      expect(() => parseQrUrl(url)).toThrow(NfceError);
-    }
-    expect(() => parseQrUrl(URL_OK.replace(KEY, KEY.slice(0, 43) + ((Number(KEY[43]) + 1) % 10)))).toThrow(NfceError);
+  it('nunca usa o endereço lido: domínio estranho com chave de SP vira a URL canônica', () => {
+    expect(parseNfceQr(`https://evil.example.com/qrcode?p=${P}`).spUrl).toBe(CANONICAL);
+    expect(parseNfceQr(`http://169.254.169.254/qrcode?p=${P}`).spUrl).toBe(CANONICAL);
+  });
+
+  it('QR versão 3 (sem hash)', () => {
+    const qr = parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?p=${KEY}|3|1`);
+    expect(qr.spUrl).toBe(`${SEFAZ_SP_CANONICAL}${KEY}|3|1`);
+  });
+
+  it('p com caracteres inesperados não vira URL de consulta', () => {
+    const qr = parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?p=${KEY}|2|1|1|<script>`);
+    expect(qr.key).toBe(KEY);
+    expect(qr.spUrl).toBeNull();
   });
 
   it('lê dia e valor do QR de contingência offline', () => {
-    const url = URL_OK.replace(`|2|1|1|${HASH}`, `|2|1|05|123.45|${'B'.repeat(56)}|1|${HASH}`);
-    expect(parseQrUrl(url).offline).toEqual({ day: '05', totalCents: 12345 });
+    const url = `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${KEY}|2|1|05|123.45|${'B'.repeat(56)}|1|${HASH}`;
+    expect(parseNfceQr(url).offline).toEqual({ day: '05', totalCents: 12345 });
+  });
+});
+
+describe('parseNfceQr: outros estados', () => {
+  it('QR de outra UF vale: chave validada, sem URL de consulta', () => {
+    const qr = parseNfceQr(`https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml?p=${KEY_MG}|2|1|1|${HASH}`);
+    expect(qr.key).toBe(KEY_MG);
+    expect(qr.access.uf).toBe('MG');
+    expect(qr.access.cnpj).toBe(CNPJ);
+    expect(qr.access.yearMonth).toBe('2026-10');
+    expect(qr.spUrl).toBeNull();
+  });
+
+  it('QR versão 1 (chNFe) e chave solta no texto', () => {
+    expect(parseNfceQr(`http://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx?chNFe=${keyFor('43')}&nVersao=100`).access.uf).toBe('RS');
+    expect(parseNfceQr(`Chave: ${keyFor('41')}`).access.uf).toBe('PR');
+  });
+
+  it('chave de SP sem p (versão 1) vale, mas sem consulta automática', () => {
+    expect(parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?chNFe=${KEY}`).spUrl).toBeNull();
+  });
+});
+
+describe('parseNfceQr: chaves inválidas', () => {
+  const badDv = (key: string) => key.slice(0, 43) + ((Number(key[43]) + 1) % 10);
+
+  it('dígito verificador inválido é recusado, em SP e fora', () => {
+    expect(() => parseNfceQr(`https://www.nfce.fazenda.sp.gov.br/qrcode?p=${badDv(KEY)}|2|1|1|${HASH}`)).toThrow(/dígito verificador/);
+    expect(() => parseNfceQr(`https://qualquer.sefaz/qr?p=${badDv(KEY_MG)}|2|1`)).toThrow(/dígito verificador/);
+  });
+
+  it('modelo diferente de 65 (NF-e) e UF inexistente são recusados', () => {
+    expect(() => parseNfceQr(`https://qualquer.sefaz/qr?p=${keyFor('35', '55')}|2|1`)).toThrow(/não é de uma NFC-e/);
+    expect(() => parseNfceQr(`https://qualquer.sefaz/qr?p=${keyFor('99')}|2|1`)).toThrow(/UF desconhecida/);
+  });
+
+  it('QR sem chave não é nota fiscal', () => {
+    for (const c of ['não é url', 'https://example.com/pagina', 'https://x.sefaz/qr?p=123|2|1', '']) {
+      expect(() => parseNfceQr(c), c).toThrow(NfceError);
+    }
   });
 });
 
 describe('parsePage e toResult', () => {
   it('extrai os dados da nota e confere com a chave', () => {
-    const qr = parseQrUrl(URL_OK);
+    const qr = parseNfceQr(CANONICAL);
     expect(toResult(qr, parsePage(page()))).toEqual({
       key: KEY,
       issuerName: 'LOJA TESTE LTDA',
@@ -97,20 +149,20 @@ describe('parsePage e toResult', () => {
     const html = `<script>$('#spnAlertaProsseguirMaster').html('<ul><li>Verifique. Erro(s): </br>- Hash QR Code inválido</li></ul>');</script>`;
     const data = parsePage(html);
     expect(data.error).toBe('Hash QR Code inválido');
-    expect(() => toResult(parseQrUrl(URL_OK), data)).toThrow(/recusou/);
+    expect(() => toResult(parseNfceQr(CANONICAL), data)).toThrow(/recusou/);
   });
 
   it('captcha é detectado como bloqueio', () => {
     const data = parsePage(page({ extra: '<div class="g-recaptcha"></div>' }));
-    expect(() => toResult(parseQrUrl(URL_OK), data)).toThrow(/captcha/);
+    expect(() => toResult(parseNfceQr(CANONICAL), data)).toThrow(/captcha/);
   });
 
   it('layout desconhecido não vira dado errado', () => {
-    expect(() => toResult(parseQrUrl(URL_OK), parsePage('<html>nova página</html>'))).toThrow(/ler os dados/);
+    expect(() => toResult(parseNfceQr(CANONICAL), parsePage('<html>nova página</html>'))).toThrow(/ler os dados/);
   });
 
   it('CNPJ ou mês diferentes da chave são recusados', () => {
-    const qr = parseQrUrl(URL_OK);
+    const qr = parseNfceQr(CANONICAL);
     expect(() => toResult(qr, parsePage(page({ cnpj: '99.999.999/0001-99' })))).toThrow(/não batem/);
     expect(() => toResult(qr, parsePage(page({ date: '05/09/2026 10:00:00' })))).toThrow(/não batem/);
   });

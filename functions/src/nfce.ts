@@ -1,16 +1,31 @@
 /**
- * Consulta pública da NFC-e na SEFAZ-SP a partir da URL do QR Code.
+ * NFC-e a partir do QR Code: leitura da chave (qualquer estado) e consulta
+ * pública na SEFAZ-SP (só SP tem conferência automática).
  * Parser vindo da prova de conceito (scripts/sefaz-poc), agora com testes.
  *
- * Funções puras + `fetchNfce`, a única que acessa a rede. Só URLs da
- * SEFAZ-SP são aceitas (a Function nunca busca endereços arbitrários).
+ * Funções puras + `fetchNfce`, a única que acessa a rede. O QR pode vir de
+ * qualquer domínio de SEFAZ, mas a rede só é acessada na URL canônica da
+ * SEFAZ-SP, montada aqui a partir da chave: a Function nunca busca o endereço
+ * que veio no QR nem segue redirecionamentos.
  */
 
 export const SEFAZ_SP_HOST = 'www.nfce.fazenda.sp.gov.br';
-const SEFAZ_SP_PATH_PREFIX = '/NFCeConsultaPublica/';
+export const SEFAZ_SP_CANONICAL = `https://${SEFAZ_SP_HOST}/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=`;
+
+/** Códigos IBGE das UFs (dois primeiros dígitos da chave de acesso). */
+export const UF_BY_CODE: Readonly<Record<string, string>> = {
+  '11': 'RO', '12': 'AC', '13': 'AM', '14': 'RR', '15': 'PA', '16': 'AP', '17': 'TO',
+  '21': 'MA', '22': 'PI', '23': 'CE', '24': 'RN', '25': 'PB', '26': 'PE', '27': 'AL', '28': 'SE', '29': 'BA',
+  '31': 'MG', '32': 'ES', '33': 'RJ', '35': 'SP',
+  '41': 'PR', '42': 'SC', '43': 'RS',
+  '50': 'MS', '51': 'MT', '52': 'GO', '53': 'DF',
+};
 
 export interface AccessKey {
-  uf: string;
+  /** Código IBGE da UF, ex.: '35'. */
+  ufCode: string;
+  /** Sigla da UF, ex.: 'SP' (undefined se o código não existir). */
+  uf: string | undefined;
   /** YYYY-MM */
   yearMonth: string;
   cnpj: string;
@@ -23,8 +38,9 @@ export interface AccessKey {
 
 export interface QrData {
   key: string;
-  version: string;
-  production: boolean;
+  access: AccessKey;
+  /** URL canônica de consulta na SEFAZ-SP; null para outros estados (sem consulta). */
+  spUrl: string | null;
   /** QR de contingência offline (tpEmis 9) traz dia e valor no próprio QR. */
   offline?: { day: string; totalCents: number };
 }
@@ -73,7 +89,8 @@ export function checkDigit(first43: string): number {
 export function parseAccessKey(key: string): AccessKey {
   if (!/^\d{44}$/.test(key)) throw new NfceError('invalid_key', 'Chave de acesso inválida.');
   return {
-    uf: key.slice(0, 2),
+    ufCode: key.slice(0, 2),
+    uf: UF_BY_CODE[key.slice(0, 2)],
     yearMonth: `20${key.slice(2, 4)}-${key.slice(4, 6)}`,
     cnpj: key.slice(6, 20),
     model: key.slice(20, 22),
@@ -91,31 +108,50 @@ export function brlToCents(text: string): number {
   return Number(m[1].replace(/\./g, '') + m[2]);
 }
 
+/** Valida a chave: UF existente, modelo 65 (NFC-e) e dígito verificador. */
+export function validateKey(key: string): AccessKey {
+  const access = parseAccessKey(key);
+  if (!access.uf) throw new NfceError('invalid_key', 'A chave desta nota não é válida (UF desconhecida).');
+  if (access.model !== '65') throw new NfceError('invalid_key', 'Este QR Code não é de uma NFC-e (cupom fiscal).');
+  if (!access.checkDigitOk) throw new NfceError('invalid_key', 'A chave desta nota não é válida (dígito verificador).');
+  return access;
+}
+
 /**
- * Valida a URL do QR (só SEFAZ-SP, HTTPS) e decodifica o parâmetro `p`.
- * Versão 2: online = chave|versão|ambiente|idCSC|hash (5 partes);
+ * Lê o QR de NFC-e de qualquer estado e domínio de SEFAZ:
+ * - `p=chave|versão|...` (versões 2 e 3; aceita http/https, com ou sem www,
+ *   /qrcode ou ConsultaQRCode.aspx);
+ * - `chNFe=chave` (versão 1);
+ * - em último caso, uma sequência de 44 dígitos no texto.
+ * Para SP com `p`, monta a URL canônica de consulta. Nunca usa o endereço lido.
+ *
+ * Versão 2 do `p`: online = chave|versão|ambiente|idCSC|hash (5 partes);
  * offline = chave|versão|ambiente|dia|vNF|digVal|idCSC|hash (8 partes).
  */
-export function parseQrUrl(raw: string): QrData {
-  let url: URL;
+export function parseNfceQr(raw: string): QrData {
+  const text = raw.trim();
+  let p: string | null = null;
+  let key: string | undefined;
+
   try {
-    url = new URL(raw.trim());
+    const url = new URL(text);
+    p = url.searchParams.get('p');
+    key = p?.split('|')[0] ?? url.searchParams.get('chNFe') ?? undefined;
   } catch {
+    // Não é URL: procura a chave no texto.
+  }
+  key ??= text.match(/(?<!\d)\d{44}(?!\d)/)?.[0];
+  if (!key || !/^\d{44}$/.test(key)) {
     throw new NfceError('invalid_url', 'Este QR Code não é de uma nota fiscal.');
   }
-  if (url.protocol !== 'https:' || url.hostname !== SEFAZ_SP_HOST || !url.pathname.startsWith(SEFAZ_SP_PATH_PREFIX)) {
-    throw new NfceError('not_sp', 'Só notas fiscais de São Paulo podem ser consultadas.');
-  }
-  const p = url.searchParams.get('p');
-  if (!p) throw new NfceError('invalid_url', 'Este QR Code não é de uma nota fiscal.');
-  const parts = p.split('|');
-  const [key, version, env] = parts;
-  const access = parseAccessKey(key);
-  if (access.uf !== '35' || access.model !== '65' || !access.checkDigitOk) {
-    throw new NfceError('invalid_key', 'A chave desta nota não é válida.');
-  }
-  const data: QrData = { key, version, production: env === '1' };
-  if (version === '2' && parts.length === 8 && /^\d+(\.\d{1,2})?$/.test(parts[4])) {
+
+  const access = validateKey(key);
+  const parts = p?.split('|') ?? [];
+  // Só dígitos, letras e pipes seguem para a URL canônica.
+  const spUrl = access.uf === 'SP' && p && /^[0-9A-Za-z|.]+$/.test(p) ? SEFAZ_SP_CANONICAL + p : null;
+
+  const data: QrData = { key, access, spUrl };
+  if (parts[1] === '2' && parts.length === 8 && /^\d+(\.\d{1,2})?$/.test(parts[4])) {
     const [reais, cents = ''] = parts[4].split('.');
     data.offline = { day: parts[3], totalCents: Number(reais) * 100 + Number(cents.padEnd(2, '0')) };
   }
@@ -170,8 +206,7 @@ export function toResult(qr: QrData, page: PageData): NfceResult {
   if (!page.issuerName || page.totalCents === undefined || !page.date || !page.issuerCnpj) {
     throw new NfceError('unparsed', 'Não foi possível ler os dados da nota.');
   }
-  const access = parseAccessKey(qr.key);
-  if (page.issuerCnpj !== access.cnpj || page.date.slice(0, 7) !== access.yearMonth) {
+  if (page.issuerCnpj !== qr.access.cnpj || page.date.slice(0, 7) !== qr.access.yearMonth) {
     throw new NfceError('mismatch', 'Os dados da página não batem com a chave da nota.');
   }
   return {
@@ -188,13 +223,17 @@ export interface FetchTiming {
   ms: number;
 }
 
-/** Busca e interpreta a nota. Única função com acesso à rede. */
-export async function fetchNfce(rawUrl: string, timeoutMs = 15_000): Promise<{ result: NfceResult; timing: FetchTiming }> {
-  const qr = parseQrUrl(rawUrl);
+/**
+ * Busca e interpreta uma nota de SP. Única função com acesso à rede, e só na
+ * URL canônica da SEFAZ-SP (montada por `parseNfceQr`), sem redirecionamentos.
+ */
+export async function fetchNfce(qrContent: string, timeoutMs = 15_000): Promise<{ result: NfceResult; timing: FetchTiming }> {
+  const qr = parseNfceQr(qrContent);
+  if (!qr.spUrl) throw new NfceError('not_sp', 'A conferência automática é só para notas de SP.');
   const started = Date.now();
   let res: Response;
   try {
-    res = await fetch(rawUrl.trim(), {
+    res = await fetch(qr.spUrl, {
       redirect: 'error',
       signal: AbortSignal.timeout(timeoutMs),
       headers: { 'Accept-Language': 'pt-BR,pt;q=0.9' },

@@ -87,9 +87,12 @@ service cloud.firestore {
       }
 
       // Comprovante gravado pelo app. `isNew`: criação (foto ainda não enviada).
-      // QR: o app só grava 'pending' e nunca os dados da nota; só a Function
-      // grava 'ok'/'failed' e nfceData. Na edição, o QR pode ser mantido como
-      // está (inclusive já conferido) ou trocado/reconsultado como 'pending'.
+      // QR (NFC-e de qualquer estado, chave de 44 dígitos e modelo 65; o dígito
+      // verificador é conferido no app e na Function):
+      // - SP: só 'pending', com a URL canônica da SEFAZ-SP da própria chave;
+      // - outros estados: só 'unchecked', sem URL (sem conferência automática).
+      // O app nunca grava 'ok'/'failed' nem nfceData. Na edição, o QR pode ser
+      // mantido exatamente como está (inclusive já conferido).
       function validReceipt(r, expenseId, isNew) {
         return r.type == 'none' && r.keys().hasOnly(['type'])
           || r.type == 'photo'
@@ -98,13 +101,21 @@ service cloud.firestore {
             && r.photoUploaded is bool
             && (!isNew || r.photoUploaded == false)
           || r.type == 'nfce'
-            && r.keys().hasOnly(['type', 'nfceKey', 'nfceUrl', 'nfceStatus', 'nfceData', 'nfceError'])
-            && r.nfceKey is string && r.nfceKey.matches('^[0-9]{44}$')
-            && r.nfceUrl is string && r.nfceUrl.size() <= 600
-            && r.nfceUrl.matches('^https://www[.]nfce[.]fazenda[.]sp[.]gov[.]br/.*')
             && (
-              r.nfceStatus == 'pending' && !r.keys().hasAny(['nfceData', 'nfceError'])
-              || !isNew && r == resource.data.receipt
+              !isNew && r == resource.data.receipt
+              || r.nfceKey is string
+                && r.nfceKey.matches('^[0-9]{20}65[0-9]{22}$')
+                && (
+                  r.keys().hasOnly(['type', 'nfceKey', 'nfceUrl', 'nfceStatus'])
+                    && r.nfceStatus == 'pending'
+                    && r.nfceKey.matches('^35[0-9]{42}$')
+                    && r.nfceUrl is string && r.nfceUrl.size() <= 600
+                    && r.nfceUrl.matches('^https://www[.]nfce[.]fazenda[.]sp[.]gov[.]br/NFCeConsultaPublica/Paginas/ConsultaQRCode[.]aspx[?]p='
+                         + r.nfceKey + '([|][0-9A-Za-z|.]*)?$')
+                  || r.keys().hasOnly(['type', 'nfceKey', 'nfceStatus'])
+                    && r.nfceStatus == 'unchecked'
+                    && !r.nfceKey.matches('^35[0-9]{42}$')
+                )
             );
       }
 

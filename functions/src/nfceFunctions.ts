@@ -32,14 +32,17 @@ export const resolveNfce = onCall({ timeoutSeconds: 30 }, async (request): Promi
 interface NfceReceipt {
   type: 'nfce';
   nfceKey: string;
-  nfceUrl: string;
-  nfceStatus: 'pending' | 'ok' | 'failed';
+  /** URL canônica da SEFAZ-SP; ausente em notas de outros estados. */
+  nfceUrl?: string;
+  /** 'unchecked': nota de outro estado, sem conferência automática (vai para aprovação). */
+  nfceStatus: 'pending' | 'ok' | 'failed' | 'unchecked';
   nfceData?: { issuerName: string; totalCents: number; date: string };
   nfceError?: string;
 }
 
 /**
- * Conferência do QR no servidor. Roda quando o gasto chega ao servidor
+ * Conferência do QR no servidor (só notas de SP; as de outros estados ficam
+ * 'unchecked' e vão para aprovação). Roda quando o gasto chega ao servidor
  * (inclusive o lançado offline) e a cada alteração:
  * 1. `nfceStatus: 'pending'` → consulta a SEFAZ e grava `ok` (com os dados
  *    da nota) ou `failed` (com o motivo). O QR continua valendo como comprovante.
@@ -58,6 +61,7 @@ export const checkNfce = onDocumentWritten(
     if (receipt.nfceStatus === 'pending') {
       let update: Partial<NfceReceipt>;
       try {
+        if (!receipt.nfceUrl) throw new NfceError('not_sp', 'Nota sem URL de consulta.');
         const { result } = await fetchNfce(receipt.nfceUrl);
         if (result.key !== receipt.nfceKey) throw new NfceError('mismatch', 'A chave da nota não confere.');
         update = {

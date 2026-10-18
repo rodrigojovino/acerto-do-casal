@@ -2,6 +2,7 @@ import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
 
 // Gatilho checkNfce (Functions emulator). Nenhum teste acessa a SEFAZ:
@@ -11,9 +12,15 @@ import { createTestEnv } from './setup';
 const A = 'uid-a';
 const B = 'uid-b';
 const GROUP = 'group-1';
-const KEY = '3'.repeat(44);
-// URL fictícia no formato da SEFAZ-SP (as regras exigem esse domínio na edição pelo app).
-const SP_URL = `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${KEY}|2|1|1|${'A'.repeat(40)}`;
+// Chaves fictícias de NFC-e (SP e MG) com dígito verificador válido.
+const keyFor = (ufCode: string) => {
+  const base = `${ufCode}26101122233300018165001000000123112345678`;
+  return base + checkDigit(base);
+};
+const KEY = keyFor('35');
+const KEY_MG = keyFor('31');
+// URL canônica fictícia da SEFAZ-SP (as regras exigem esse formato na edição pelo app).
+const SP_URL = `${SEFAZ_SP_CANONICAL}${KEY}|2|1|1|${'A'.repeat(40)}`;
 const path = (id: string) => `groups/${GROUP}/expenses/${id}`;
 
 let env: RulesTestEnvironment;
@@ -66,7 +73,8 @@ async function read(id: string): Promise<Record<string, unknown> | undefined> {
 }
 
 /** Espera o gatilho agir (ou o tempo acabar) e devolve o documento. */
-async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean, ms = 8000) {
+// 20 s: a primeira execução do gatilho no emulador pode demorar (partida da Function).
+async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean, ms = 20000) {
   const until = Date.now() + ms;
   let data = await read(id);
   while (Date.now() < until && !(data && done(data))) {
@@ -93,12 +101,23 @@ describe('checkNfce', () => {
   });
 
   it('QR pendente que não pode ser conferido vira failed e segue pendente', async () => {
+    // URL sem chave: recusada pelo parser antes de qualquer rede.
     await write('falha', nfceExpense({ nfceStatus: 'pending' }));
     const d = await waitFor('falha', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
     const receipt = d?.receipt as { nfceStatus: string; nfceError: string };
     expect(receipt.nfceStatus).toBe('failed');
-    expect(receipt.nfceError).toBe('not_sp');
+    expect(receipt.nfceError).toBe('invalid_url');
     expect(d?.status).toBe('pending_approval');
+  });
+
+  it('nota de outro estado ("unchecked") não é consultada nem confirmada', async () => {
+    const data = nfceExpense({ nfceKey: KEY_MG, nfceStatus: 'unchecked' });
+    delete (data.receipt as Record<string, unknown>).nfceUrl;
+    await write('mg', data);
+    await new Promise((r) => setTimeout(r, 3000));
+    const d = await read('mg');
+    expect(d?.status).toBe('pending_approval');
+    expect((d?.receipt as { nfceStatus: string }).nfceStatus).toBe('unchecked');
   });
 
   it('gasto devolvido não é confirmado pela nota', async () => {

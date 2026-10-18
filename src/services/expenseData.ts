@@ -29,8 +29,11 @@ export type ReceiptChoice =
   | { type: 'none' }
   /** `replaced`: foto nova escolhida agora (precisa ser enviada de novo). */
   | { type: 'photo'; replaced: boolean }
-  /** QR Code da NFC-e lido no aparelho: a conferência é feita pela Function. */
-  | { type: 'nfce'; nfceKey: string; nfceUrl: string };
+  /**
+   * QR Code da NFC-e lido no aparelho (qualquer estado). Com `nfceUrl` (SP), a
+   * Function confere a nota; sem ela (outros estados), o gasto vai para aprovação.
+   */
+  | { type: 'nfce'; nfceKey: string; nfceUrl: string | null };
 
 export interface NfceData {
   issuerName: string;
@@ -45,9 +48,13 @@ export type StoredReceipt =
   | {
       type: 'nfce';
       nfceKey: string;
-      nfceUrl: string;
-      /** Gravado como 'pending' pelo app; só a Function grava 'ok' ou 'failed'. */
-      nfceStatus: 'pending' | 'ok' | 'failed';
+      /** URL canônica da SEFAZ-SP; ausente em notas de outros estados. */
+      nfceUrl?: string;
+      /**
+       * O app grava 'pending' (SP, a conferir) ou 'unchecked' (outros estados,
+       * sem conferência automática). Só a Function grava 'ok' ou 'failed'.
+       */
+      nfceStatus: 'pending' | 'ok' | 'failed' | 'unchecked';
       nfceData?: NfceData;
       nfceError?: string;
     };
@@ -69,7 +76,9 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
   if (choice.type === 'nfce') {
     // Mesmo QR: mantém a conferência já feita. QR novo: a Function consulta de novo.
     if (current?.type === 'nfce' && current.nfceKey === choice.nfceKey) return { ...current };
-    return { type: 'nfce', nfceKey: choice.nfceKey, nfceUrl: choice.nfceUrl, nfceStatus: 'pending' };
+    return choice.nfceUrl
+      ? { type: 'nfce', nfceKey: choice.nfceKey, nfceUrl: choice.nfceUrl, nfceStatus: 'pending' }
+      : { type: 'nfce', nfceKey: choice.nfceKey, nfceStatus: 'unchecked' };
   }
   return { type: 'none' };
 }

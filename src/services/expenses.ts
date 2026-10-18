@@ -241,7 +241,8 @@ export function watchOpenItems(
 
 /** Pede à Function para consultar a nota de novo (depois de uma falha). */
 export function retryNfceCheck(groupId: string, expense: Pick<Expense, 'id' | 'receipt' | 'status'>): void {
-  if (expense.receipt.type !== 'nfce' || expense.status !== 'pending_approval') return;
+  // Só notas de SP (com URL) têm conferência automática.
+  if (expense.receipt.type !== 'nfce' || !expense.receipt.nfceUrl || expense.status !== 'pending_approval') return;
   trackWrite(
     updateDoc(doc(expensesCol(groupId), expense.id), {
       'receipt.nfceStatus': 'pending',

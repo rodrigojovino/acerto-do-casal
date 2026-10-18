@@ -130,7 +130,7 @@ import { centsFromDigits, formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
 import { createExpense, receiptPhotoUrl, updateExpense, watchExpense, type Expense, type ReceiptChoice } from '@/services/expenses';
-import { lookupNfce, type ScannedNfce } from '@/services/nfce';
+import { formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -224,7 +224,7 @@ async function loadReceipt(expense: Expense): Promise<void> {
     if (receipt.value.type === 'photo' && !receipt.value.data) receipt.value = { type: 'photo', previewUrl: url };
   } else if (r.type === 'nfce') {
     const label = r.nfceData ? `Nota de ${r.nfceData.issuerName}` : 'Nota fiscal anexada (QR Code)';
-    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl, label };
+    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl ?? null, label };
   }
 }
 
@@ -235,8 +235,26 @@ onIonViewDidEnter(() => {
 
 // ---- QR Code: pré-preenchimento pela SEFAZ (online) ----
 async function onScanned(scanned: ScannedNfce): Promise<void> {
+  // Pela chave (qualquer estado, sem rede): descrição e mês de emissão.
+  if (description.value.trim() === '') description.value = `Nota fiscal ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
+  if (!dateTouched.value && monthOf(date.value) !== scanned.yearMonth) {
+    // A chave traz só o mês: usa o último dia dele (ou hoje, se for o mês atual) e pede para conferir o dia.
+    const [y, m] = scanned.yearMonth.split('-').map(Number);
+    const lastDay = `${scanned.yearMonth}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+    const candidate = lastDay < today.value ? lastDay : today.value;
+    if (candidate >= minDate.value && candidate <= maxDate.value) date.value = candidate;
+  }
+
+  if (!scanned.spUrl) {
+    nfceMessage.value = {
+      kind: 'warn',
+      text: `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP; o gasto vai para a aprovação de ${partnerFirstName.value}.`,
+    };
+    return;
+  }
+
   nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
-  const result = await lookupNfce(scanned.url);
+  const result = await lookupNfce(scanned.spUrl);
   // Outro comprovante escolhido enquanto consultava: ignora.
   if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if ('error' in result) {
@@ -245,9 +263,12 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   }
   const nota = result.data;
   receipt.value = { ...receipt.value, label: `Nota de ${nota.issuerName}` };
-  // Preenche só o que ainda não foi digitado; nunca sobrescreve.
+  // Preenche só o que ainda não foi digitado; nunca sobrescreve. A descrição
+  // provisória da chave ("Nota fiscal SP · CNPJ …") é trocada pelo emitente.
   if (totalCents.value === 0) totalCents.value = nota.totalCents;
-  if (description.value.trim() === '') description.value = nota.issuerName.slice(0, 80);
+  if (description.value.trim() === '' || description.value.startsWith('Nota fiscal SP · CNPJ')) {
+    description.value = nota.issuerName.slice(0, 80);
+  }
   if (!dateTouched.value && nota.date >= minDate.value && nota.date <= maxDate.value) date.value = nota.date;
 
   const when = nota.date.split('-').reverse().join('/');

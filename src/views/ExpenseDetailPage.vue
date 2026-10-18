@@ -154,7 +154,8 @@ import {
 } from '@/services/expenses';
 import { NFCE_APPROVER, debtView, tagFor } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
-import { canScanQr } from '@/services/nfce';
+import { canScanQr, formatCnpj } from '@/services/nfce';
+import { UF_BY_CODE, parseAccessKey } from '../../functions/src/nfce';
 import { pendingPhotoIds } from '@/services/photoQueue';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
@@ -260,6 +261,7 @@ const receiptTitle = computed(() => {
   const r = expense.value?.receipt;
   if (!r || r.type === 'none') return 'Nenhum comprovante anexado';
   if (r.type === 'photo') return isCreator.value ? 'Foto pendente de envio' : 'Foto ainda não enviada';
+  if (r.nfceStatus === 'unchecked') return `Nota de ${nfceUf.value}: conferência automática só para SP`;
   if (r.nfceStatus === 'pending') return 'Nota fiscal: consultando a SEFAZ…';
   if (r.nfceStatus === 'failed') return 'Nota fiscal: não foi possível conferir';
   if (r.nfceData && expense.value && r.nfceData.totalCents !== expense.value.totalCents) {
@@ -281,6 +283,12 @@ const receiptDetail = computed(() => {
       : `${partnerFirstName.value} já anexou a foto; ela aparece aqui assim que for enviada. Até lá não dá para aprovar.`;
   }
   const parts: string[] = [];
+  if (r.nfceStatus === 'unchecked') {
+    const access = parseAccessKey(r.nfceKey);
+    const [y, m] = access.yearMonth.split('-');
+    parts.push(`CNPJ ${formatCnpj(access.cnpj)} · emitida em ${m}/${y}.`);
+    if (e.status !== 'confirmed') parts.push('O QR vale como comprovante; o gasto precisa de aprovação.');
+  }
   if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
   if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
   if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante; o gasto precisa de aprovação.');
@@ -298,6 +306,12 @@ const canRetryNfce = computed(
     expense.value.status === 'pending_approval' &&
     !isClosed.value,
 );
+
+/** UF da nota (pela chave), para o aviso de notas de fora de SP. */
+const nfceUf = computed(() => {
+  const r = expense.value?.receipt;
+  return r?.type === 'nfce' ? (UF_BY_CODE[r.nfceKey.slice(0, 2)] ?? r.nfceKey.slice(0, 2)) : '';
+});
 
 /** Aprovar bloqueado enquanto a foto não foi enviada (as regras também barram). */
 const approveBlocked = computed(() => {

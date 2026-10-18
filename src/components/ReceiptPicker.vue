@@ -38,7 +38,7 @@ export type ReceiptState =
   | { type: 'none' }
   /** `data`: foto nova escolhida agora (ainda não guardada); sem ela, mantém a já anexada. */
   | { type: 'photo'; data?: Blob; previewUrl: string | null }
-  | { type: 'nfce'; nfceKey: string; nfceUrl: string; label: string };
+  | { type: 'nfce'; nfceKey: string; nfceUrl: string | null; label: string };
 
 const props = defineProps<{ modelValue: ReceiptState; partnerName: string }>();
 const emit = defineEmits<{
@@ -55,7 +55,9 @@ const note = computed(() => {
     case 'photo':
       return `Com foto, ${props.partnerName} aprova depois de ver a foto. Sem conexão, a foto fica no aparelho e é enviada depois.`;
     case 'nfce':
-      return `A nota é conferida na SEFAZ. Se o valor bater, o gasto é confirmado sem precisar da aprovação de ${props.partnerName}.`;
+      return props.modelValue.nfceUrl
+        ? `A nota é conferida na SEFAZ. Se o valor bater, o gasto é confirmado sem precisar da aprovação de ${props.partnerName}.`
+        : `Nota de outro estado: vale como comprovante, mas a conferência automática é só para SP. O gasto vai para a aprovação de ${props.partnerName}.`;
     default:
       return `Sem comprovante, o gasto fica pendente até ${props.partnerName} aprovar.`;
   }
@@ -97,8 +99,8 @@ async function scanQr(): Promise<void> {
     emit('update:modelValue', {
       type: 'nfce',
       nfceKey: scanned.key,
-      nfceUrl: scanned.url,
-      label: `Nota fiscal de ${m}/${y} lida`,
+      nfceUrl: scanned.spUrl,
+      label: `Nota fiscal de ${scanned.uf} (${m}/${y}) lida`,
     });
     emit('scanned', scanned);
   } catch (err) {

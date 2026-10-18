@@ -2,8 +2,8 @@ import { BarcodeFormat, BarcodeScanner } from '@capacitor-mlkit/barcode-scanning
 import { Capacitor } from '@capacitor/core';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-// Mesmo parser das Functions: valida a URL (só SEFAZ-SP) e a chave no aparelho.
-import { NfceError, parseAccessKey, parseQrUrl } from '../../functions/src/nfce';
+// Mesmo parser das Functions: lê a chave de qualquer estado e monta a URL canônica de SP.
+import { NfceError, parseNfceQr } from '../../functions/src/nfce';
 import type { IsoDate } from '@/domain/calendar';
 import type { Cents } from '@/domain/settlement';
 import { functions } from './firebase';
@@ -15,10 +15,15 @@ export const canScanQr = Capacitor.isNativePlatform();
 export class QrError extends Error {}
 
 export interface ScannedNfce {
-  url: string;
   key: string;
+  /** Sigla da UF da nota, ex.: 'SP', 'MG'. */
+  uf: string;
+  /** CNPJ do emitente (14 dígitos), tirado da chave. */
+  cnpj: string;
   /** Mês de emissão pela chave (`YYYY-MM`), disponível mesmo offline. */
   yearMonth: string;
+  /** URL canônica de consulta na SEFAZ-SP; null para outros estados (sem conferência). */
+  spUrl: string | null;
 }
 
 export interface NfcePrefill {
@@ -27,7 +32,7 @@ export interface NfcePrefill {
   date: IsoDate;
 }
 
-/** Abre o leitor do Google e valida o QR. `null` se a pessoa cancelar. */
+/** Abre o leitor do Google e valida o QR (qualquer estado). `null` se a pessoa cancelar. */
 export async function scanNfceQr(): Promise<ScannedNfce | null> {
   const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
   if (!available) {
@@ -47,18 +52,29 @@ export async function scanNfceQr(): Promise<ScannedNfce | null> {
   if (!raw) return null;
 
   try {
-    const qr = parseQrUrl(raw);
-    return { url: raw.trim(), key: qr.key, yearMonth: parseAccessKey(qr.key).yearMonth };
+    const qr = parseNfceQr(raw);
+    return {
+      key: qr.key,
+      uf: qr.access.uf ?? qr.access.ufCode,
+      cnpj: qr.access.cnpj,
+      yearMonth: qr.access.yearMonth,
+      spUrl: qr.spUrl,
+    };
   } catch (err) {
     throw new QrError(err instanceof NfceError ? err.message : 'Este QR Code não é de uma nota fiscal.');
   }
 }
 
+/** "12345678000190" → "12.345.678/0001-90". */
+export function formatCnpj(cnpj: string): string {
+  return cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
 /**
- * Online: consulta a SEFAZ (pela Function) para pré-preencher o formulário.
+ * Só SP, online: consulta a SEFAZ (pela Function) para pré-preencher o formulário.
  * Offline ou com falha, devolve o motivo e o QR segue como comprovante (plano B).
  */
-export async function lookupNfce(url: string): Promise<{ data: NfcePrefill } | { error: string }> {
+export async function lookupNfce(spUrl: string): Promise<{ data: NfcePrefill } | { error: string }> {
   if (!navigator.onLine) return { error: 'Sem conexão: digite o valor. A nota será conferida quando a conexão voltar.' };
   try {
     const call = httpsCallable<{ url: string }, NfcePrefill & { key: string; issuerCnpj: string }>(
@@ -66,7 +82,7 @@ export async function lookupNfce(url: string): Promise<{ data: NfcePrefill } | {
       'resolveNfce',
       { timeout: 20_000 },
     );
-    const { data } = await call({ url });
+    const { data } = await call({ url: spUrl });
     return { data: { issuerName: data.issuerName, totalCents: data.totalCents, date: data.date } };
   } catch (err) {
     const message =

@@ -13,6 +13,7 @@ import {
   rejectionData,
   type ExpenseInput,
 } from '../../src/services/expenseData';
+import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
@@ -33,9 +34,15 @@ const TOO_FAR = month(2);
 const CLOSED = month(-2);
 const OPEN_PAST = month(-1);
 
-// Chave e URL fictícias (nenhuma nota real).
-const NFCE_KEY = '3'.repeat(44);
-const NFCE_URL = `https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p=${NFCE_KEY}|2|1|1|${'A'.repeat(40)}`;
+// Chaves e URL fictícias (nenhuma nota real): NFC-e (modelo 65) de SP e de MG.
+const keyFor = (ufCode: string) => {
+  const base = `${ufCode}26101122233300018165001000000123112345678`;
+  return base + checkDigit(base);
+};
+const NFCE_KEY = keyFor('35');
+const NFCE_KEY_MG = keyFor('31');
+const NFCE_URL = `${SEFAZ_SP_CANONICAL}${NFCE_KEY}|2|1|1|${'A'.repeat(40)}`;
+const nfceUnchecked = { type: 'nfce', nfceKey: NFCE_KEY_MG, nfceStatus: 'unchecked' };
 
 const serverTime = () => firebase.firestore.FieldValue.serverTimestamp();
 const removeField = () => firebase.firestore.FieldValue.delete();
@@ -242,9 +249,50 @@ describe('comprovante na criação', () => {
     await assertFails(db(A).doc(path('q4')).set(expense({ receipt: { ...nfcePending, nfceData: nfceOk.nfceData } })));
   });
 
-  it('QR: recusa chave mal formada e URL fora da SEFAZ-SP', async () => {
+  it('QR: recusa chave mal formada, de NF-e (modelo 55) e URL fora da canônica de SP', async () => {
     await assertFails(db(A).doc(path('q5')).set(expense({ receipt: { ...nfcePending, nfceKey: '123' } })));
+    const nfe = NFCE_KEY.slice(0, 20) + '55' + NFCE_KEY.slice(22);
+    await assertFails(
+      db(A).doc(path('q5b')).set(expense({ receipt: { ...nfcePending, nfceKey: nfe, nfceUrl: SEFAZ_SP_CANONICAL + nfe } })),
+    );
     await assertFails(db(A).doc(path('q6')).set(expense({ receipt: { ...nfcePending, nfceUrl: 'https://evil.example.com/x' } })));
+    await assertFails(
+      db(A).doc(path('q7')).set(
+        expense({ receipt: { ...nfcePending, nfceUrl: `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${NFCE_KEY}|2|1` } }),
+      ),
+    );
+  });
+
+  it('QR: a URL de SP precisa ser da própria chave', async () => {
+    const other = NFCE_KEY.slice(0, 34) + '9999999999';
+    await assertFails(
+      db(A).doc(path('q8')).set(expense({ receipt: { ...nfcePending, nfceUrl: `${SEFAZ_SP_CANONICAL}${other}|2|1` } })),
+    );
+  });
+
+  it('QR de outro estado: vale como "unchecked", sem URL, e nasce pendente', async () => {
+    await assertSucceeds(db(A).doc(path('mg1')).set(expense({ receipt: nfceUnchecked })));
+    await assertFails(db(A).doc(path('mg2')).set(expense({ receipt: nfceUnchecked, status: 'confirmed' })));
+  });
+
+  it('QR de outro estado não pede conferência; QR de SP não fica "unchecked"', async () => {
+    await assertFails(
+      db(A).doc(path('mg3')).set(
+        expense({ receipt: { ...nfceUnchecked, nfceStatus: 'pending', nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } }),
+      ),
+    );
+    await assertFails(db(A).doc(path('mg4')).set(expense({ receipt: { ...nfceUnchecked, nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } })));
+    await assertFails(
+      db(A).doc(path('sp-unchecked')).set(expense({ receipt: { type: 'nfce', nfceKey: NFCE_KEY, nfceStatus: 'unchecked' } })),
+    );
+  });
+
+  it('QR de outro estado: o outro membro aprova normalmente', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('b-mg')).set(seeded({ createdBy: B, payerUid: B, receipt: nfceUnchecked }));
+    });
+    await assertFails(approve(B, 'b-mg'));
+    await assertSucceeds(approve(A, 'b-mg'));
   });
 
   it('tipo desconhecido ou campos extras no comprovante são recusados', async () => {
@@ -464,6 +512,8 @@ describe('documentos montados pelo app', () => {
     await assertSucceeds(db(A).doc(path('app-2')).set(newExpenseData(photo, A, CURRENT, ids('app-2'), serverTime())));
     const qr = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, nfceUrl: NFCE_URL } };
     await assertSucceeds(db(A).doc(path('app-3')).set(newExpenseData(qr, A, CURRENT, ids('app-3'), serverTime())));
+    const qrMg = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY_MG, nfceUrl: null } };
+    await assertSucceeds(db(A).doc(path('app-4')).set(newExpenseData(qrMg, A, CURRENT, ids('app-4'), serverTime())));
   });
 
   it('edição do app passa nas regras, inclusive devolvido corrigido e confirmado pelo QR', async () => {
