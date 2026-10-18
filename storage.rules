@@ -3,7 +3,7 @@ rules_version = '2';
 // Comprovantes dos gastos: groups/{groupId}/receipts/{expenseId}.jpg
 // - membros do grupo leem;
 // - só quem lançou o gasto envia, troca ou apaga a foto, e só se o gasto
-//   tiver comprovante do tipo foto;
+//   tiver foto no comprovante (tipo foto, ou chave com foto da nota anexada);
 // - só JPEG (comprimido no aparelho abaixo de 500 KB), até 1 MB.
 // Cada operação faz uma única leitura no Firestore.
 service firebase.storage {
@@ -26,7 +26,8 @@ service firebase.storage {
         && request.resource.contentType == 'image/jpeg'
         && request.resource.size < 1024 * 1024
         && expenseDoc(groupId, fileName).data.createdBy == request.auth.uid
-        && expenseDoc(groupId, fileName).data.receipt.type == 'photo';
+        && (expenseDoc(groupId, fileName).data.receipt.type == 'photo'
+            || expenseDoc(groupId, fileName).data.receipt.get('photoPath', null) != null);
 
       allow delete: if request.auth != null
         && expenseDoc(groupId, fileName).data.createdBy == request.auth.uid;

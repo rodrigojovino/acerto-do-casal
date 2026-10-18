@@ -31,6 +31,7 @@ export function flagsFor(expense: Pick<Expense, 'receipt' | 'totalCents' | 'stat
     }
     if (r.nfceStatus === 'failed') return ['nfce-failed'];
     if (r.nfceStatus === 'pending') return ['nfce-checking'];
+    if (r.photoPath && !r.photoUploaded) return ['photo-missing'];
   }
   if (r.type === 'photo' && !r.photoUploaded) return ['photo-missing'];
   return [];
@@ -165,7 +166,7 @@ export function originLabel(
   const r = expense.receipt;
   if (r.type === 'nfce') {
     const conferred = expense.approval?.byUid === NFCE_APPROVER || r.nfceStatus === 'ok';
-    return `${fiscalKeyLabel(r)}${conferred ? ' · conferida' : ''}`;
+    return `${fiscalKeyLabel(r)}${conferred ? ' · conferida' : ''}${r.photoPath ? ' · com foto' : ''}`;
   }
   if (expense.approval?.byUid === NFCE_APPROVER) return 'Automático · nota conferida';
   if (r.type === 'photo') return 'Confirmado pela foto do recibo';

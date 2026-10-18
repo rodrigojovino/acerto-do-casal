@@ -73,7 +73,7 @@
 
           <!-- Comprovante -->
           <button
-            v-if="expense.receipt.type === 'photo' && photoUrl"
+            v-if="photoUrl"
             type="button"
             class="photo-btn"
             aria-label="Ampliar foto do comprovante"
@@ -82,7 +82,7 @@
             <img :src="photoUrl" alt="Foto do comprovante" class="photo" />
             <span v-if="photoQueuedHere" class="photo-badge">Foto pendente de envio</span>
           </button>
-          <div v-else class="receipt">
+          <div v-if="expense.receipt.type !== 'photo' || !photoUrl" class="receipt">
             <p class="strong">{{ receiptTitle }}</p>
             <p v-if="receiptDetail" class="hint">{{ receiptDetail }}</p>
             <button v-if="canRetryNfce" type="button" class="link" @click="retryNfce">Tentar conferir de novo</button>
@@ -439,6 +439,9 @@ const receiptDetail = computed(() => {
   if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
   if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
   if (r.nfceStatus === 'failed') parts.push('A chave continua valendo como comprovante.');
+  if (r.photoPath && !r.photoUploaded) {
+    parts.push(isCreator.value ? 'A foto da nota sobe quando houver conexão.' : 'A foto da nota aparece aqui assim que for enviada.');
+  }
   if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== purchaseCents.value) {
     parts.push(`O valor lançado (${formatBRL(purchaseCents.value)}) não bate com a nota.`);
   }

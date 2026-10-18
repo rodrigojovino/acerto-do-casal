@@ -667,6 +667,36 @@ describe('exclusão', () => {
 });
 
 // Os documentos exatamente como o app grava (src/services/expenseData.ts).
+describe('foto da nota junto com a chave', () => {
+  const keyPhoto = (id: string, uploaded = false) => ({ ...nfceUnchecked, photoPath: photoPath(id), photoUploaded: uploaded });
+
+  it('criar com chave e foto: continua confirmado automático; caminho errado ou já enviada é recusado', async () => {
+    await assertSucceeds(db(A).doc(path('kf1')).set(expense({ receipt: keyPhoto('kf1') })));
+    await assertSucceeds(db(A).doc(path('kf2')).set(expense({ receipt: { ...nfcePending, photoPath: photoPath('kf2'), photoUploaded: false } })));
+    await assertFails(db(A).doc(path('kf3')).set(expense({ receipt: keyPhoto('outro') })));
+    await assertFails(db(A).doc(path('kf4')).set(expense({ receipt: keyPhoto('kf4', true) })));
+    await assertFails(db(A).doc(path('kf5')).set(expense({ receipt: { ...nfceUnchecked, photoPath: photoPath('kf5') } })));
+  });
+
+  it('anexar a foto depois num confirmado com chave conferida: a conferência fica e volta para aprovação', async () => {
+    const input = { description: 'Mercado', totalCents: 20000, personalCents: 5000, payerUid: A, payerSharePct: 50, date: `${CURRENT}-05` };
+    const choice = { type: 'nfce' as const, nfceKey: NFCE_KEY, entry: 'read' as const, photo: { replaced: true } };
+    const data = expenseUpdateData({ ...input, receipt: choice }, CURRENT, { groupId: GROUP, expenseId: 'a-qr' }, { receipt: nfceOk as never, status: 'confirmed' }, serverTime(), removeField());
+    if (data.status !== 'pending_approval') throw new Error('anexar a foto num confirmado é edição: volta para aprovação');
+    await assertFails(db(A).doc(path('a-qr')).update({ ...data, status: 'confirmed' }));
+    await assertSucceeds(db(A).doc(path('a-qr')).update(data));
+  });
+
+  it('a fila marca a foto da nota como enviada (sem mexer no status); sem foto anexada, não', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('kf6')).set(seeded({ receipt: keyPhoto('kf6'), status: 'confirmed' }));
+      await ctx.firestore().doc(path('kf7')).set(seeded({ receipt: nfceUnchecked, status: 'confirmed' }));
+    });
+    await assertSucceeds(edit(A, 'kf6', { 'receipt.photoUploaded': true }));
+    await assertFails(edit(A, 'kf7', { 'receipt.photoUploaded': true }));
+  });
+});
+
 describe('observação', () => {
   it('opcional, até 300 caracteres; vazia ou de outro tipo é recusada', async () => {
     await assertSucceeds(db(A).doc(path('n1')).set(expense({ note: 'churrasco do sábado' })));

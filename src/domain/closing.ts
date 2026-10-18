@@ -9,6 +9,7 @@ import {
   type SettlementExpense,
   type Transfer,
 } from './settlement.js';
+import { receiptHasPhoto } from './image.js';
 
 /**
  * Fechamento do mês: memória de cálculo, o que impede fechar e os pagamentos
@@ -90,14 +91,14 @@ export interface Blocker {
  * Uma série de parcelas conta cada parcela do mês (só a do mês está aqui).
  */
 export function closeBlockers(
-  expenses: ReadonlyArray<{ status: ExpenseStatus; receipt: { type: string; photoUploaded?: boolean } }>,
+  expenses: ReadonlyArray<{ status: ExpenseStatus; receipt: { type: string; photoPath?: string; photoUploaded?: boolean } }>,
 ): Blocker[] {
   const counts: Record<BlockerKind, number> = { pending: 0, returned: 0, awaiting: 0, photo: 0 };
   for (const e of expenses) {
     if (e.status === 'pending_approval') counts.pending++;
     else if (e.status === 'returned') counts.returned++;
     else if (e.status === 'awaiting_confirmation') counts.awaiting++;
-    if (e.receipt.type === 'photo' && !e.receipt.photoUploaded) counts.photo++;
+    if (receiptHasPhoto(e.receipt) && !e.receipt.photoUploaded) counts.photo++;
   }
   return (['pending', 'returned', 'awaiting', 'photo'] as const)
     .filter((kind) => counts[kind] > 0)

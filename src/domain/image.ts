@@ -54,6 +54,13 @@ export async function compressToLimit(
 }
 
 /** Caminho da foto no Storage (único por gasto). */
+/** O comprovante tem foto (de recibo, ou da nota junto com a chave)? */
+export function receiptHasPhoto<R extends { type: string; photoPath?: string }>(
+  receipt: R,
+): receipt is R & { photoPath: string; photoUploaded?: boolean } {
+  return receipt.type === 'photo' || (receipt.type === 'nfce' && !!receipt.photoPath);
+}
+
 export function receiptPhotoPath(groupId: string, expenseId: string): string {
   return `groups/${groupId}/receipts/${expenseId}.jpg`;
 }

@@ -12,7 +12,7 @@ import {
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { createStore, del, entries, set } from 'idb-keyval';
 import { readonly, ref, watch } from 'vue';
-import { receiptPhotoPath } from '@/domain/image';
+import { receiptHasPhoto, receiptPhotoPath } from '@/domain/image';
 import { db, storage } from './firebase';
 import { group } from './session';
 import { isOnline } from './sync';
@@ -81,9 +81,10 @@ async function uploadOne(item: QueuedPhoto): Promise<Outcome> {
     const local = await getDocFromCache(expenseRef).catch(() => null);
     return local?.exists() ? 'waiting' : 'dropped';
   }
-  const receipt = onServer.get('receipt') as { type?: string; photoPath?: string; photoUploaded?: boolean } | undefined;
+  const receipt = onServer.get('receipt') as { type: string; photoPath?: string; photoUploaded?: boolean } | undefined;
   const path = receiptPhotoPath(item.groupId, item.expenseId);
-  if (receipt?.type !== 'photo' || receipt.photoPath !== path) return 'dropped'; // foto trocada ou removida
+  // Foto trocada ou removida (vale também para a foto anexada à chave da nota).
+  if (!receipt || !receiptHasPhoto(receipt) || receipt.photoPath !== path) return 'dropped';
 
   await uploadBytes(storageRef(storage, path), item.data, { contentType: 'image/jpeg' });
   if (!receipt.photoUploaded) {
@@ -105,8 +106,8 @@ async function markSeriesUploaded(groupId: string, seriesId: string, path: strin
   await Promise.all(
     parcels.docs
       .filter((d) => {
-        const r = d.get('receipt') as { type?: string; photoPath?: string; photoUploaded?: boolean } | undefined;
-        return d.id !== seriesId && r?.type === 'photo' && r.photoPath === path && !r.photoUploaded;
+        const r = d.get('receipt') as { type: string; photoPath?: string; photoUploaded?: boolean } | undefined;
+        return d.id !== seriesId && !!r && receiptHasPhoto(r) && r.photoPath === path && !r.photoUploaded;
       })
       .map((d) => updateDoc(d.ref, { 'receipt.photoUploaded': true, updatedAt: serverTimestamp() }).catch(() => undefined)),
   );

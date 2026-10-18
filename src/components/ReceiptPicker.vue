@@ -57,7 +57,17 @@
         <button type="button" class="btn primary" @click="useTypedKey">Usar chave</button>
       </div>
     </div>
-    <p v-else-if="modelValue.type === 'nfce'" class="hint strong">{{ modelValue.label }}</p>
+    <template v-else-if="modelValue.type === 'nfce'">
+      <p class="hint strong">{{ modelValue.label }}</p>
+      <!-- Foto da nota junto com a chave (opcional): o selo continua Automático -->
+      <div v-if="modelValue.photo" class="preview">
+        <img v-if="modelValue.photo.previewUrl" :src="modelValue.photo.previewUrl" alt="Foto da nota" class="thumb" />
+        <span v-else class="thumb placeholder">Foto já anexada</span>
+        <button type="button" class="link" :disabled="busy" @click="chooseKeyPhoto">Trocar foto</button>
+        <button type="button" class="link" :disabled="busy" @click="removeKeyPhoto">Remover foto</button>
+      </div>
+      <button v-else type="button" class="link" :disabled="busy" @click="chooseKeyPhoto">Anexar foto da nota (opcional)</button>
+    </template>
 
     <p v-if="error" class="field-error" role="alert">{{ error }}</p>
     <p class="hint">{{ note }}</p>
@@ -76,8 +86,18 @@ export type ReceiptState =
   | { type: 'none' }
   /** `data`: foto nova escolhida agora (ainda não guardada); sem ela, mantém a já anexada. */
   | { type: 'photo'; data?: Blob; previewUrl: string | null }
-  /** Chave de NF-e ou NFC-e, lida (QR ou código de barras) ou digitada. `spUrl`: só NFC-e de SP (conferida). */
-  | { type: 'nfce'; nfceKey: string; entry: KeyEntry; spUrl: string | null; label: string };
+  /**
+   * Chave de NF-e ou NFC-e, lida (QR ou código de barras) ou digitada. `spUrl`: só NFC-e de SP (conferida).
+   * `photo`: foto da nota anexada à chave (opcional); `data` = foto nova escolhida agora.
+   */
+  | {
+      type: 'nfce';
+      nfceKey: string;
+      entry: KeyEntry;
+      spUrl: string | null;
+      label: string;
+      photo?: { data?: Blob; previewUrl: string | null };
+    };
 
 const props = defineProps<{ modelValue: ReceiptState; partnerName: string }>();
 const emit = defineEmits<{
@@ -108,10 +128,11 @@ const note = computed(() => {
   }
 });
 
-async function choosePhoto(): Promise<void> {
+/** Câmera ou galeria, já comprimida; `null` se a pessoa desistir. */
+async function pickPhoto(header: string): Promise<Blob | null> {
   error.value = null;
   const sheet = await actionSheetController.create({
-    header: 'Foto do comprovante',
+    header,
     buttons: [
       { text: 'Tirar foto', data: 'camera' },
       { text: 'Escolher da galeria', data: 'gallery' },
@@ -120,18 +141,39 @@ async function choosePhoto(): Promise<void> {
   });
   await sheet.present();
   const { data } = await sheet.onDidDismiss<PhotoSource>();
-  if (data !== 'camera' && data !== 'gallery') return;
+  if (data !== 'camera' && data !== 'gallery') return null;
 
   busy.value = true;
   try {
-    const photo = await pickReceiptPhoto(data);
-    if (!photo) return;
-    emit('update:modelValue', { type: 'photo', data: photo.data, previewUrl: URL.createObjectURL(photo.data) });
+    return (await pickReceiptPhoto(data))?.data ?? null;
   } catch (err) {
     error.value = err instanceof PhotoError ? err.message : 'Não foi possível usar esta foto.';
+    return null;
   } finally {
     busy.value = false;
   }
+}
+
+async function choosePhoto(): Promise<void> {
+  const data = await pickPhoto('Foto do comprovante');
+  if (data) emit('update:modelValue', { type: 'photo', data, previewUrl: URL.createObjectURL(data) });
+}
+
+/** Foto da nota junto com a chave (o comprovante continua sendo a chave). */
+async function chooseKeyPhoto(): Promise<void> {
+  const data = await pickPhoto('Foto da nota');
+  const current = props.modelValue;
+  if (data && current.type === 'nfce') {
+    emit('update:modelValue', { ...current, photo: { data, previewUrl: URL.createObjectURL(data) } });
+  }
+}
+
+function removeKeyPhoto(): void {
+  const current = props.modelValue;
+  if (current.type !== 'nfce') return;
+  const { photo: _photo, ...rest } = current;
+  void _photo;
+  emit('update:modelValue', rest);
 }
 
 /** Chave lida ou digitada vira o comprovante do formulário. */

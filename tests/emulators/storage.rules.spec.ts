@@ -90,6 +90,29 @@ describe('leitura e exclusão', () => {
   });
 });
 
+describe('foto da nota junto com a chave', () => {
+  const key = '31' + '2'.repeat(18) + '55' + '3'.repeat(22);
+
+  it('quem lançou envia a foto da nota quando a chave tem foto anexada; sem foto anexada, não', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc(`groups/${GROUP}/expenses/chave-foto`).set({
+        createdBy: A,
+        receipt: { type: 'nfce', nfceKey: key, entry: 'read', nfceStatus: 'unchecked', photoPath: receipt('chave-foto'), photoUploaded: false },
+      });
+      await db.doc(`groups/${GROUP}/expenses/chave-sem`).set({
+        createdBy: A,
+        receipt: { type: 'nfce', nfceKey: key, entry: 'read', nfceStatus: 'unchecked' },
+      });
+    });
+    const put = (uid: string, id: string) =>
+      env.authenticatedContext(uid).storage().ref(receipt(id)).put(jpeg(2048), { contentType: 'image/jpeg' });
+    await assertSucceeds(put(A, 'chave-foto'));
+    await assertFails(put(B, 'chave-foto'));
+    await assertFails(put(A, 'chave-sem'));
+  });
+});
+
 describe('comprovante PIX do acerto', () => {
   const MONTH = '2026-09';
   const pix = (id: string, month = MONTH) => `groups/${GROUP}/settlements/${month}/${id}.jpg`;

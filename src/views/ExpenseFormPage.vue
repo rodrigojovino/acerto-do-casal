@@ -329,6 +329,14 @@ async function loadReceipt(expense: Expense): Promise<void> {
     const doc = fiscalDocName(r.nfceKey.slice(20, 22));
     const label = r.nfceData ? `${doc} de ${r.nfceData.issuerName}` : `${doc} anexada (chave ${r.entry === 'typed' ? 'digitada' : 'lida'})`;
     receipt.value = { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry ?? 'read', spUrl: r.nfceUrl ?? null, label };
+    if (r.photoPath) {
+      // Foto da nota já anexada: mostra a prévia quando carregar.
+      receipt.value = { ...receipt.value, photo: { previewUrl: null } };
+      const url = group.value ? await receiptPhotoUrl(group.value.id, expense) : null;
+      if (receipt.value.type === 'nfce' && receipt.value.photo && !receipt.value.photo.data) {
+        receipt.value = { ...receipt.value, photo: { previewUrl: url } };
+      }
+    }
   }
 }
 
@@ -515,7 +523,9 @@ function save(): void {
     date: date.value,
     receipt: receiptChoice(),
   };
-  const photo = receipt.value.type === 'photo' ? receipt.value.data : undefined;
+  // Foto nova: de recibo, ou da nota junto com a chave.
+  const photo =
+    receipt.value.type === 'photo' ? receipt.value.data : receipt.value.type === 'nfce' ? receipt.value.photo?.data : undefined;
   // Não espera o servidor: offline, a gravação (e a foto) sincronizam depois.
   if (editing?.installment) {
     const targets = seriesParcels.value.length > 0 ? seriesTargets(seriesParcels.value, 'edit', myUid.value, closedMonths.value) : [editing];
@@ -548,7 +558,9 @@ function save(): void {
 function receiptChoice(): ReceiptChoice {
   const r = receipt.value;
   if (r.type === 'photo') return { type: 'photo', replaced: r.data !== undefined };
-  if (r.type === 'nfce') return { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry };
+  if (r.type === 'nfce') {
+    return { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry, ...(r.photo ? { photo: { replaced: r.photo.data !== undefined } } : {}) };
+  }
   return { type: 'none' };
 }
 

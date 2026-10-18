@@ -41,7 +41,13 @@ export type ReceiptChoice =
    * código de barras) ou digitada. NFC-e de SP é conferida na SEFAZ pela
    * Function; as demais valem como comprovante sem conferência.
    */
-  | { type: 'nfce'; nfceKey: string; entry: KeyEntry };
+  | {
+      type: 'nfce';
+      nfceKey: string;
+      entry: KeyEntry;
+      /** Foto da nota anexada à chave (opcional); `replaced`: foto nova escolhida agora. */
+      photo?: { replaced: boolean };
+    };
 
 /** Como a chave chegou: lida pelo leitor (QR ou código de barras) ou digitada. */
 export type KeyEntry = 'read' | 'typed';
@@ -71,6 +77,9 @@ export type StoredReceipt =
       nfceStatus: 'pending' | 'ok' | 'failed' | 'unchecked';
       nfceData?: NfceData;
       nfceError?: string;
+      /** Foto da nota anexada à chave (opcional), no mesmo caminho das fotos de recibo. */
+      photoPath?: string;
+      photoUploaded?: boolean;
     };
 
 export interface ExpenseIds {
@@ -88,13 +97,24 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
     };
   }
   if (choice.type === 'nfce') {
-    // Mesma chave: mantém a conferência já feita. Chave nova: a Function consulta de novo.
-    if (current?.type === 'nfce' && current.nfceKey === choice.nfceKey) return { ...current };
-    // QR e código de barras da mesma nota dão o mesmo comprovante (URL montada da chave).
-    const nfceUrl = spConsultUrl(choice.nfceKey);
-    return nfceUrl
-      ? { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceUrl, nfceStatus: 'pending' }
-      : { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceStatus: 'unchecked' };
+    let base: StoredReceipt & { type: 'nfce' };
+    if (current?.type === 'nfce' && current.nfceKey === choice.nfceKey) {
+      // Mesma chave: mantém a conferência já feita (a foto é tratada abaixo).
+      const { photoPath: _path, photoUploaded: _uploaded, ...rest } = current;
+      void _path;
+      void _uploaded;
+      base = rest;
+    } else {
+      // Chave nova: a Function consulta de novo. QR e código de barras da mesma
+      // nota dão o mesmo comprovante (URL montada da chave).
+      const nfceUrl = spConsultUrl(choice.nfceKey);
+      base = nfceUrl
+        ? { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceUrl, nfceStatus: 'pending' }
+        : { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceStatus: 'unchecked' };
+    }
+    if (!choice.photo) return base;
+    const keepUpload = !choice.photo.replaced && current?.type === 'nfce' && current.photoUploaded === true;
+    return { ...base, photoPath: receiptPhotoPath(ids.groupId, ids.expenseId), photoUploaded: keepUpload };
   }
   return { type: 'none' };
 }

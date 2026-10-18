@@ -21,7 +21,7 @@ import { expenseLabel } from './expenseView';
 import type { InstallmentInfo } from '@/domain/installments';
 import type { Competence, ExpenseStatus, SettlementExpense } from '@/domain/settlement';
 import { deleteObject, getDownloadURL, ref as storageRef } from 'firebase/storage';
-import { receiptPhotoPath } from '@/domain/image';
+import { receiptHasPhoto, receiptPhotoPath } from '@/domain/image';
 import {
   approvalData,
   contestData,
@@ -33,6 +33,7 @@ import {
   validationData,
   type ExpenseInput,
   type InstallmentChoice,
+  type ReceiptChoice,
   type SeriesEditInput,
   type StoredReceipt,
 } from './expenseData';
@@ -84,6 +85,9 @@ export interface WriteResult {
 }
 
 const expensesCol = (groupId: string) => collection(db, 'groups', groupId, 'expenses');
+
+/** O comprovante escolhido tem foto: de recibo, ou da nota junto com a chave. */
+const choiceHasPhoto = (c: ReceiptChoice) => c.type === 'photo' || (c.type === 'nfce' && !!c.photo);
 
 
 function toExpense(snap: DocumentSnapshot): Expense {
@@ -186,7 +190,7 @@ export function createExpense(
     setDoc(ref, newExpenseData(input, uid, competence, ids, serverTimestamp())),
     `Não foi possível salvar o gasto ${expenseLabel(input)}.`,
   );
-  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, ref.id, photo);
+  if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, ref.id, photo);
   return { id: ref.id, competence };
 }
 
@@ -208,8 +212,8 @@ export function updateExpense(
     ),
     `Não foi possível salvar a alteração do gasto ${expenseLabel(input)}.`,
   );
-  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, current.id, photo);
-  else if (input.receipt.type !== 'photo') void discardQueuedPhoto(groupId, current.id);
+  if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, current.id, photo);
+  else if (!choiceHasPhoto(input.receipt)) void discardQueuedPhoto(groupId, current.id);
   return { id: current.id, competence };
 }
 
@@ -220,7 +224,7 @@ export function updateExpense(
  */
 export async function deleteExpense(groupId: string, expense: Pick<Expense, 'id' | 'receipt'>): Promise<void> {
   void discardQueuedPhoto(groupId, expense.id);
-  if (expense.receipt.type === 'photo' && expense.receipt.photoUploaded && navigator.onLine) {
+  if (receiptHasPhoto(expense.receipt) && expense.receipt.photoUploaded && navigator.onLine) {
     const photo = deleteObject(storageRef(storage, receiptPhotoPath(groupId, expense.id))).catch(() => undefined);
     const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
     await Promise.race([photo, timeout]);
@@ -291,7 +295,7 @@ export async function receiptPhotoUrl(
   groupId: string,
   expense: Pick<Expense, 'id' | 'receipt' | 'installment'>,
 ): Promise<string | null> {
-  if (expense.receipt.type !== 'photo') return null;
+  if (!receiptHasPhoto(expense.receipt)) return null;
   const owner = receiptOwnerId(expense);
   const local = await queuedPhotoUrl(groupId, owner);
   if (local) return local;
@@ -330,7 +334,7 @@ export function createInstallmentSeries(
   const batch = writeBatch(db);
   for (const p of parcels) batch.set(doc(expensesCol(groupId), p.id), p.data);
   trackWrite(batch.commit(), `Não foi possível salvar a compra parcelada ${expenseLabel(input)}.`);
-  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, seriesId, photo);
+  if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, seriesId, photo);
   return { id: seriesId, competence: choice.firstMonth };
 }
 
@@ -370,8 +374,8 @@ export function updateSeries(
     );
   }
   trackWrite(batch.commit(), 'Não foi possível salvar a alteração da série.');
-  if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, seriesId, photo);
-  else if (input.receipt.type !== 'photo') void discardQueuedPhoto(groupId, seriesId);
+  if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, seriesId, photo);
+  else if (!choiceHasPhoto(input.receipt)) void discardQueuedPhoto(groupId, seriesId);
 }
 
 /**
@@ -386,7 +390,7 @@ export async function deleteSeries(
   if (parcels.length === 0) return;
   void discardQueuedPhoto(groupId, seriesId);
   const receipt = parcels[0].receipt;
-  if (receipt.type === 'photo' && receipt.photoUploaded && navigator.onLine) {
+  if (receiptHasPhoto(receipt) && receipt.photoUploaded && navigator.onLine) {
     const photo = deleteObject(storageRef(storage, receiptPhotoPath(groupId, seriesId))).catch(() => undefined);
     const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
     await Promise.race([photo, timeout]);

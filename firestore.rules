@@ -127,6 +127,15 @@ service cloud.firestore {
       //   URL (sem conferência automática; a consulta de NF-e exige captcha).
       // O app nunca grava 'ok'/'failed' nem nfceData. Na edição, o comprovante
       // pode ser mantido exatamente como está (inclusive já conferido).
+      // Foto da nota anexada à chave (opcional): no caminho do dono, não enviada na criação.
+      function validKeyPhoto(r, ownerId, isNew) {
+        return !r.keys().hasAny(['photoPath', 'photoUploaded'])
+          || r.keys().hasAll(['photoPath', 'photoUploaded'])
+            && r.photoPath == photoPath(ownerId)
+            && r.photoUploaded is bool
+            && (!isNew || r.photoUploaded == false);
+      }
+
       // `ownerId`: o gasto (ou, numa parcela, a série) dono da foto.
       function validReceipt(r, ownerId, isNew) {
         return r.type == 'none' && r.keys().hasOnly(['type'])
@@ -138,16 +147,23 @@ service cloud.firestore {
           || r.type == 'nfce'
             && (
               !isNew && r == resource.data.receipt
+              // Mesma chave, só a foto anexada, trocada ou removida (a conferência fica).
+              || !isNew
+                && resource.data.receipt.type == 'nfce'
+                && r.diff(resource.data.receipt).affectedKeys().hasOnly(['photoPath', 'photoUploaded'])
+                && validKeyPhoto(r, ownerId, false)
               || r.nfceKey is string
                 && r.nfceKey.matches('^[0-9]{20}(55|65)[0-9]{22}$')
                 && r.get('entry', null) in ['read', 'typed']
                 && (
-                  r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceUrl', 'nfceStatus'])
+                  r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceUrl', 'nfceStatus', 'photoPath', 'photoUploaded'])
+                    && validKeyPhoto(r, ownerId, isNew)
                     && r.nfceStatus == 'pending'
                     && r.nfceKey.matches('^35[0-9]{18}65[0-9]{22}$')
                     && r.nfceUrl == 'https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p='
                          + r.nfceKey + '|3|1'
-                  || r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceStatus'])
+                  || r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceStatus', 'photoPath', 'photoUploaded'])
+                    && validKeyPhoto(r, ownerId, isNew)
                     && r.nfceStatus == 'unchecked'
                     && !r.nfceKey.matches('^35[0-9]{18}65[0-9]{22}$')
                 )
@@ -271,7 +287,7 @@ service cloud.firestore {
       // sem tocar em mais nada, inclusive o status (vale para devolvido também).
       function isPhotoUploadedMark() {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receipt', 'updatedAt'])
-          && resource.data.receipt.type == 'photo'
+          && (resource.data.receipt.type == 'photo' || resource.data.receipt.keys().hasAny(['photoPath']))
           && request.resource.data.receipt.diff(resource.data.receipt).affectedKeys().hasOnly(['photoUploaded'])
           && request.resource.data.receipt.photoUploaded == true
           && request.resource.data.updatedAt == request.time;

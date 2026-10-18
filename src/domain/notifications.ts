@@ -82,17 +82,16 @@ function subject(e: ExpenseSnapshot): string {
 }
 
 /**
- * O que vem depois do valor: aprovar (pendente, com o resumo da observação)
- * ou a origem (confirmado automático).
+ * O que vem depois do valor: aprovar (pendente) ou a origem (confirmado
+ * automático), seguidos do resumo da observação, se houver.
  */
 function tail(e: ExpenseSnapshot): string {
-  if (e.status === 'pending_approval') {
-    const note = noteSummary(e.note);
-    return ` · toque para aprovar${note ? ` — “${note}”` : ''}`;
-  }
+  const note = noteSummary(e.note);
+  const withNote = (text: string) => `${text}${note ? ` — “${note}”` : ''}`;
+  if (e.status === 'pending_approval') return withNote(' · toque para aprovar');
   if (e.status === 'confirmed' && !e.approval) {
     const origin = receiptOrigin(e.receipt);
-    return origin ? ` · ${origin}` : '';
+    return withNote(origin ? ` · ${origin}` : '');
   }
   return '';
 }

@@ -66,11 +66,13 @@ describe('observação nos avisos de aprovação', () => {
     expect(long?.endsWith('…')).toBe(true);
   });
 
-  it('aviso para aprovar leva o resumo; confirmado automático não', () => {
+  it('aviso para aprovar e de confirmado automático levam o resumo (depois da origem)', () => {
     const pending = expenseNotices(null, expense({ note: 'churrasco do sábado' }), 'g1', ctx)[0];
     expect(brl(pending.body)).toBe('Ana lançou Mercado · R$ 214,00 · toque para aprovar — “churrasco do sábado”');
-    const auto = expenseNotices(null, expense({ status: 'confirmed', receipt: { type: 'photo' }, note: 'x' }), 'g1', ctx)[0];
-    expect(auto.body.endsWith('foto do recibo')).toBe(true);
+    const auto = expenseNotices(null, expense({ status: 'confirmed', receipt: { type: 'photo' }, note: 'feira do mês' }), 'g1', ctx)[0];
+    expect(brl(auto.body)).toBe('Ana lançou Mercado · R$ 214,00 · foto do recibo — “feira do mês”');
+    const noNote = expenseNotices(null, expense({ status: 'confirmed', receipt: { type: 'photo' } }), 'g1', ctx)[0];
+    expect(noNote.body.endsWith('foto do recibo')).toBe(true);
   });
 });
 
