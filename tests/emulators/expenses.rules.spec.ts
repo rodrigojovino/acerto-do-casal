@@ -16,6 +16,7 @@ import {
   type ExpenseInput,
 } from '../../src/services/expenseData';
 import { SEFAZ_SP_CANONICAL, checkDigit, parseFiscalCode, parseTypedKey } from '../../functions/src/nfce';
+import { resolveCompetence } from '../../src/domain/calendar';
 import { createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
@@ -694,6 +695,30 @@ describe('foto da nota junto com a chave', () => {
     });
     await assertSucceeds(edit(A, 'kf6', { 'receipt.photoUploaded': true }));
     await assertFails(edit(A, 'kf7', { 'receipt.photoUploaded': true }));
+  });
+});
+
+describe('relançar no mês aberto (mês fechou enquanto o gasto estava offline)', () => {
+  it('o lançamento no mês fechado é recusado; o mesmo gasto relançado entra no mês aberto, com a data original', async () => {
+    const input = {
+      description: 'Mercado',
+      note: 'feira do mês',
+      totalCents: 20000,
+      personalCents: 0,
+      payerUid: A,
+      payerSharePct: 50,
+      date: `${CLOSED}-20`,
+      receipt: { type: 'none' as const },
+    };
+    // O que o app gravou offline: competência = mês da data, que depois fechou.
+    const offline = newExpenseData(input, A, CLOSED, { groupId: GROUP, expenseId: 'off1' }, serverTime());
+    await assertFails(db(A).doc(path('off1')).set(offline));
+    // "Lançar no mês aberto": mesmos dados, competência resolvida com o mês fechado.
+    const competence = resolveCompetence(input.date, new Set([CLOSED]), `${CURRENT}-01`);
+    expect(competence).not.toBe(CLOSED);
+    const relaunched = newExpenseData(input, A, competence, { groupId: GROUP, expenseId: 'off2' }, serverTime());
+    expect(relaunched.date).toBe(`${CLOSED}-20`);
+    await assertSucceeds(db(A).doc(path('off2')).set(relaunched));
   });
 });
 

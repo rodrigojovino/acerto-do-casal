@@ -17,13 +17,18 @@ if (typeof window !== 'undefined') {
 /**
  * Acompanha uma gravação do Firestore sem bloquear a tela. A promessa só
  * termina quando o servidor confirma (offline, quando a conexão volta);
- * se a regra recusar, guarda a mensagem para o aviso.
+ * se a regra recusar, guarda a mensagem para o aviso. `onDenied`: quem trata
+ * a recusa das regras por conta própria (lançamento novo: "Lançar no mês aberto").
  */
-export function trackWrite(write: Promise<unknown>, failMessage: string): void {
+export function trackWrite(write: Promise<unknown>, failMessage: string, onDenied?: () => void): void {
   inFlight.value++;
   write
     .catch((err: unknown) => {
       const code = (err as { code?: string })?.code;
+      if (code === 'permission-denied' && onDenied) {
+        onDenied();
+        return;
+      }
       lastError.value =
         code === 'permission-denied'
           ? `${failMessage} O mês pode ter sido fechado ou o gasto mudou; se precisar, lance de novo com esses dados.`

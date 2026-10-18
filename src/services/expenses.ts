@@ -40,6 +40,7 @@ import {
 import { db, storage } from './firebase';
 import { discardQueuedPhoto, queuePhoto, queuedPhotoUrl } from './photoQueue';
 import { trackWrite } from './sync';
+import { checkLaunchesSoon, forgetLaunch, rememberLaunch } from './launchGuard';
 
 export type { ExpenseInput, InstallmentChoice, ReceiptChoice, SeriesEditInput } from './expenseData';
 
@@ -186,9 +187,12 @@ export function createExpense(
   const ref = doc(expensesCol(groupId));
   const ids = { groupId, expenseId: ref.id };
   const competence = resolveCompetence(input.date, closedMonths, today);
+  // Guardado no aparelho até o servidor confirmar (recusado: "Lançar no mês aberto").
+  rememberLaunch({ groupId, expenseId: ref.id, kind: 'single', input, photo: choiceHasPhoto(input.receipt) ? photo : undefined });
   trackWrite(
     setDoc(ref, newExpenseData(input, uid, competence, ids, serverTimestamp())),
     `Não foi possível salvar o gasto ${expenseLabel(input)}.`,
+    checkLaunchesSoon,
   );
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, ref.id, photo);
   return { id: ref.id, competence };
@@ -224,6 +228,7 @@ export function updateExpense(
  */
 export async function deleteExpense(groupId: string, expense: Pick<Expense, 'id' | 'receipt'>): Promise<void> {
   void discardQueuedPhoto(groupId, expense.id);
+  void forgetLaunch(groupId, expense.id);
   if (receiptHasPhoto(expense.receipt) && expense.receipt.photoUploaded && navigator.onLine) {
     const photo = deleteObject(storageRef(storage, receiptPhotoPath(groupId, expense.id))).catch(() => undefined);
     const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
@@ -333,7 +338,8 @@ export function createInstallmentSeries(
   const parcels = newInstallmentSeriesData(input, choice, uid, { groupId, seriesId }, serverTimestamp());
   const batch = writeBatch(db);
   for (const p of parcels) batch.set(doc(expensesCol(groupId), p.id), p.data);
-  trackWrite(batch.commit(), `Não foi possível salvar a compra parcelada ${expenseLabel(input)}.`);
+  rememberLaunch({ groupId, expenseId: seriesId, kind: 'series', input, installment: choice });
+  trackWrite(batch.commit(), `Não foi possível salvar a compra parcelada ${expenseLabel(input)}.`, checkLaunchesSoon);
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, seriesId, photo);
   return { id: seriesId, competence: choice.firstMonth };
 }
@@ -389,6 +395,7 @@ export async function deleteSeries(
 ): Promise<void> {
   if (parcels.length === 0) return;
   void discardQueuedPhoto(groupId, seriesId);
+  void forgetLaunch(groupId, seriesId);
   const receipt = parcels[0].receipt;
   if (receiptHasPhoto(receipt) && receipt.photoUploaded && navigator.onLine) {
     const photo = deleteObject(storageRef(storage, receiptPhotoPath(groupId, seriesId))).catch(() => undefined);

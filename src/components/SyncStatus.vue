@@ -6,6 +6,7 @@
     <span v-else-if="syncing" class="pill syncing">
       <span class="dot" aria-hidden="true"></span>Sincronizando…
     </span>
+    <RejectedLaunches />
     <p v-if="writeError" class="alert-error error" role="alert">
       <span>{{ writeError }}</span>
       <button class="link" type="button" @click="clearWriteError">Ok</button>
@@ -16,6 +17,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { clearWriteError, isOnline, isSyncing, writeError } from '@/services/sync';
+import RejectedLaunches from './RejectedLaunches.vue';
 
 const props = defineProps<{
   /** Há gravações deste mês ainda não confirmadas pelo servidor (vindas do cache). */
