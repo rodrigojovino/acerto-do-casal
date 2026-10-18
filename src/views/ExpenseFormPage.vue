@@ -48,6 +48,7 @@
                 v-model="date"
                 class="input"
                 type="date"
+                @input="dateTouched = true"
                 :min="minDate"
                 :max="maxDate"
                 :aria-invalid="showErrors && !!errors.date"
@@ -90,7 +91,13 @@
             </div>
           </div>
 
-          <p class="hint">Sem comprovante, o gasto fica pendente até a outra pessoa aprovar. Foto e QR Code da nota chegam na próxima fase.</p>
+          <ReceiptPicker
+            ref="picker"
+            v-model="receipt"
+            :partner-name="partnerFirstName"
+            @scanned="onScanned"
+          />
+          <p v-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
 
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
@@ -106,8 +113,9 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonPage, onIonViewWillEnter } from '@ionic/vue';
+import { IonContent, IonPage, onIonViewDidEnter, onIonViewWillEnter } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref } from 'vue';
+import ReceiptPicker, { type ReceiptState } from '@/components/ReceiptPicker.vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   firstDayOf,
@@ -121,7 +129,8 @@ import {
 import { centsFromDigits, formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
-import { createExpense, updateExpense, watchExpense, type Expense } from '@/services/expenses';
+import { createExpense, receiptPhotoUrl, updateExpense, watchExpense, type Expense, type ReceiptChoice } from '@/services/expenses';
+import { lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -146,6 +155,12 @@ const payerUid = ref(myUid.value);
 /** Guardado como no banco: a parte de quem pagou. A tela converte com split.ts. */
 const payerSharePct = ref(group.value?.defaultSplitPct ?? 50);
 const showErrors = ref(false);
+const receipt = ref<ReceiptState>({ type: 'none' });
+const dateTouched = ref(false);
+const nfceMessage = ref<{ kind: 'info' | 'ok' | 'warn'; text: string } | null>(null);
+const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
+/** `?anexar=qr` (aba Pendências): abre o leitor de QR assim que o gasto carregar. */
+const attachQr = route.query.anexar === 'qr';
 
 const ready = ref(!isEdit);
 const blocked = ref<string | null>(null);
@@ -163,6 +178,9 @@ onIonViewWillEnter(() => {
   payerUid.value = myUid.value;
   payerSharePct.value = group.value?.defaultSplitPct ?? 50;
   showErrors.value = false;
+  receipt.value = { type: 'none' };
+  dateTouched.value = false;
+  nfceMessage.value = null;
 });
 
 // Edição: carrega o gasto uma vez (também do cache offline).
@@ -186,13 +204,58 @@ if (editId && group.value) {
         date.value = expense.date;
         payerUid.value = expense.payerUid;
         payerSharePct.value = expense.payerSharePct;
+        dateTouched.value = true;
+        void loadReceipt(expense);
         ready.value = true;
+        if (attachQr) setTimeout(() => void picker.value?.scanQr(), 300);
       }
     },
     () => (blocked.value = 'Não foi possível carregar o gasto.'),
   );
 }
 onBeforeUnmount(() => stopWatch?.());
+
+/** Comprovante atual do gasto em edição, na forma da seção de comprovante. */
+async function loadReceipt(expense: Expense): Promise<void> {
+  const r = expense.receipt;
+  if (r.type === 'photo') {
+    receipt.value = { type: 'photo', previewUrl: null };
+    const url = group.value ? await receiptPhotoUrl(group.value.id, expense) : null;
+    if (receipt.value.type === 'photo' && !receipt.value.data) receipt.value = { type: 'photo', previewUrl: url };
+  } else if (r.type === 'nfce') {
+    const label = r.nfceData ? `Nota de ${r.nfceData.issuerName}` : 'Nota fiscal anexada (QR Code)';
+    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl, label };
+  }
+}
+
+// Novo gasto aberto pelo atalho de QR: abre o leitor ao entrar.
+onIonViewDidEnter(() => {
+  if (!isEdit && attachQr) void picker.value?.scanQr();
+});
+
+// ---- QR Code: pré-preenchimento pela SEFAZ (online) ----
+async function onScanned(scanned: ScannedNfce): Promise<void> {
+  nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
+  const result = await lookupNfce(scanned.url);
+  // Outro comprovante escolhido enquanto consultava: ignora.
+  if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
+  if ('error' in result) {
+    nfceMessage.value = { kind: 'warn', text: result.error };
+    return;
+  }
+  const nota = result.data;
+  receipt.value = { ...receipt.value, label: `Nota de ${nota.issuerName}` };
+  // Preenche só o que ainda não foi digitado; nunca sobrescreve.
+  if (totalCents.value === 0) totalCents.value = nota.totalCents;
+  if (description.value.trim() === '') description.value = nota.issuerName.slice(0, 80);
+  if (!dateTouched.value && nota.date >= minDate.value && nota.date <= maxDate.value) date.value = nota.date;
+
+  const when = nota.date.split('-').reverse().join('/');
+  nfceMessage.value =
+    totalCents.value === nota.totalCents
+      ? { kind: 'ok', text: `Nota de ${formatBRL(nota.totalCents)} em ${when}. Se o valor continuar igual, o gasto é confirmado sem aprovação.` }
+      : { kind: 'warn', text: `Valor diferente da nota (${formatBRL(nota.totalCents)}). O gasto ficará pendente até ${partnerFirstName.value} aprovar.` };
+}
 
 // ---- Limites de data ----
 const firstMonth = computed(() => {
@@ -277,19 +340,26 @@ function save(): void {
     payerUid: payerUid.value,
     payerSharePct: payerSharePct.value,
     date: date.value,
-    // Seção de comprovante chega com as telas da Fase 4; por ora mantém o que o gasto já tem.
-    receipt: editing?.receipt.type === 'photo' ? { type: 'photo' as const, replaced: false } : { type: 'none' as const },
+    receipt: receiptChoice(),
   };
-  // Não espera o servidor: offline, a gravação sincroniza depois.
+  const photo = receipt.value.type === 'photo' ? receipt.value.data : undefined;
+  // Não espera o servidor: offline, a gravação (e a foto) sincronizam depois.
   const result = editing
-    ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value)
-    : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value);
+    ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value, photo)
+    : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value, photo);
 
   router.replace(
     editing
       ? { name: 'gasto', params: { id: result.id } }
       : { name: 'painel', query: { mes: result.competence } },
   );
+}
+
+function receiptChoice(): ReceiptChoice {
+  const r = receipt.value;
+  if (r.type === 'photo') return { type: 'photo', replaced: r.data !== undefined };
+  if (r.type === 'nfce') return { type: 'nfce', nfceKey: r.nfceKey, nfceUrl: r.nfceUrl };
+  return { type: 'none' };
 }
 
 function goBack(): void {
@@ -299,6 +369,29 @@ function goBack(): void {
 </script>
 
 <style scoped>
+.nfce-msg {
+  margin: -4px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-control);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nfce-msg.info {
+  background: #e3eafa;
+  color: var(--app-accent-dark);
+}
+
+.nfce-msg.ok {
+  background: #e2f1e6;
+  color: #1e6b3a;
+}
+
+.nfce-msg.warn {
+  background: #fcebd9;
+  color: #8a3f00;
+}
+
 .form {
   display: flex;
   flex-direction: column;

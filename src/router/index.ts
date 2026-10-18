@@ -6,6 +6,7 @@ import EntradaPage from '../views/EntradaPage.vue';
 import VinculoPage from '../views/VinculoPage.vue';
 import PainelPage from '../views/PainelPage.vue';
 import EmBrevePage from '../views/EmBrevePage.vue';
+import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 import ExpenseDetailPage from '../views/ExpenseDetailPage.vue';
 
@@ -14,7 +15,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/entrar', name: 'entrar', component: EntradaPage },
   { path: '/vinculo', name: 'vinculo', component: VinculoPage },
   { path: '/painel', name: 'painel', component: PainelPage },
-  { path: '/pendencias', name: 'pendencias', component: EmBrevePage },
+  { path: '/pendencias', name: 'pendencias', component: PendenciasPage },
   { path: '/historico', name: 'historico', component: EmBrevePage },
   { path: '/ajustes', name: 'ajustes', component: EmBrevePage },
   { path: '/gasto/novo', name: 'gasto-novo', component: ExpenseFormPage },

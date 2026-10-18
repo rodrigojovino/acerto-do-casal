@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
-import { debtView, expenseSubtitle, splitLabel, tagFor } from './expenseView';
+import { debtView, expenseSubtitle, flagsFor, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -74,5 +74,28 @@ describe('debtView', () => {
   it('gasto todo pessoal não gera dívida', () => {
     const e = { totalCents: 5000, personalCents: 5000, payerUid: A, payerSharePct: 50 };
     expect(debtView(e, [A, B], A, nameOf)).toEqual({ label: 'Ninguém deve nada por este gasto', amountCents: 0 });
+  });
+});
+
+describe('flagsFor', () => {
+  const nfce = (status: 'pending' | 'ok' | 'failed', notaCents?: number) => ({
+    type: 'nfce' as const,
+    nfceKey: '3'.repeat(44),
+    nfceUrl: 'https://www.nfce.fazenda.sp.gov.br/x',
+    nfceStatus: status,
+    ...(notaCents === undefined ? {} : { nfceData: { issuerName: 'LOJA', totalCents: notaCents, date: '2026-10-05' } }),
+  });
+
+  it('valor diferente da nota só quando a nota foi conferida e o valor diverge', () => {
+    expect(flagsFor(expense({ totalCents: 20000, receipt: nfce('ok', 19900) }))).toEqual(['nfce-diff']);
+    expect(flagsFor(expense({ totalCents: 20000, receipt: nfce('ok', 20000) }))).toEqual([]);
+  });
+
+  it('nota em conferência, nota não conferida e foto não enviada', () => {
+    expect(flagsFor(expense({ receipt: nfce('pending') }))).toEqual(['nfce-checking']);
+    expect(flagsFor(expense({ receipt: nfce('failed') }))).toEqual(['nfce-failed']);
+    expect(flagsFor(expense({ receipt: { type: 'photo', photoPath: 'p', photoUploaded: false } }))).toEqual(['photo-missing']);
+    expect(flagsFor(expense({ receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }))).toEqual([]);
+    expect(flagsFor(expense({}))).toEqual([]);
   });
 });

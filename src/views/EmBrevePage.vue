@@ -30,17 +30,13 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import { signOut } from '@/services/auth';
 import { user } from '@/services/session';
 
-type Tab = 'pendencias' | 'historico' | 'ajustes';
+type Tab = 'historico' | 'ajustes';
 
 // O Ionic mantém as telas visitadas vivas; ler a rota de forma reativa faria
 // esta tela reagir às rotas das outras. A aba é fixada na criação.
 const tab = useRoute().name as Tab;
 
 const texts: Record<Tab, { title: string; description: string }> = {
-  pendencias: {
-    title: 'Pendências',
-    description: 'Gastos para aprovar, devolvidos e recorrentes a confirmar chegam com os comprovantes.',
-  },
   historico: {
     title: 'Histórico',
     description: 'Meses fechados, exportação e pedido de reabertura chegam junto com o fechamento do mês.',

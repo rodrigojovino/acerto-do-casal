@@ -24,6 +24,11 @@
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
           </section>
 
+          <div v-if="expense.status === 'returned' && expense.rejection" class="rejection" role="status">
+            <p class="strong">Recusado por {{ nameLower(expense.rejection.byUid) }}</p>
+            <p>{{ expense.rejection.reason ? `"${expense.rejection.reason}"` : 'Sem motivo informado.' }}</p>
+          </div>
+
           <dl class="card calc">
             <div class="calc-row">
               <dt>Parte pessoal de quem pagou</dt>
@@ -46,44 +51,111 @@
 
           <p v-if="competenceNote" class="hint">{{ competenceNote }}</p>
 
-          <div class="receipt">
-            <p class="strong">Nenhum comprovante anexado</p>
-            <p class="hint">Por isso este gasto precisa da aprovação de {{ approverLabel }}.</p>
+          <!-- Comprovante -->
+          <button
+            v-if="expense.receipt.type === 'photo' && photoUrl"
+            type="button"
+            class="photo-btn"
+            aria-label="Ampliar foto do comprovante"
+            @click="zoomOpen = true"
+          >
+            <img :src="photoUrl" alt="Foto do comprovante" class="photo" />
+            <span v-if="photoQueuedHere" class="photo-badge">Foto pendente de envio</span>
+          </button>
+          <div v-else class="receipt">
+            <p class="strong">{{ receiptTitle }}</p>
+            <p v-if="receiptDetail" class="hint">{{ receiptDetail }}</p>
+            <button v-if="canRetryNfce" type="button" class="link" @click="retryNfce">Tentar conferir de novo</button>
           </div>
 
           <p class="hint">
             Lançado por {{ creatorLabel }}{{ createdText }}.<br />
             <template v-if="expense.pendingWrite">Ainda não sincronizado: será enviado quando houver conexão.<br /></template>
+            <template v-if="approvalText">{{ approvalText }}<br /></template>
             Já conta no saldo do mês{{ expense.status === 'confirmed' ? '' : ', destacado como pendente' }}.
           </p>
 
           <div class="actions">
             <p v-if="isClosed" class="hint">Mês fechado: este gasto não pode mais ser alterado.</p>
-            <template v-else-if="isCreator">
+
+            <!-- Outro membro: aprovar ou recusar -->
+            <template v-else-if="canReview">
+              <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
+              <input id="motivo" v-model="reason" class="input" maxlength="200" placeholder="Ex.: anexe a nota, por favor" />
+              <p v-if="approveBlocked" class="field-error">{{ approveBlocked }}</p>
               <div class="grid-2">
-                <button class="btn danger" type="button" @click="confirmDelete">Excluir</button>
-                <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">Editar</router-link>
+                <button class="btn outline" type="button" @click="reject">Recusar</button>
+                <button class="btn primary" type="button" :disabled="!!approveBlocked" @click="approve">Aprovar</button>
               </div>
             </template>
-            <p v-else class="hint">Só quem lançou edita ou exclui. Aprovar e recusar chegam na próxima fase.</p>
+
+            <!-- Quem lançou -->
+            <template v-else-if="isCreator">
+              <router-link
+                v-if="canScanQr && expense.status !== 'confirmed' && expense.receipt.type !== 'nfce'"
+                class="btn outline attach"
+                :to="{ name: 'gasto-editar', params: { id: expense.id }, query: { anexar: 'qr' } }"
+              >
+                Anexar QR Code e dispensar aprovação
+              </router-link>
+              <div class="grid-2">
+                <button class="btn danger" type="button" @click="confirmDelete">Excluir</button>
+                <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">
+                  {{ expense.status === 'returned' ? 'Corrigir' : 'Editar' }}
+                </router-link>
+              </div>
+              <p v-if="expense.status === 'confirmed'" class="hint">Editar um gasto confirmado faz ele voltar a pendente.</p>
+            </template>
           </div>
         </template>
       </main>
+
+      <!-- Foto ampliada: toque para aproximar e afastar -->
+      <ion-modal :is-open="zoomOpen" @did-dismiss="zoomOpen = false">
+        <div class="zoom">
+          <div class="zoom-head">
+            <span class="strong">Comprovante</span>
+            <button class="icon-btn light" type="button" aria-label="Fechar" @click="zoomOpen = false">
+              <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          </div>
+          <div class="zoom-body">
+            <img
+              v-if="photoUrl"
+              :src="photoUrl"
+              alt="Foto do comprovante ampliada"
+              :class="{ big: zoomed }"
+              @click="zoomed = !zoomed"
+            />
+          </div>
+          <p class="zoom-hint">Toque na foto para {{ zoomed ? 'afastar' : 'aproximar' }}</p>
+        </div>
+      </ion-modal>
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonPage, alertController } from '@ionic/vue';
+import { IonContent, IonModal, IonPage, alertController } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { formatDateBR, monthName, monthOf } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import { splitForViewer } from '@/domain/split';
-import { deleteExpense, watchExpense, type Expense } from '@/services/expenses';
-import { debtView, tagFor } from '@/services/expenseView';
+import {
+  approveExpense,
+  deleteExpense,
+  receiptPhotoUrl,
+  rejectExpense,
+  retryNfceCheck,
+  watchExpense,
+  type Expense,
+} from '@/services/expenses';
+import { NFCE_APPROVER, debtView, tagFor } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
+import { canScanQr } from '@/services/nfce';
+import { pendingPhotoIds } from '@/services/photoQueue';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
 const route = useRoute();
@@ -92,14 +164,14 @@ const router = useRouter();
 const myUid = computed(() => user.value?.uid ?? '');
 const members = computed<Members>(() => [myUid.value, partnerUid.value ?? ''] as const);
 
+// Fixado na criação: o Ionic mantém a tela viva enquanto outras rotas abrem.
+const expenseId = String(route.params.id);
+
 // ---- Gasto em tempo real (inclusive do cache offline) ----
 const expense = ref<Expense | null>(null);
 const loaded = ref(false);
 const loadError = ref<string | null>(null);
 let stop: (() => void) | null = null;
-
-// Fixado na criação: o Ionic mantém a tela viva enquanto outras rotas abrem.
-const expenseId = String(route.params.id);
 
 watch(
   () => group.value?.id,
@@ -125,17 +197,45 @@ watch(
 );
 onBeforeUnmount(() => stop?.());
 
+// ---- Foto ----
+const photoUrl = ref<string | null>(null);
+const zoomOpen = ref(false);
+const zoomed = ref(false);
+const photoQueuedHere = computed(() => pendingPhotoIds.value.has(expenseId));
+
+watch(
+  () => [expense.value?.receipt, photoQueuedHere.value] as const,
+  async () => {
+    const e = expense.value;
+    photoUrl.value = e && group.value ? await receiptPhotoUrl(group.value.id, e) : null;
+  },
+  { immediate: true },
+);
+
 // ---- Textos e cálculo: funções de src/domain via expenseView ----
 const isCreator = computed(() => expense.value?.createdBy === myUid.value);
 const isClosed = computed(() => !!expense.value && closedMonths.value.has(expense.value.competence));
+const canReview = computed(() => !!expense.value && !isCreator.value && expense.value.status === 'pending_approval');
 
-const payerLabel = computed(() => (expense.value ? firstNameOf(expense.value.payerUid).replace('Você', 'você') : ''));
-const creatorLabel = computed(() => (expense.value ? firstNameOf(expense.value.createdBy).replace('Você', 'você') : ''));
-const approverLabel = computed(() => (isCreator.value ? partnerFirstName.value : 'você'));
+const nameLower = (uid: string) => firstNameOf(uid).replace('Você', 'você');
+const payerLabel = computed(() => (expense.value ? nameLower(expense.value.payerUid) : ''));
+const creatorLabel = computed(() => (expense.value ? nameLower(expense.value.createdBy) : ''));
+
+const dateTime = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'America/Sao_Paulo',
+});
 
 const statusText = computed(() => {
-  if (!expense.value) return '';
-  switch (tagFor(expense.value, myUid.value)) {
+  const e = expense.value;
+  if (!e) return '';
+  if (e.status === 'confirmed') {
+    return e.approval?.byUid === NFCE_APPROVER ? 'Confirmado pela nota fiscal' : 'Confirmado';
+  }
+  switch (tagFor(e, myUid.value)) {
     case 'pending':
       return `Aguarda aprovação de ${partnerFirstName.value}`;
     case 'approve':
@@ -143,10 +243,67 @@ const statusText = computed(() => {
     case 'returned':
       return 'Devolvido para correção';
     default:
-      return 'Confirmado';
+      return '';
   }
 });
 const statusClass = computed(() => (expense.value?.status === 'confirmed' ? 'ok' : expense.value?.status));
+
+const approvalText = computed(() => {
+  const a = expense.value?.approval;
+  if (!a || expense.value?.status !== 'confirmed') return null;
+  if (a.byUid === NFCE_APPROVER) return 'Confirmado automaticamente: a nota foi conferida na SEFAZ e o valor bate.';
+  return `Aprovado por ${nameLower(a.byUid)}${a.at ? ` em ${dateTime.format(a.at).replace(', ', ' às ')}` : ''}.`;
+});
+
+/** Comprovante sem foto exibível: sem comprovante, foto não enviada ou nota. */
+const receiptTitle = computed(() => {
+  const r = expense.value?.receipt;
+  if (!r || r.type === 'none') return 'Nenhum comprovante anexado';
+  if (r.type === 'photo') return isCreator.value ? 'Foto pendente de envio' : 'Foto ainda não enviada';
+  if (r.nfceStatus === 'pending') return 'Nota fiscal: consultando a SEFAZ…';
+  if (r.nfceStatus === 'failed') return 'Nota fiscal: não foi possível conferir';
+  if (r.nfceData && expense.value && r.nfceData.totalCents !== expense.value.totalCents) {
+    return `Valor diferente da nota: ${formatBRL(r.nfceData.totalCents)}`;
+  }
+  return 'Nota fiscal conferida pela SEFAZ';
+});
+
+const receiptDetail = computed(() => {
+  const e = expense.value;
+  const r = e?.receipt;
+  if (!e || !r) return null;
+  if (r.type === 'none') {
+    return e.status === 'confirmed' ? null : `Por isso este gasto precisa da aprovação de ${isCreator.value ? partnerFirstName.value : 'você'}.`;
+  }
+  if (r.type === 'photo') {
+    return isCreator.value
+      ? 'A foto está guardada no seu aparelho e sobe quando houver conexão.'
+      : `${partnerFirstName.value} já anexou a foto; ela aparece aqui assim que for enviada. Até lá não dá para aprovar.`;
+  }
+  const parts: string[] = [];
+  if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
+  if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
+  if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante; o gasto precisa de aprovação.');
+  if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== e.totalCents) {
+    parts.push(`O valor lançado (${formatBRL(e.totalCents)}) não bate com a nota, por isso precisa de aprovação.`);
+  }
+  return parts.join(' ') || null;
+});
+
+const canRetryNfce = computed(
+  () =>
+    isCreator.value &&
+    expense.value?.receipt.type === 'nfce' &&
+    expense.value.receipt.nfceStatus === 'failed' &&
+    expense.value.status === 'pending_approval' &&
+    !isClosed.value,
+);
+
+/** Aprovar bloqueado enquanto a foto não foi enviada (as regras também barram). */
+const approveBlocked = computed(() => {
+  const r = expense.value?.receipt;
+  return r?.type === 'photo' && !r.photoUploaded ? 'Foto ainda não enviada' : null;
+});
 
 const sharedCents = computed(() => (expense.value ? expense.value.totalCents - expense.value.personalCents : 0));
 
@@ -179,19 +336,29 @@ const competenceNote = computed(() => {
   return `Entra no acerto de ${monthName(e.competence)}: ${monthName(monthOf(e.date))} já estava fechado quando foi lançado.`;
 });
 
-const dateTime = new Intl.DateTimeFormat('pt-BR', {
-  day: '2-digit',
-  month: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  timeZone: 'America/Sao_Paulo',
-});
 const createdText = computed(() => {
   const at = expense.value?.createdAt;
   return at ? ` em ${dateTime.format(at).replace(', ', ' às ')}` : '';
 });
 
-// ---- Ações ----
+// ---- Ações (não esperam o servidor: funcionam offline) ----
+const reason = ref('');
+
+function approve(): void {
+  if (!group.value || !expense.value || approveBlocked.value) return;
+  approveExpense(group.value.id, expense.value.id, myUid.value);
+}
+
+function reject(): void {
+  if (!group.value || !expense.value) return;
+  rejectExpense(group.value.id, expense.value.id, myUid.value, reason.value);
+  reason.value = '';
+}
+
+function retryNfce(): void {
+  if (group.value && expense.value) retryNfceCheck(group.value.id, expense.value);
+}
+
 async function confirmDelete(): Promise<void> {
   const e = expense.value;
   if (!e || !group.value) return;
@@ -206,7 +373,6 @@ async function confirmDelete(): Promise<void> {
   await alert.present();
   const { role } = await alert.onDidDismiss();
   if (role !== 'destructive') return;
-  // Não espera o servidor: offline, a exclusão sincroniza depois.
   await deleteExpense(group.value.id, e);
   router.replace({ name: 'painel', query: { mes: e.competence } });
 }
@@ -276,6 +442,18 @@ function goBack(): void {
   color: #1e6b3a;
 }
 
+.rejection {
+  padding: 12px 14px;
+  border-radius: var(--app-radius-control);
+  background: var(--app-danger-bg);
+  color: var(--app-danger);
+  font-size: 14px;
+}
+
+.rejection p {
+  margin: 0;
+}
+
 .calc {
   margin: 0;
   display: flex;
@@ -330,7 +508,93 @@ function goBack(): void {
   font-size: 13px;
 }
 
+.photo-btn {
+  position: relative;
+  padding: 0;
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--app-subtle);
+  cursor: zoom-in;
+}
+
+.photo {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+}
+
+.photo-badge {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fcebd9;
+  color: #8a3f00;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .actions {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attach {
+  font-size: 14px;
+}
+
+.zoom {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #111;
+  color: #fff;
+  padding-top: var(--app-safe-top);
+  padding-bottom: var(--app-safe-bottom);
+}
+
+.zoom-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 16px;
+}
+
+.icon-btn.light {
+  color: #fff;
+}
+
+.zoom-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-body img {
+  max-width: 100%;
+  max-height: 100%;
+  cursor: zoom-in;
+}
+
+.zoom-body img.big {
+  max-width: none;
+  max-height: none;
+  width: 250%;
+  cursor: zoom-out;
+}
+
+.zoom-hint {
+  margin: 0;
+  padding: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: #c9c8c2;
 }
 </style>

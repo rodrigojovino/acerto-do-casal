@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { resolveCompetence, type IsoDate } from '@/domain/calendar';
 import type { Competence, ExpenseStatus, SettlementExpense } from '@/domain/settlement';
-import { deleteObject, ref as storageRef } from 'firebase/storage';
+import { deleteObject, getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { receiptPhotoPath } from '@/domain/image';
 import {
   approvalData,
@@ -26,7 +26,7 @@ import {
   type StoredReceipt,
 } from './expenseData';
 import { db, storage } from './firebase';
-import { discardQueuedPhoto, queuePhoto } from './photoQueue';
+import { discardQueuedPhoto, queuePhoto, queuedPhotoUrl } from './photoQueue';
 import { trackWrite } from './sync';
 
 export type { ExpenseInput, ReceiptChoice } from './expenseData';
@@ -219,4 +219,48 @@ export function rejectExpense(groupId: string, id: string, uid: string, reason?:
     updateDoc(doc(expensesCol(groupId), id), rejectionData(uid, reason, serverTimestamp())),
     'Não foi possível recusar o gasto.',
   );
+}
+
+/**
+ * Gastos pendentes ou devolvidos de todos os meses (aba Pendências), em tempo
+ * real e do cache offline.
+ */
+export function watchOpenItems(
+  groupId: string,
+  onChange: (expenses: Expense[]) => void,
+  onError: (err: Error) => void,
+): Unsubscribe {
+  const q = query(expensesCol(groupId), where('status', 'in', ['pending_approval', 'returned']));
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snap) => onChange(snap.docs.map(toExpense).sort(byDateDesc)),
+    onError,
+  );
+}
+
+/** Pede à Function para consultar a nota de novo (depois de uma falha). */
+export function retryNfceCheck(groupId: string, expense: Pick<Expense, 'id' | 'receipt' | 'status'>): void {
+  if (expense.receipt.type !== 'nfce' || expense.status !== 'pending_approval') return;
+  trackWrite(
+    updateDoc(doc(expensesCol(groupId), expense.id), {
+      'receipt.nfceStatus': 'pending',
+      'receipt.nfceError': deleteField(),
+      'receipt.nfceData': deleteField(),
+      updatedAt: serverTimestamp(),
+    }),
+    'Não foi possível pedir uma nova consulta da nota.',
+  );
+}
+
+/**
+ * Endereço da foto do comprovante: a cópia local enquanto ainda está na fila
+ * deste aparelho; senão, a do Storage (precisa de conexão).
+ */
+export async function receiptPhotoUrl(groupId: string, expense: Pick<Expense, 'id' | 'receipt'>): Promise<string | null> {
+  if (expense.receipt.type !== 'photo') return null;
+  const local = await queuedPhotoUrl(groupId, expense.id);
+  if (local) return local;
+  if (!expense.receipt.photoUploaded) return null;
+  return getDownloadURL(storageRef(storage, receiptPhotoPath(groupId, expense.id))).catch(() => null);
 }

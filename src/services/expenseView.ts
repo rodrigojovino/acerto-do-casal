@@ -11,6 +11,31 @@ import type { Expense } from './expenses';
 
 export type ExpenseTag = 'pending' | 'approve' | 'returned' | null;
 
+/** Avisos extras do gasto, além da etiqueta de status. */
+export type ExpenseFlag = 'nfce-diff' | 'nfce-failed' | 'nfce-checking' | 'photo-missing';
+
+export const flagLabel: Record<ExpenseFlag, string> = {
+  'nfce-diff': 'Valor diferente da nota',
+  'nfce-failed': 'Nota não conferida',
+  'nfce-checking': 'Conferindo nota',
+  'photo-missing': 'Foto não enviada',
+};
+
+/** Avisos sobre o comprovante (nota divergente, falha na conferência, foto pendente). */
+export function flagsFor(expense: Pick<Expense, 'receipt' | 'totalCents' | 'status'>): ExpenseFlag[] {
+  const r = expense.receipt;
+  if (r.type === 'nfce') {
+    if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== expense.totalCents) return ['nfce-diff'];
+    if (r.nfceStatus === 'failed') return ['nfce-failed'];
+    if (r.nfceStatus === 'pending') return ['nfce-checking'];
+  }
+  if (r.type === 'photo' && !r.photoUploaded) return ['photo-missing'];
+  return [];
+}
+
+/** Quem aprovou pode ser a conferência da nota (approval.byUid 'nfce'). */
+export const NFCE_APPROVER = 'nfce';
+
 /** Etiqueta da lista: "Pendente" (meu), "Aprovar" (do outro), "Devolvido". */
 export function tagFor(expense: Pick<Expense, 'status' | 'createdBy'>, viewerUid: string): ExpenseTag {
   if (expense.status === 'pending_approval') return expense.createdBy === viewerUid ? 'pending' : 'approve';
