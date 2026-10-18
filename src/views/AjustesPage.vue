@@ -14,6 +14,14 @@
           <span aria-hidden="true" class="chev">›</span>
         </router-link>
 
+        <router-link class="card row" :to="{ name: 'avisos' }">
+          <span class="row-main">
+            <span class="row-title">Avisos</span>
+            <span class="hint">{{ pushSummary }}</span>
+          </span>
+          <span aria-hidden="true" class="chev">›</span>
+        </router-link>
+
         <div class="card soon">
           <p class="strong">Em breve</p>
           <p class="hint">Perfis, divisão padrão e notificações chegam nas próximas fases.</p>
@@ -35,6 +43,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import { signOut } from '@/services/auth';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { pushPermission } from '@/services/push';
+import { notificationPrefs } from '@/services/notificationPrefs';
 import { group, user } from '@/services/session';
 
 const list = ref<RecurringDoc[]>([]);
@@ -48,6 +58,13 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => stop?.());
+
+const pushSummary = computed(() => {
+  if (pushPermission.value === 'unavailable') return 'Chegam no app Android';
+  if (pushPermission.value !== 'granted') return 'Desligados neste aparelho';
+  const off = Object.values(notificationPrefs.value).filter((v) => v === false).length;
+  return off === 0 ? 'Todos ligados' : `${4 - off} de 4 categorias ligadas`;
+});
 
 const recurringSummary = computed(() => {
   const active = list.value.filter((r) => r.active).length;

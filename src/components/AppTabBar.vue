@@ -5,8 +5,11 @@
       Início
     </router-link>
     <router-link :to="{ name: 'pendencias' }" class="tab" :class="{ active: active === 'pendencias' }" :aria-current="active === 'pendencias' ? 'page' : undefined">
-      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
-      Pendências
+      <span class="icon-wrap">
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+        <span v-if="pendingCountLabel" class="count" aria-hidden="true">{{ pendingCountLabel }}</span>
+      </span>
+      <span>Pendências<span v-if="pendingCountLabel" class="sr-only">: {{ pendingCountLabel }} para você resolver</span></span>
     </router-link>
     <router-link :to="{ name: 'gasto-novo' }" class="add" aria-label="Novo gasto">
       <svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -23,6 +26,8 @@
 </template>
 
 <script setup lang="ts">
+import { pendingCountLabel } from '@/services/pendingCount';
+
 defineProps<{ active: 'painel' | 'pendencias' | 'historico' | 'ajustes' }>();
 </script>
 
@@ -52,6 +57,38 @@ defineProps<{ active: 'painel' | 'pendencias' | 'historico' | 'ajustes' }>();
   font-weight: 600;
   color: var(--app-muted);
   text-decoration: none;
+}
+
+.icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Contador: só o que depende de quem vê; "9+" acima de 9. */
+.count {
+  position: absolute;
+  top: -6px;
+  left: 14px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #b3261e;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .tab.active {

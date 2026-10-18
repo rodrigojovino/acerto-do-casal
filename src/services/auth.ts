@@ -72,6 +72,9 @@ function isNativeCancel(err: unknown): boolean {
 }
 
 export async function signOut(): Promise<void> {
+  // Este aparelho para de receber os avisos da conta que sai.
+  const { unregisterDevice } = await import('./push');
+  await unregisterDevice();
   if (Capacitor.isNativePlatform()) {
     // Limpa a conta Google escolhida, para o seletor aparecer no próximo login.
     await FirebaseAuthentication.signOut().catch(() => undefined);

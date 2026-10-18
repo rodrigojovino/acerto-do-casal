@@ -35,9 +35,15 @@
         </provider>
         <!-- Leitor de QR Code do Google (ML Kit): baixado pelo Play Services na instalação; dispensa a permissão de câmera. -->
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
+        <!-- Avisos (FCM): ícone, cor e canal padrão das notificações. -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_stat_notify" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_accent" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="avisos" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Avisos no Android 13+ (pedida pelo app depois de explicar o motivo). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

@@ -17,6 +17,18 @@
 
         <SyncStatus :pending-writes="hasPendingWrites" />
 
+        <section v-if="showPushInvite" class="card push-invite" aria-labelledby="avisos-titulo">
+          <p id="avisos-titulo" class="strong">Ativar avisos?</p>
+          <p class="hint">
+            Receba um aviso quando {{ partnerFirstName }} lançar um gasto, devolver um gasto seu ou registrar o pagamento
+            do acerto. Você escolhe o que receber em Ajustes › Avisos.
+          </p>
+          <div class="grid-2">
+            <button class="btn outline" type="button" @click="notNow">Agora não</button>
+            <button class="btn primary" type="button" @click="activatePush">Ativar avisos</button>
+          </div>
+        </section>
+
         <section class="balance" aria-labelledby="saldo-titulo">
           <p id="saldo-titulo" class="muted small">
             {{ isClosed ? `Acerto de ${monthName(month)}${closedPayments.length > 0 ? ' · pago' : ''}` : 'Saldo do acerto até agora' }}
@@ -150,6 +162,7 @@ import ReopenPanel from '@/components/ReopenPanel.vue';
 import { closingErrorMessage, requestReopen, watchMonth, type MonthDoc, type MonthPayment } from '@/services/closing';
 import { askReopenReason } from '@/components/reopenDialog';
 import { isOnline } from '@/services/sync';
+import { dismissPushInvite, enablePush, pushAskedBefore, pushPermission } from '@/services/push';
 import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { forecastRecurring, forecastTotal } from '@/domain/recurrence';
@@ -224,6 +237,18 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => stopMonth?.());
+
+// Convite para os avisos: só no Android, enquanto a permissão não foi pedida.
+const inviteDismissed = ref(pushAskedBefore());
+const showPushInvite = computed(() => pushPermission.value === 'prompt' && !inviteDismissed.value);
+function notNow(): void {
+  dismissPushInvite();
+  inviteDismissed.value = true;
+}
+async function activatePush(): Promise<void> {
+  inviteDismissed.value = true;
+  await enablePush().catch(() => undefined);
+}
 
 /** Pagamentos do acerto do mês fechado. */
 const closedPayments = computed(() => monthDoc.value?.payments ?? []);
@@ -554,6 +579,17 @@ li:last-child .item {
 .item-sub {
   font-size: 12px;
   color: var(--app-muted);
+}
+
+.push-invite {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.push-invite p {
+  margin: 0;
 }
 
 .closed-line {
