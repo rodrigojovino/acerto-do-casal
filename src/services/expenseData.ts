@@ -1,6 +1,7 @@
 import type { IsoDate } from '@/domain/calendar';
 import { receiptPhotoPath } from '@/domain/image';
 import { installmentExpenseId, planInstallments } from '@/domain/installments';
+import { MAX_NOTE } from '@/domain/notifications';
 import { spConsultUrl } from '../../functions/src/nfce';
 import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
 
@@ -20,6 +21,8 @@ import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
 /** O que o formulário informa. Competência, status e autoria são calculados à parte. */
 export interface ExpenseInput {
   description: string;
+  /** Observação opcional (até MAX_NOTE caracteres); vazia = sem observação. */
+  note?: string;
   totalCents: Cents;
   personalCents: Cents;
   payerUid: string;
@@ -96,6 +99,13 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
   return { type: 'none' };
 }
 
+/** Observação gravada: sem espaços nas pontas e no limite; vazia sai do documento. */
+function noteField<D>(note: string | undefined, removeField?: D) {
+  const text = note?.trim().slice(0, MAX_NOTE);
+  if (text) return { note: text };
+  return removeField === undefined ? {} : { note: removeField };
+}
+
 function fields(input: ExpenseInput, competence: Competence) {
   return {
     description: input.description.trim(),
@@ -121,6 +131,7 @@ export function authorStatus(receipt: ReceiptChoice, currentStatus?: ExpenseStat
 export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: Competence, ids: ExpenseIds, now: T) {
   return {
     ...fields(input, competence),
+    ...noteField(input.note),
     receipt: receiptData(input.receipt, ids),
     status: authorStatus(input.receipt),
     createdBy: uid,
@@ -144,6 +155,7 @@ export function expenseUpdateData<T, D>(
 ) {
   return {
     ...fields(input, competence),
+    ...noteField(input.note, removeField),
     receipt: receiptData(input.receipt, ids, current.receipt),
     status: authorStatus(input.receipt, current.status),
     approval: removeField,
@@ -237,6 +249,7 @@ export function newInstallmentSeriesData<T>(
     id: installmentExpenseId(ids.seriesId, p.index),
     data: {
       description: input.description.trim(),
+      ...noteField(input.note),
       totalCents: p.totalCents,
       personalCents: p.personalCents,
       payerUid: input.payerUid,
@@ -262,6 +275,7 @@ export function newInstallmentSeriesData<T>(
 /** O que muda na edição de uma série (valor, parcelas e primeiro mês: exclui e lança de novo). */
 export interface SeriesEditInput {
   description: string;
+  note?: string;
   payerUid: string;
   payerSharePct: number;
   receipt: ReceiptChoice;
@@ -280,6 +294,7 @@ export function installmentUpdateData<T, D>(
 ) {
   return {
     description: input.description.trim(),
+    ...noteField(input.note, removeField),
     payerUid: input.payerUid,
     payerSharePct: input.payerSharePct,
     receipt: receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId }, current.receipt),

@@ -12,6 +12,16 @@ import type { Cents, Competence, ExpenseStatus } from './settlement.js';
 
 export type NoticeCategory = 'expenses' | 'returns' | 'settlement' | 'recurring';
 
+/** Limite da observação de um gasto (o mesmo das regras). */
+export const MAX_NOTE = 300;
+
+/** Resumo de uma linha da observação (Pendências e avisos): até `max` caracteres, com "…". */
+export function noteSummary(note: string | undefined, max = 60): string | null {
+  const text = note?.replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
 export const NOTICE_CATEGORIES: readonly NoticeCategory[] = ['expenses', 'returns', 'settlement', 'recurring'];
 
 export interface Notice {
@@ -49,6 +59,7 @@ export interface ExpenseSnapshot {
   rejection?: { byUid: string; reason?: string; kind?: 'reject' | 'contest' };
   recurringId?: string;
   installment?: InstallmentInfo;
+  note?: string;
 }
 
 /** De onde veio a confirmação automática, para convidar à conferência. */
@@ -70,9 +81,15 @@ function subject(e: ExpenseSnapshot): string {
   return e.installment ? `a compra ${e.description}` : e.description;
 }
 
-/** O que vem depois do valor: aprovar (pendente) ou a origem (confirmado automático). */
+/**
+ * O que vem depois do valor: aprovar (pendente, com o resumo da observação)
+ * ou a origem (confirmado automático).
+ */
 function tail(e: ExpenseSnapshot): string {
-  if (e.status === 'pending_approval') return ' · toque para aprovar';
+  if (e.status === 'pending_approval') {
+    const note = noteSummary(e.note);
+    return ` · toque para aprovar${note ? ` — “${note}”` : ''}`;
+  }
   if (e.status === 'confirmed' && !e.approval) {
     const origin = receiptOrigin(e.receipt);
     return origin ? ` · ${origin}` : '';

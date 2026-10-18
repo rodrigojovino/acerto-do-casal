@@ -103,6 +103,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 - **Documento fiscal:** NF-e (modelo 55) ou NFC-e (65), identificado pela chave de 44 dígitos: lida pelo leitor (QR Code da NFC-e ou código de barras Code 128 da chave) ou digitada (aceita os espaços entre os blocos; o app confere dígito verificador e modelo). QR e código de barras da mesma nota dão o mesmo comprovante. Só NFC-e de SP é conferida na SEFAZ, e a conferência apenas registra ok, falha ou valor divergente (aviso), nunca muda o status. NF-e não tem consulta (exige captcha): a chave preenche emitente (CNPJ) e mês, o valor é digitado. Origem no Detalhe: "NF-e · chave lida", "NFC-e · chave digitada", com " · conferida" quando a SEFAZ conferiu.
 - Seção de comprovante do formulário: Foto, Ler QR ou código de barras (só Android), Digitar chave e Sem comprovante.
 - Só quem lançou edita ou exclui o gasto.
+- **Observação** (opcional, até 300 caracteres): no lançamento, na confirmação do valor do recorrente variável e na edição da série (é da série). Aparece completa no Detalhe; resumida em uma linha (`noteSummary`, ~60 caracteres) em Pendências e nos avisos de aprovação ("… · toque para aprovar — “churrasco do sábado”").
 - A mesma regra de edição vale para recorrentes fixos e séries de parcelas.
 
 ### Parcelados
@@ -227,6 +228,7 @@ groups/{groupId}/expenses/{expenseId}
   approval?: { byUid, at }        // byUid 'nfce' = confirmado pela conferência da nota (só a Function grava)
   rejection?: { byUid, reason? (até 200), at }
   recurringId?, installment?: { seriesId, index, count, firstMonth, purchaseCents }
+  note?                           // observação de quem lançou, 1..300 caracteres (numa série, a mesma em todas as parcelas)
   createdBy, createdAt, updatedAt
 
 groups/{groupId}/recurring/{recurringId}
@@ -242,7 +244,7 @@ Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no 
 Comprovantes PIX do acerto em `groups/{groupId}/settlements/{YYYY-MM}/{paymentId}.jpg`: membros enviam (arquivo novo, JPEG até 1 MB) enquanto o mês não está fechado e leem; sem troca nem exclusão.
 
 Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
-- `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
+- `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, observação opcional 1..300 (só quem lançou grava; mudá-la num confirmado volta para aprovação, como qualquer edição), data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
 - **Quem lança** (criar e editar): todos os campos e nenhum a mais, `createdBy` = quem cria, horários do servidor, `status` conforme a regra do comprovante e da edição (tabelas acima), sem `approval`/`rejection` (a edição apaga as anteriores); `recurringId` nunca na criação e inalterado na edição. Comprovante: foto no caminho do próprio gasto (não enviada na criação); chave de 44 dígitos, modelo 55 ou 65, com `entry` 'read' ou 'typed': NFC-e de SP só `'pending'` com a URL montada da própria chave (`p=chave|3|1`), NF-e e NFC-e de outros estados só `'unchecked'` sem URL; ou mantido sem mudança na edição. O dígito verificador é conferido no app e na Function (as regras não calculam o módulo 11). Exceção estreita: a fila de fotos pode só virar `receipt.photoUploaded` para `true`, sem mexer no status.
 - **Outro membro**: em `pending_approval` aprova (`→ confirmed`, `approval.byUid` = ele) ou recusa (`→ returned`, motivo opcional); em automático valida (grava `approval` sem mudar o status) ou contesta (`→ returned`, motivo obrigatório). Não toca em valores nem no comprovante.
 - **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; só grava `nfceStatus`/`nfceData`, nunca muda o status. Numa série, só a parcela 1 consulta e grava em todas. `resolveNfce` (callable) só pré-preenche o formulário.

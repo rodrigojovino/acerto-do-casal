@@ -72,6 +72,8 @@ export interface Expense extends SettlementExpense {
   recurringId?: string;
   /** Parcela de uma compra parcelada. */
   installment?: InstallmentInfo;
+  /** Observação opcional de quem lançou (numa série, a mesma em todas as parcelas). */
+  note?: string;
   /** Gravado no aparelho e ainda não confirmado pelo servidor. */
   pendingWrite: boolean;
 }
@@ -108,6 +110,7 @@ function toExpense(snap: DocumentSnapshot): Expense {
       : undefined,
     recurringId: data.recurringId,
     installment: data.installment,
+    note: data.note,
     pendingWrite: snap.metadata.hasPendingWrites,
   };
 }

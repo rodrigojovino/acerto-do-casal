@@ -64,6 +64,11 @@
             <p class="formula hint num">{{ formula }}</p>
           </dl>
 
+          <section v-if="expense.note" class="card note" aria-labelledby="obs-titulo">
+            <p id="obs-titulo" class="strong">Observação</p>
+            <p class="note-text">{{ expense.note }}</p>
+          </section>
+
           <p v-if="competenceNote" class="hint">{{ competenceNote }}</p>
 
           <!-- Comprovante -->
@@ -591,6 +596,19 @@ function goBack(): void {
 
 .btn.stacked .num {
   white-space: nowrap;
+}
+
+.note {
+  padding: 12px 16px;
+}
+
+.note p {
+  margin: 0 0 2px;
+}
+
+.note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .series {

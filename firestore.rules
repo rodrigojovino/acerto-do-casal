@@ -198,8 +198,15 @@ service cloud.firestore {
           && first.createdBy == request.auth.uid;
       }
 
+      // Observação opcional, até 300 caracteres (vazia: o campo não existe).
+      function validNote(data) {
+        return !data.keys().hasAny(['note'])
+          || data.note is string && data.note.trim().size() >= 1 && data.note.size() <= 300;
+      }
+
       function validExpense(data, expenseId, isNew) {
-        return data.description is string
+        return validNote(data)
+          && data.description is string
           && data.description.trim().size() >= 1
           && data.description.size() <= 80
           && data.totalCents is int
@@ -245,7 +252,7 @@ service cloud.firestore {
       // installment: só na criação; na edição de uma parcela, a série, o valor,
       // a parte pessoal e a data ficam (para mudá-los, exclui e lança de novo).
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment']))
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note']))
           && request.resource.data.keys().hasAll(expenseKeys())
           && (isNew
                 ? !request.resource.data.keys().hasAny(['recurringId'])

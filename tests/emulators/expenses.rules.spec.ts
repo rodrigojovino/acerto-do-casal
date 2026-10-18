@@ -667,6 +667,41 @@ describe('exclusão', () => {
 });
 
 // Os documentos exatamente como o app grava (src/services/expenseData.ts).
+describe('observação', () => {
+  it('opcional, até 300 caracteres; vazia ou de outro tipo é recusada', async () => {
+    await assertSucceeds(db(A).doc(path('n1')).set(expense({ note: 'churrasco do sábado' })));
+    await assertSucceeds(db(A).doc(path('n2')).set(expense({ note: 'x'.repeat(300) })));
+    await assertFails(db(A).doc(path('n3')).set(expense({ note: 'x'.repeat(301) })));
+    await assertFails(db(A).doc(path('n4')).set(expense({ note: '   ' })));
+    await assertFails(db(A).doc(path('n5')).set(expense({ note: 42 })));
+  });
+
+  it('o app grava a observação aparada; vazia sai do documento', async () => {
+    const input = { description: 'Mercado', totalCents: 20000, personalCents: 0, payerUid: A, payerSharePct: 50, date: `${CURRENT}-05`, receipt: { type: 'none' as const } };
+    const withNote = newExpenseData({ ...input, note: '  dividido com a família  ' }, A, CURRENT, { groupId: GROUP, expenseId: 'n6' }, serverTime());
+    expect(withNote.note).toBe('dividido com a família');
+    await assertSucceeds(db(A).doc(path('n6')).set(withNote));
+    const cleared = expenseUpdateData({ ...input, note: '' }, CURRENT, { groupId: GROUP, expenseId: 'n6' }, { receipt: { type: 'none' }, status: 'pending_approval' }, serverTime(), removeField());
+    await assertSucceeds(db(A).doc(path('n6')).update(cleared));
+  });
+
+  it('mudar a observação de um confirmado volta para aprovação', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(path('n7')).set(seeded({ status: 'confirmed', approval: { byUid: B, at: new Date() } }));
+    });
+    await assertFails(edit(A, 'n7', { note: 'esqueci de dizer' }));
+    await assertFails(edit(A, 'n7', { note: 'esqueci de dizer', approval: removeField() }));
+    await assertSucceeds(edit(A, 'n7', { note: 'esqueci de dizer', status: 'pending_approval', approval: removeField() }));
+  });
+
+  it('o outro membro não escreve nem muda a observação', async () => {
+    await assertFails(edit(B, 'a-atual', { note: 'não foi bem assim' }));
+    await assertFails(
+      db(B).doc(path('a-atual')).update({ status: 'confirmed', approval: { byUid: B, at: serverTime() }, note: 'ok', updatedAt: serverTime() }),
+    );
+  });
+});
+
 describe('documentos montados pelo app', () => {
   const input: ExpenseInput = {
     description: '  Farmácia  ',

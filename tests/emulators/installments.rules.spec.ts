@@ -246,6 +246,19 @@ describe('edição da série', () => {
     await assertSucceeds(batch.commit());
   });
 
+  it('observação é da série: lançada em todas as parcelas e trocada pela edição da série', async () => {
+    const parcels = series({ note: 'geladeira nova da cozinha' }, 3);
+    if (parcels.some((p) => p.data.note !== 'geladeira nova da cozinha')) throw new Error('observação deveria ir em todas');
+    await assertSucceeds(createBatch(A, parcels));
+    const fs = db(A);
+    const batch = fs.batch();
+    const edit = { description: 'Geladeira', note: 'com frete', payerUid: A, payerSharePct: 50, receipt: { type: 'none' as const } };
+    for (const p of parcels) {
+      batch.update(fs.doc(expPath(p.id)), installmentUpdateData(edit, { receipt: p.data.receipt, status: 'pending_approval' }, { groupId: GROUP, seriesId: 'serie1' }, serverTime(), removeField()));
+    }
+    await assertSucceeds(batch.commit());
+  });
+
   it('pendente + anexar comprovante confirma a série', async () => {
     const parcels = series({}, 3);
     await seedSeries(parcels);

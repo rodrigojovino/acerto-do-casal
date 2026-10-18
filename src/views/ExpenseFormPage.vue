@@ -134,6 +134,19 @@
             </template>
           </div>
 
+          <div class="field">
+            <label for="obs" class="label">Observação (opcional)</label>
+            <textarea
+              id="obs"
+              v-model="note"
+              class="input note"
+              rows="2"
+              :maxlength="MAX_NOTE"
+              placeholder="Ex.: churrasco do sábado, dividido com a família"
+            />
+            <p class="hint counter" aria-live="polite">{{ note.length }}/{{ MAX_NOTE }}</p>
+          </div>
+
           <ReceiptPicker
             ref="picker"
             v-model="receipt"
@@ -193,6 +206,7 @@ import {
   lastInstallmentMonth,
 } from '@/domain/installments';
 import { seriesTargets } from '@/services/series';
+import { MAX_NOTE } from '@/domain/notifications';
 import { fiscalDocName, formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
@@ -213,6 +227,7 @@ const today = ref(todayInSaoPaulo());
 const totalCents = ref(0);
 const personalCents = ref(0);
 const description = ref('');
+const note = ref('');
 const date = ref(today.value);
 const payerUid = ref(myUid.value);
 /** Guardado como no banco: a parte de quem pagou. A tela converte com split.ts. */
@@ -248,6 +263,7 @@ onIonViewWillEnter(() => {
   totalCents.value = 0;
   personalCents.value = 0;
   description.value = '';
+  note.value = '';
   date.value = today.value;
   payerUid.value = myUid.value;
   payerSharePct.value = group.value?.defaultSplitPct ?? 50;
@@ -284,6 +300,7 @@ if (editId && group.value) {
         totalCents.value = expense.totalCents;
         personalCents.value = expense.personalCents;
         description.value = expense.description;
+        note.value = expense.note ?? '';
         date.value = expense.date;
         payerUid.value = expense.payerUid;
         payerSharePct.value = expense.payerSharePct;
@@ -490,6 +507,7 @@ function save(): void {
 
   const input = {
     description: description.value,
+    note: note.value,
     totalCents: totalCents.value,
     personalCents: personalCents.value,
     payerUid: payerUid.value,
@@ -563,6 +581,19 @@ function goBack(): void {
 .check input {
   width: 20px;
   height: 20px;
+}
+
+textarea.note {
+  height: auto;
+  min-height: 64px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  resize: vertical;
+  font: inherit;
+}
+
+.counter {
+  text-align: right;
 }
 
 .nfce-msg {

@@ -35,6 +35,7 @@
               <span class="item-main">
                 <span class="item-name">{{ e.description }}</span>
                 <span class="item-sub">{{ subtitle(e) }}</span>
+                <span v-if="noteSummary(e.note)" class="item-sub note">“{{ noteSummary(e.note) }}”</span>
                 <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
               </span>
               <span class="side">
@@ -55,6 +56,7 @@
                 <span class="item-main">
                   <span class="item-name">{{ e.description }}</span>
                   <span class="item-sub">{{ subtitle(e) }}</span>
+                <span v-if="noteSummary(e.note)" class="item-sub note">“{{ noteSummary(e.note) }}”</span>
                 <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
                 </span>
                 <span class="side">
@@ -151,6 +153,7 @@ import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthLabel, monthName } from '@/domain/calendar';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { collapseSeries } from '@/services/series';
+import { noteSummary } from '@/domain/notifications';
 import { watchMonths, type MonthDoc } from '@/services/closing';
 import { installmentSummary } from '@/domain/installments';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
@@ -322,6 +325,10 @@ function subtitle(e: Expense): string {
 .item-sub {
   font-size: 12px;
   color: var(--app-muted);
+}
+
+.item-sub.note {
+  font-style: italic;
 }
 
 .item-sub.danger {

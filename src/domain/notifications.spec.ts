@@ -4,6 +4,7 @@ import {
   countLabel,
   expenseNotices,
   monthNotices,
+  noteSummary,
   receiptOrigin,
   recurringNotices,
   variableRecurringSummary,
@@ -52,6 +53,24 @@ describe('expenseNotices: lançamento', () => {
   it('recorrente gerado não avisa; exclusão não avisa', () => {
     expect(expenseNotices(null, expense({ recurringId: 'r1', status: 'confirmed' }), 'rec', ctx)).toEqual([]);
     expect(expenseNotices(expense(), null, 'g1', ctx)).toEqual([]);
+  });
+});
+
+describe('observação nos avisos de aprovação', () => {
+  it('resumo de uma linha, com "…" acima do limite', () => {
+    expect(noteSummary('  churrasco\n do  sábado ')).toBe('churrasco do sábado');
+    expect(noteSummary('')).toBeNull();
+    expect(noteSummary(undefined)).toBeNull();
+    const long = noteSummary('a'.repeat(100));
+    expect(long).toHaveLength(60);
+    expect(long?.endsWith('…')).toBe(true);
+  });
+
+  it('aviso para aprovar leva o resumo; confirmado automático não', () => {
+    const pending = expenseNotices(null, expense({ note: 'churrasco do sábado' }), 'g1', ctx)[0];
+    expect(brl(pending.body)).toBe('Ana lançou Mercado · R$ 214,00 · toque para aprovar — “churrasco do sábado”');
+    const auto = expenseNotices(null, expense({ status: 'confirmed', receipt: { type: 'photo' }, note: 'x' }), 'g1', ctx)[0];
+    expect(auto.body.endsWith('foto do recibo')).toBe(true);
   });
 });
 
