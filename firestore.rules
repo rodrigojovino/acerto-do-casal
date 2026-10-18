@@ -148,12 +148,20 @@ service cloud.firestore {
       }
 
       // ---- Quem lança (autor) ----
-      // Nunca grava `confirmed` nem aprovação/recusa: só a aprovação do outro
-      // membro ou a Function (QR conferido) confirmam.
-      function isAuthorWrite() {
+      // O status segue o comprovante: sem comprovante, pendente de aprovação;
+      // com foto ou QR, confirmado (contestável pelo outro membro). Correção de
+      // devolvido (recusado ou contestado) sempre volta para aprovação explícita.
+      // Nunca grava aprovação nem recusa.
+      function authorStatus(data, isNew) {
+        return !isNew && resource.data.status == 'returned' || data.receipt.type == 'none'
+          ? 'pending_approval'
+          : 'confirmed';
+      }
+
+      function isAuthorWrite(isNew) {
         return request.resource.data.keys().hasOnly(expenseKeys())
           && request.resource.data.keys().hasAll(expenseKeys())
-          && request.resource.data.status == 'pending_approval'
+          && request.resource.data.status == authorStatus(request.resource.data, isNew)
           && request.resource.data.updatedAt == request.time;
       }
 
@@ -167,54 +175,73 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time;
       }
 
-      // ---- Quem aprova ou recusa (o outro membro) ----
-      // Mexe só em status, approval/rejection e updatedAt, e só em gasto pendente.
+      // ---- O outro membro ----
+      // Mexe só em status, approval/rejection e updatedAt:
+      // - gasto pendente: aprova ou recusa (motivo opcional);
+      // - gasto confirmado automaticamente (por comprovante, pela conferência
+      //   do QR ou recorrente fixo): contesta, com motivo obrigatório.
+      // Gasto aprovado manualmente pelo outro membro não é contestável.
       function isReviewWrite() {
         return resource.data.createdBy != request.auth.uid
-          && resource.data.status == 'pending_approval'
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['status', 'approval', 'rejection', 'updatedAt'])
           && request.resource.data.updatedAt == request.time
-          && (isApproval() || isRejection());
+          && (
+            resource.data.status == 'pending_approval' && (isApproval() || isRejection('reject'))
+            || isAutoConfirmed() && isRejection('contest')
+          );
       }
 
-      // Aprovar: foto só depois de enviada.
+      // Confirmado sem aprovação de pessoa: pelo comprovante (sem approval) ou
+      // pela conferência do QR da versão anterior (approval.byUid 'nfce').
+      function isAutoConfirmed() {
+        return resource.data.status == 'confirmed'
+          && (!resource.data.keys().hasAny(['approval']) || resource.data.approval.byUid == 'nfce');
+      }
+
       function isApproval() {
         return request.resource.data.status == 'confirmed'
           && request.resource.data.approval == { 'byUid': request.auth.uid, 'at': request.time }
-          && !request.resource.data.keys().hasAny(['rejection'])
-          && (resource.data.receipt.type != 'photo' || resource.data.receipt.photoUploaded == true);
+          && !request.resource.data.keys().hasAny(['rejection']);
       }
 
-      // Recusar: motivo opcional, até 200 caracteres.
-      function isRejection() {
+      // Recusar (motivo opcional) ou contestar (motivo obrigatório), até 200 caracteres.
+      function isRejection(kind) {
         let r = request.resource.data.rejection;
         return request.resource.data.status == 'returned'
           && !request.resource.data.keys().hasAny(['approval'])
-          && r.keys().hasAll(['byUid', 'at'])
-          && r.keys().hasOnly(['byUid', 'at', 'reason'])
+          && r.keys().hasAll(['byUid', 'at', 'kind'])
+          && r.keys().hasOnly(['byUid', 'at', 'kind', 'reason'])
           && r.byUid == request.auth.uid
           && r.at == request.time
-          && (!r.keys().hasAny(['reason']) || r.reason is string && r.reason.size() <= 200);
+          && r.kind == kind
+          && (
+            kind == 'contest'
+              && r.keys().hasAny(['reason']) && r.reason is string
+              && r.reason.trim().size() >= 1 && r.reason.size() <= 200
+            || kind == 'reject'
+              && (!r.keys().hasAny(['reason']) || r.reason is string && r.reason.size() <= 200)
+          );
       }
 
       match /expenses/{expenseId} {
         allow read: if isMember(groupId);
 
-        // Todo gasto nasce pendente de aprovação, com qualquer comprovante.
+        // Sem comprovante nasce pendente; com foto ou QR, confirmado.
         allow create: if isMember(groupId)
-          && isAuthorWrite()
+          && isAuthorWrite(true)
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt == request.time
           && validExpense(request.resource.data, expenseId, true);
 
-        // Autor: edita (volta a pendente, descarta aprovação/recusa).
-        // Outro membro: aprova ou recusa. Nunca em mês fechado.
+        // Autor: edita (status pelo comprovante; devolvido vai para aprovação;
+        // descarta aprovação/recusa). Outro membro: aprova, recusa ou contesta.
+        // Nunca em mês fechado (a contestação vale até o fechamento).
         allow update: if isMember(groupId)
           && !isClosed(resource.data.competence)
           && (
             resource.data.createdBy == request.auth.uid
-              && isAuthorWrite()
+              && isAuthorWrite(false)
               && request.resource.data.createdBy == resource.data.createdBy
               && request.resource.data.createdAt == resource.data.createdAt
               && validExpense(request.resource.data, expenseId, false)

@@ -19,6 +19,7 @@ import { deleteObject, getDownloadURL, ref as storageRef } from 'firebase/storag
 import { receiptPhotoPath } from '@/domain/image';
 import {
   approvalData,
+  contestData,
   expenseUpdateData,
   newExpenseData,
   rejectionData,
@@ -42,6 +43,8 @@ export interface Rejection {
   byUid: string;
   reason?: string;
   at: Date | null;
+  /** 'reject': recusa de um pendente; 'contest': contestação de um confirmado. Ausente em dados antigos. */
+  kind?: 'reject' | 'contest';
 }
 
 export interface Expense extends SettlementExpense {
@@ -86,7 +89,7 @@ function toExpense(snap: DocumentSnapshot): Expense {
     updatedAt: toDate(data.updatedAt),
     approval: data.approval ? { byUid: data.approval.byUid, at: toDate(data.approval.at) } : undefined,
     rejection: data.rejection
-      ? { byUid: data.rejection.byUid, reason: data.rejection.reason, at: toDate(data.rejection.at) }
+      ? { byUid: data.rejection.byUid, reason: data.rejection.reason, at: toDate(data.rejection.at), kind: data.rejection.kind }
       : undefined,
     pendingWrite: snap.metadata.hasPendingWrites,
   };
@@ -167,10 +170,10 @@ export function createExpense(
   return { id: ref.id, competence };
 }
 
-/** Edita um gasto de quem lançou. Volta a pendente e descarta aprovação ou recusa anteriores. */
+/** Edita um gasto de quem lançou. Status pelo comprovante; descarta aprovação ou recusa anteriores. */
 export function updateExpense(
   groupId: string,
-  current: Pick<Expense, 'id' | 'receipt'>,
+  current: Pick<Expense, 'id' | 'receipt' | 'status'>,
   input: ExpenseInput,
   closedMonths: ReadonlySet<Competence>,
   today: IsoDate,
@@ -181,7 +184,7 @@ export function updateExpense(
   trackWrite(
     updateDoc(
       doc(expensesCol(groupId), current.id),
-      expenseUpdateData(input, competence, ids, current.receipt, serverTimestamp(), deleteField()),
+      expenseUpdateData(input, competence, ids, current, serverTimestamp(), deleteField()),
     ),
     'Não foi possível salvar a alteração.',
   );
@@ -241,8 +244,8 @@ export function watchOpenItems(
 
 /** Pede à Function para consultar a nota de novo (depois de uma falha). */
 export function retryNfceCheck(groupId: string, expense: Pick<Expense, 'id' | 'receipt' | 'status'>): void {
-  // Só notas de SP (com URL) têm conferência automática.
-  if (expense.receipt.type !== 'nfce' || !expense.receipt.nfceUrl || expense.status !== 'pending_approval') return;
+  // Só notas de SP (com URL) têm conferência automática; o gasto com QR fica confirmado.
+  if (expense.receipt.type !== 'nfce' || !expense.receipt.nfceUrl || expense.status !== 'confirmed') return;
   trackWrite(
     updateDoc(doc(expensesCol(groupId), expense.id), {
       'receipt.nfceStatus': 'pending',
@@ -264,4 +267,12 @@ export async function receiptPhotoUrl(groupId: string, expense: Pick<Expense, 'i
   if (local) return local;
   if (!expense.receipt.photoUploaded) return null;
   return getDownloadURL(storageRef(storage, receiptPhotoPath(groupId, expense.id))).catch(() => null);
+}
+
+/** Contestação de um gasto confirmado automaticamente, com motivo. Funciona offline. */
+export function contestExpense(groupId: string, id: string, uid: string, reason: string): void {
+  trackWrite(
+    updateDoc(doc(expensesCol(groupId), id), contestData(uid, reason, serverTimestamp(), deleteField())),
+    'Não foi possível contestar o gasto.',
+  );
 }

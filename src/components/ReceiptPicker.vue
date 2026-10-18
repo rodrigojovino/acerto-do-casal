@@ -53,11 +53,11 @@ const error = ref<string | null>(null);
 const note = computed(() => {
   switch (props.modelValue.type) {
     case 'photo':
-      return `Com foto, ${props.partnerName} aprova depois de ver a foto. Sem conexão, a foto fica no aparelho e é enviada depois.`;
+      return `Com foto, o gasto já entra confirmado; ${props.partnerName} pode contestar até o fechamento do mês. Sem conexão, a foto fica no aparelho e é enviada depois.`;
     case 'nfce':
       return props.modelValue.nfceUrl
-        ? `A nota é conferida na SEFAZ. Se o valor bater, o gasto é confirmado sem precisar da aprovação de ${props.partnerName}.`
-        : `Nota de outro estado: vale como comprovante, mas a conferência automática é só para SP. O gasto vai para a aprovação de ${props.partnerName}.`;
+        ? `Com QR, o gasto já entra confirmado. A nota é conferida na SEFAZ e, se o valor não bater, ${props.partnerName} vê o aviso e pode contestar.`
+        : `Nota de outro estado: vale como comprovante e o gasto já entra confirmado (conferência automática só para SP). ${props.partnerName} pode contestar.`;
     default:
       return `Sem comprovante, o gasto fica pendente até ${props.partnerName} aprovar.`;
   }

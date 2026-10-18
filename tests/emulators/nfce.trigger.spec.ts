@@ -1,6 +1,4 @@
 import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
@@ -86,85 +84,48 @@ async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean
 
 const okData = (totalCents: number) => ({ issuerName: 'LOJA TESTE LTDA', totalCents, date: '2026-10-05' });
 
-describe('checkNfce', () => {
-  it('nota conferida com valor igual confirma o gasto, marcando a conferência como aprovadora', async () => {
-    await write('igual', nfceExpense({ nfceStatus: 'ok', nfceData: okData(5548) }));
-    const d = await waitFor('igual', (x) => x.status === 'confirmed');
-    expect(d?.status).toBe('confirmed');
-    expect((d?.approval as { byUid: string }).byUid).toBe('nfce');
-  });
-
-  it('valor diferente da nota continua pendente', async () => {
-    await write('diferente', nfceExpense({ nfceStatus: 'ok', nfceData: okData(9999) }));
-    await new Promise((r) => setTimeout(r, 3000));
-    expect((await read('diferente'))?.status).toBe('pending_approval');
-  });
-
-  it('QR pendente que não pode ser conferido vira failed e segue pendente', async () => {
+describe('checkNfce: só registra, nunca muda o status', () => {
+  it('QR que não pode ser conferido vira failed e o gasto continua confirmado', async () => {
     // URL sem chave: recusada pelo parser antes de qualquer rede.
-    await write('falha', nfceExpense({ nfceStatus: 'pending' }));
+    await write('falha', nfceExpense({ nfceStatus: 'pending' }, { status: 'confirmed' }));
     const d = await waitFor('falha', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
     const receipt = d?.receipt as { nfceStatus: string; nfceError: string };
     expect(receipt.nfceStatus).toBe('failed');
     expect(receipt.nfceError).toBe('invalid_url');
-    expect(d?.status).toBe('pending_approval');
+    expect(d?.status).toBe('confirmed');
+    expect(d?.approval).toBeUndefined();
   });
 
-  it('nota de outro estado ("unchecked") não é consultada nem confirmada', async () => {
-    const data = nfceExpense({ nfceKey: KEY_MG, nfceStatus: 'unchecked' });
+  it('nota conferida com valor igual não mexe num pendente antigo', async () => {
+    await write('igual', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }));
+    await new Promise((r) => setTimeout(r, 3000));
+    const d = await read('igual');
+    expect(d?.status).toBe('pending_approval');
+    expect(d?.approval).toBeUndefined();
+  });
+
+  it('valor divergente fica só como aviso: o gasto continua confirmado', async () => {
+    await write('diferente', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(9999) }, { status: 'confirmed' }));
+    await new Promise((r) => setTimeout(r, 3000));
+    const d = await read('diferente');
+    expect(d?.status).toBe('confirmed');
+    expect((d?.receipt as { nfceData: { totalCents: number } }).nfceData.totalCents).toBe(9999);
+  });
+
+  it('nota de outro estado ("unchecked") não é consultada', async () => {
+    const data = nfceExpense({ nfceKey: KEY_MG, nfceStatus: 'unchecked' }, { status: 'confirmed' });
     delete (data.receipt as Record<string, unknown>).nfceUrl;
     await write('mg', data);
     await new Promise((r) => setTimeout(r, 3000));
     const d = await read('mg');
-    expect(d?.status).toBe('pending_approval');
+    expect(d?.status).toBe('confirmed');
     expect((d?.receipt as { nfceStatus: string }).nfceStatus).toBe('unchecked');
   });
 
-  it('gasto devolvido não é confirmado pela nota', async () => {
-    await write('devolvido', nfceExpense({ nfceStatus: 'ok', nfceData: okData(5548) }, { status: 'returned' }));
+  it('gasto contestado não é alterado pela nota', async () => {
+    const rejection = { byUid: B, at: new Date(), kind: 'contest', reason: 'Valor errado' };
+    await write('contestado', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }, { status: 'returned', rejection }));
     await new Promise((r) => setTimeout(r, 3000));
-    expect((await read('devolvido'))?.status).toBe('returned');
-  });
-
-  it('não confirma em mês fechado', async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`groups/${GROUP}/months/2026-10`).set({ status: 'closed' });
-    });
-    await write('fechado', nfceExpense({ nfceStatus: 'ok', nfceData: okData(5548) }));
-    await new Promise((r) => setTimeout(r, 3000));
-    expect((await read('fechado'))?.status).toBe('pending_approval');
-  });
-
-  it('editar um gasto confirmado pelo QR volta a pendente e o gatilho confere de novo', async () => {
-    await write('editado', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }));
-    await waitFor('editado', (x) => x.status === 'confirmed');
-
-    // Edição de quem lançou, pelas regras (como o app): só a descrição muda.
-    const db = env.authenticatedContext(A).firestore();
-    await db.doc(path('editado')).update({
-      description: 'Mercado do mês',
-      status: 'pending_approval',
-      approval: firebase.firestore.FieldValue.delete(),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    const d = await waitFor('editado', (x) => x.status === 'confirmed' && x.description === 'Mercado do mês');
-    expect(d?.status).toBe('confirmed');
-    expect((d?.approval as { byUid: string }).byUid).toBe('nfce');
-  });
-
-  it('editar o valor de um gasto confirmado pelo QR deixa pendente (diverge da nota)', async () => {
-    await write('valor', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'ok', nfceData: okData(5548) }));
-    await waitFor('valor', (x) => x.status === 'confirmed');
-    const db = env.authenticatedContext(A).firestore();
-    await db.doc(path('valor')).update({
-      totalCents: 6000,
-      status: 'pending_approval',
-      approval: firebase.firestore.FieldValue.delete(),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    await new Promise((r) => setTimeout(r, 3000));
-    const d = await read('valor');
-    expect(d?.status).toBe('pending_approval');
-    expect(d?.approval).toBeUndefined();
+    expect((await read('contestado'))?.status).toBe('returned');
   });
 });

@@ -1,6 +1,6 @@
 import type { IsoDate } from '@/domain/calendar';
 import { receiptPhotoPath } from '@/domain/image';
-import type { Cents, Competence } from '@/domain/settlement';
+import type { Cents, Competence, ExpenseStatus } from '@/domain/settlement';
 
 /**
  * Montagem dos documentos de gasto exatamente como são gravados.
@@ -8,9 +8,10 @@ import type { Cents, Competence } from '@/domain/settlement';
  * campo entram por parâmetro, o que permite aos testes de regras usar estas
  * mesmas funções.
  *
- * Quem lança nunca grava `confirmed`: todo gasto nasce e volta a
- * `pending_approval` ao ser editado. Só a aprovação do outro membro ou a
- * conferência do QR pela Function confirmam.
+ * Status pelo comprovante: sem comprovante, `pending_approval`; com foto ou
+ * QR, `confirmed` (o outro membro pode contestar até o fechamento do mês).
+ * Correção de um devolvido (recusado ou contestado) sempre volta para
+ * aprovação explícita. Quem lança nunca grava aprovação nem recusa.
  */
 
 /** O que o formulário informa. Competência, status e autoria são calculados à parte. */
@@ -95,12 +96,18 @@ function fields(input: ExpenseInput, competence: Competence) {
   };
 }
 
-/** Gasto novo: sempre pendente de aprovação. */
+/** Status que quem lança grava (as regras exigem exatamente este). */
+export function authorStatus(receipt: ReceiptChoice, currentStatus?: ExpenseStatus): 'pending_approval' | 'confirmed' {
+  if (currentStatus === 'returned' || receipt.type === 'none') return 'pending_approval';
+  return 'confirmed';
+}
+
+/** Gasto novo: pendente sem comprovante; confirmado com foto ou QR. */
 export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: Competence, ids: ExpenseIds, now: T) {
   return {
     ...fields(input, competence),
     receipt: receiptData(input.receipt, ids),
-    status: 'pending_approval' as const,
+    status: authorStatus(input.receipt),
     createdBy: uid,
     createdAt: now,
     updatedAt: now,
@@ -108,31 +115,31 @@ export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: 
 }
 
 /**
- * Edição de quem lançou: volta a pendente (inclusive devolvido corrigido e
- * confirmado editado) e descarta aprovação ou recusa anteriores.
+ * Edição de quem lançou: status pelo comprovante (devolvido corrigido vai para
+ * aprovação) e descarta aprovação ou recusa anteriores.
  */
 export function expenseUpdateData<T, D>(
   input: ExpenseInput,
   competence: Competence,
   ids: ExpenseIds,
-  current: StoredReceipt,
+  current: { receipt: StoredReceipt; status: ExpenseStatus },
   now: T,
   removeField: D,
 ) {
   return {
     ...fields(input, competence),
-    receipt: receiptData(input.receipt, ids, current),
-    status: 'pending_approval' as const,
+    receipt: receiptData(input.receipt, ids, current.receipt),
+    status: authorStatus(input.receipt, current.status),
     approval: removeField,
     rejection: removeField,
     updatedAt: now,
   };
 }
 
-/** Limite do motivo de recusa (o mesmo das regras). */
+/** Limite do motivo de recusa ou contestação (o mesmo das regras). */
 export const MAX_REJECTION_REASON = 200;
 
-/** Aprovação pelo outro membro: confirma o gasto. Só vale para gasto pendente. */
+/** Aprovação pelo outro membro: confirma um gasto pendente. */
 export function approvalData<T>(uid: string, now: T) {
   return {
     status: 'confirmed' as const,
@@ -141,12 +148,28 @@ export function approvalData<T>(uid: string, now: T) {
   };
 }
 
-/** Recusa pelo outro membro: devolve o gasto para correção, com motivo opcional. */
+/** Recusa de um pendente pelo outro membro: devolve para correção, motivo opcional. */
 export function rejectionData<T>(uid: string, reason: string | undefined, now: T) {
   const trimmed = reason?.trim().slice(0, MAX_REJECTION_REASON);
   return {
     status: 'returned' as const,
-    rejection: { byUid: uid, at: now, ...(trimmed ? { reason: trimmed } : {}) },
+    rejection: { byUid: uid, at: now, kind: 'reject' as const, ...(trimmed ? { reason: trimmed } : {}) },
+    updatedAt: now,
+  };
+}
+
+/**
+ * Contestação pelo outro membro de um gasto confirmado automaticamente (por
+ * comprovante ou recorrente fixo): devolve para correção. Motivo obrigatório.
+ * `removeField` tira a marca de conferência do QR (approval 'nfce'), se houver.
+ */
+export function contestData<T, D>(uid: string, reason: string, now: T, removeField: D) {
+  const trimmed = reason.trim().slice(0, MAX_REJECTION_REASON);
+  if (!trimmed) throw new RangeError('a contestação precisa de um motivo');
+  return {
+    status: 'returned' as const,
+    rejection: { byUid: uid, at: now, kind: 'contest' as const, reason: trimmed },
+    approval: removeField,
     updatedAt: now,
   };
 }

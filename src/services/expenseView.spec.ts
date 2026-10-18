@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
-import { debtView, expenseSubtitle, flagsFor, splitLabel, tagFor } from './expenseView';
+import { canContest, debtView, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -97,5 +97,22 @@ describe('flagsFor', () => {
     expect(flagsFor(expense({ receipt: { type: 'photo', photoPath: 'p', photoUploaded: false } }))).toEqual(['photo-missing']);
     expect(flagsFor(expense({ receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }))).toEqual([]);
     expect(flagsFor(expense({}))).toEqual([]);
+  });
+});
+
+describe('isAutoConfirmed e canContest', () => {
+  it('confirmado sem aprovação (comprovante) ou pela conferência antiga é automático e contestável pelo outro', () => {
+    const porComprovante = expense({ status: 'confirmed' });
+    const porNfce = expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } });
+    expect(isAutoConfirmed(porComprovante)).toBe(true);
+    expect(isAutoConfirmed(porNfce)).toBe(true);
+    expect(canContest(porComprovante, B)).toBe(true);
+    expect(canContest(porNfce, B)).toBe(true);
+  });
+
+  it('aprovado manualmente, pendente ou o próprio gasto não são contestáveis', () => {
+    expect(canContest(expense({ status: 'confirmed', approval: { byUid: B, at: null } }), B)).toBe(false);
+    expect(canContest(expense({ status: 'pending_approval' }), B)).toBe(false);
+    expect(canContest(expense({ status: 'confirmed' }), A)).toBe(false);
   });
 });

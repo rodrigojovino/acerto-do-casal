@@ -25,7 +25,9 @@
           </section>
 
           <div v-if="expense.status === 'returned' && expense.rejection" class="rejection" role="status">
-            <p class="strong">Recusado por {{ nameLower(expense.rejection.byUid) }}</p>
+            <p class="strong">
+              {{ expense.rejection.kind === 'contest' ? 'Contestado' : 'Recusado' }} por {{ nameLower(expense.rejection.byUid) }}
+            </p>
             <p>{{ expense.rejection.reason ? `"${expense.rejection.reason}"` : 'Sem motivo informado.' }}</p>
           </div>
 
@@ -78,25 +80,40 @@
           <div class="actions">
             <p v-if="isClosed" class="hint">Mês fechado: este gasto não pode mais ser alterado.</p>
 
-            <!-- Outro membro: aprovar ou recusar -->
+            <!-- Outro membro: aprovar ou recusar um pendente -->
             <template v-else-if="canReview">
               <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
               <input id="motivo" v-model="reason" class="input" maxlength="200" placeholder="Ex.: anexe a nota, por favor" />
-              <p v-if="approveBlocked" class="field-error">{{ approveBlocked }}</p>
               <div class="grid-2">
                 <button class="btn outline" type="button" @click="reject">Recusar</button>
-                <button class="btn primary" type="button" :disabled="!!approveBlocked" @click="approve">Aprovar</button>
+                <button class="btn primary" type="button" @click="approve">Aprovar</button>
               </div>
+            </template>
+
+            <!-- Outro membro: contestar um confirmado automaticamente -->
+            <template v-else-if="contestable">
+              <label for="contestacao" class="label">Motivo da contestação</label>
+              <input
+                id="contestacao"
+                v-model="reason"
+                class="input"
+                maxlength="200"
+                placeholder="Ex.: o valor não bate com a nota"
+                :aria-invalid="contestTried && !reason.trim()"
+              />
+              <p v-if="contestTried && !reason.trim()" class="field-error">Informe o motivo para contestar.</p>
+              <button class="btn outline" type="button" @click="contest">Contestar</button>
+              <p class="hint">O gasto volta para {{ creatorLabel }} corrigir ou excluir; a correção passa pela sua aprovação.</p>
             </template>
 
             <!-- Quem lançou -->
             <template v-else-if="isCreator">
               <router-link
-                v-if="canScanQr && expense.status !== 'confirmed' && expense.receipt.type !== 'nfce'"
+                v-if="expense.status === 'pending_approval' && expense.receipt.type === 'none'"
                 class="btn outline attach"
-                :to="{ name: 'gasto-editar', params: { id: expense.id }, query: { anexar: 'qr' } }"
+                :to="{ name: 'gasto-editar', params: { id: expense.id } }"
               >
-                Anexar QR Code e dispensar aprovação
+                Anexar comprovante e dispensar aprovação
               </router-link>
               <div class="grid-2">
                 <button class="btn danger" type="button" @click="confirmDelete">Excluir</button>
@@ -104,7 +121,10 @@
                   {{ expense.status === 'returned' ? 'Corrigir' : 'Editar' }}
                 </router-link>
               </div>
-              <p v-if="expense.status === 'confirmed'" class="hint">Editar um gasto confirmado faz ele voltar a pendente.</p>
+              <p v-if="expense.status === 'confirmed' && expense.receipt.type === 'none'" class="hint">
+                Editar este gasto faz ele voltar para a aprovação de {{ partnerFirstName }}.
+              </p>
+              <p v-else-if="expense.status === 'returned'" class="hint">A correção vai para a aprovação de {{ partnerFirstName }}.</p>
             </template>
           </div>
         </template>
@@ -145,6 +165,7 @@ import type { Members } from '@/domain/settlement';
 import { splitForViewer } from '@/domain/split';
 import {
   approveExpense,
+  contestExpense,
   deleteExpense,
   receiptPhotoUrl,
   rejectExpense,
@@ -152,9 +173,9 @@ import {
   watchExpense,
   type Expense,
 } from '@/services/expenses';
-import { NFCE_APPROVER, debtView, tagFor } from '@/services/expenseView';
+import { NFCE_APPROVER, canContest, debtView, isAutoConfirmed, tagFor } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
-import { canScanQr, formatCnpj } from '@/services/nfce';
+import { formatCnpj } from '@/services/nfce';
 import { UF_BY_CODE, parseAccessKey } from '../../functions/src/nfce';
 import { pendingPhotoIds } from '@/services/photoQueue';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -217,6 +238,7 @@ watch(
 const isCreator = computed(() => expense.value?.createdBy === myUid.value);
 const isClosed = computed(() => !!expense.value && closedMonths.value.has(expense.value.competence));
 const canReview = computed(() => !!expense.value && !isCreator.value && expense.value.status === 'pending_approval');
+const contestable = computed(() => !!expense.value && canContest(expense.value, myUid.value));
 
 const nameLower = (uid: string) => firstNameOf(uid).replace('Você', 'você');
 const payerLabel = computed(() => (expense.value ? nameLower(expense.value.payerUid) : ''));
@@ -233,16 +255,14 @@ const dateTime = new Intl.DateTimeFormat('pt-BR', {
 const statusText = computed(() => {
   const e = expense.value;
   if (!e) return '';
-  if (e.status === 'confirmed') {
-    return e.approval?.byUid === NFCE_APPROVER ? 'Confirmado pela nota fiscal' : 'Confirmado';
-  }
+  if (e.status === 'confirmed') return isAutoConfirmed(e) ? 'Confirmado pelo comprovante' : 'Aprovado';
   switch (tagFor(e, myUid.value)) {
     case 'pending':
       return `Aguarda aprovação de ${partnerFirstName.value}`;
     case 'approve':
       return 'Aguarda sua aprovação';
     case 'returned':
-      return 'Devolvido para correção';
+      return e.rejection?.kind === 'contest' ? 'Contestado: aguarda correção' : 'Devolvido para correção';
     default:
       return '';
   }
@@ -250,10 +270,15 @@ const statusText = computed(() => {
 const statusClass = computed(() => (expense.value?.status === 'confirmed' ? 'ok' : expense.value?.status));
 
 const approvalText = computed(() => {
-  const a = expense.value?.approval;
-  if (!a || expense.value?.status !== 'confirmed') return null;
-  if (a.byUid === NFCE_APPROVER) return 'Confirmado automaticamente: a nota foi conferida na SEFAZ e o valor bate.';
-  return `Aprovado por ${nameLower(a.byUid)}${a.at ? ` em ${dateTime.format(a.at).replace(', ', ' às ')}` : ''}.`;
+  const e = expense.value;
+  if (!e || e.status !== 'confirmed') return null;
+  if (isAutoConfirmed(e)) {
+    const who = isCreator.value ? partnerFirstName.value : 'Você';
+    const how = e.approval?.byUid === NFCE_APPROVER ? 'pela conferência da nota fiscal' : 'pelo comprovante';
+    return `Confirmado ${how}. ${who} pode contestar até o fechamento do mês.`;
+  }
+  const a = e.approval;
+  return a ? `Aprovado por ${nameLower(a.byUid)}${a.at ? ` em ${dateTime.format(a.at).replace(', ', ' às ')}` : ''}.` : null;
 });
 
 /** Comprovante sem foto exibível: sem comprovante, foto não enviada ou nota. */
@@ -280,20 +305,20 @@ const receiptDetail = computed(() => {
   if (r.type === 'photo') {
     return isCreator.value
       ? 'A foto está guardada no seu aparelho e sobe quando houver conexão.'
-      : `${partnerFirstName.value} já anexou a foto; ela aparece aqui assim que for enviada. Até lá não dá para aprovar.`;
+      : `${partnerFirstName.value} já anexou a foto; ela aparece aqui assim que for enviada.`;
   }
   const parts: string[] = [];
   if (r.nfceStatus === 'unchecked') {
     const access = parseAccessKey(r.nfceKey);
     const [y, m] = access.yearMonth.split('-');
     parts.push(`CNPJ ${formatCnpj(access.cnpj)} · emitida em ${m}/${y}.`);
-    if (e.status !== 'confirmed') parts.push('O QR vale como comprovante; o gasto precisa de aprovação.');
+    parts.push('O QR vale como comprovante.');
   }
   if (r.nfceData) parts.push(`${r.nfceData.issuerName} · ${formatDateBR(r.nfceData.date)} · ${formatBRL(r.nfceData.totalCents)}`);
   if (r.nfceStatus === 'pending') parts.push('A conferência acontece no servidor, também para notas lidas sem conexão.');
-  if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante; o gasto precisa de aprovação.');
+  if (r.nfceStatus === 'failed') parts.push('O QR continua valendo como comprovante.');
   if (r.nfceStatus === 'ok' && r.nfceData && r.nfceData.totalCents !== e.totalCents) {
-    parts.push(`O valor lançado (${formatBRL(e.totalCents)}) não bate com a nota, por isso precisa de aprovação.`);
+    parts.push(`O valor lançado (${formatBRL(e.totalCents)}) não bate com a nota.`);
   }
   return parts.join(' ') || null;
 });
@@ -303,7 +328,7 @@ const canRetryNfce = computed(
     isCreator.value &&
     expense.value?.receipt.type === 'nfce' &&
     expense.value.receipt.nfceStatus === 'failed' &&
-    expense.value.status === 'pending_approval' &&
+    expense.value.status === 'confirmed' &&
     !isClosed.value,
 );
 
@@ -311,12 +336,6 @@ const canRetryNfce = computed(
 const nfceUf = computed(() => {
   const r = expense.value?.receipt;
   return r?.type === 'nfce' ? (UF_BY_CODE[r.nfceKey.slice(0, 2)] ?? r.nfceKey.slice(0, 2)) : '';
-});
-
-/** Aprovar bloqueado enquanto a foto não foi enviada (as regras também barram). */
-const approveBlocked = computed(() => {
-  const r = expense.value?.receipt;
-  return r?.type === 'photo' && !r.photoUploaded ? 'Foto ainda não enviada' : null;
 });
 
 const sharedCents = computed(() => (expense.value ? expense.value.totalCents - expense.value.personalCents : 0));
@@ -359,8 +378,18 @@ const createdText = computed(() => {
 const reason = ref('');
 
 function approve(): void {
-  if (!group.value || !expense.value || approveBlocked.value) return;
+  if (!group.value || !expense.value) return;
   approveExpense(group.value.id, expense.value.id, myUid.value);
+}
+
+const contestTried = ref(false);
+
+function contest(): void {
+  contestTried.value = true;
+  if (!group.value || !expense.value || !reason.value.trim()) return;
+  contestExpense(group.value.id, expense.value.id, myUid.value, reason.value);
+  reason.value = '';
+  contestTried.value = false;
 }
 
 function reject(): void {

@@ -46,9 +46,9 @@ interface NfceReceipt {
  * (inclusive o lançado offline) e a cada alteração:
  * 1. `nfceStatus: 'pending'` → consulta a SEFAZ e grava `ok` (com os dados
  *    da nota) ou `failed` (com o motivo). O QR continua valendo como comprovante.
- * 2. Pendente com nota `ok` e valor lançado igual ao da nota → `confirmed`.
- *    Valor diferente: continua pendente para o outro aprovar.
- * Nunca altera o valor lançado.
+ * Só registra o resultado (ok, falha ou valor da nota para comparação): nunca
+ * muda o status nem o valor lançado. Gasto com QR já nasce confirmado; um valor
+ * divergente vira aviso, e o outro membro pode contestar.
  */
 export const checkNfce = onDocumentWritten(
   { document: 'groups/{groupId}/expenses/{expenseId}', timeoutSeconds: 60 },
@@ -80,35 +80,6 @@ export const checkNfce = onDocumentWritten(
           'receipt.nfceStatus': update.nfceStatus,
           'receipt.nfceData': update.nfceData ?? FieldValue.delete(),
           'receipt.nfceError': update.nfceError ?? FieldValue.delete(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      });
-      return; // a gravação acima dispara de novo e cai no passo 2
-    }
-
-    if (
-      after.get('status') === 'pending_approval' &&
-      receipt.nfceStatus === 'ok' &&
-      receipt.nfceData?.totalCents === after.get('totalCents')
-    ) {
-      await db.runTransaction(async (tx) => {
-        const current = await tx.get(after.ref);
-        const r = current.get('receipt') as NfceReceipt | undefined;
-        if (
-          !current.exists ||
-          current.get('status') !== 'pending_approval' ||
-          r?.type !== 'nfce' ||
-          r.nfceStatus !== 'ok' ||
-          r.nfceData?.totalCents !== current.get('totalCents')
-        ) {
-          return;
-        }
-        // Mês fechado não muda (não deveria haver pendente em mês fechado).
-        const month = await tx.get(db.doc(`groups/${event.params.groupId}/months/${current.get('competence')}`));
-        if (month.exists && month.get('status') === 'closed') return;
-        tx.update(after.ref, {
-          status: 'confirmed',
-          approval: { byUid: NFCE_APPROVER, at: FieldValue.serverTimestamp() },
           updatedAt: FieldValue.serverTimestamp(),
         });
       });

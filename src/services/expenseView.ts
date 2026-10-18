@@ -33,8 +33,21 @@ export function flagsFor(expense: Pick<Expense, 'receipt' | 'totalCents' | 'stat
   return [];
 }
 
-/** Quem aprovou pode ser a conferência da nota (approval.byUid 'nfce'). */
+/** Marca da conferência do QR da versão anterior (approval.byUid 'nfce'). */
 export const NFCE_APPROVER = 'nfce';
+
+/**
+ * Confirmado sem aprovação de pessoa: pelo comprovante, recorrente fixo ou a
+ * conferência do QR da versão anterior. É o único confirmado contestável.
+ */
+export function isAutoConfirmed(expense: Pick<Expense, 'status' | 'approval'>): boolean {
+  return expense.status === 'confirmed' && (!expense.approval || expense.approval.byUid === NFCE_APPROVER);
+}
+
+/** O outro membro pode contestar (as regras também exigem mês aberto). */
+export function canContest(expense: Pick<Expense, 'status' | 'approval' | 'createdBy'>, viewerUid: string): boolean {
+  return expense.createdBy !== viewerUid && isAutoConfirmed(expense);
+}
 
 /** Etiqueta da lista: "Pendente" (meu), "Aprovar" (do outro), "Devolvido". */
 export function tagFor(expense: Pick<Expense, 'status' | 'createdBy'>, viewerUid: string): ExpenseTag {

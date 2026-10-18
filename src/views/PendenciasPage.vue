@@ -39,12 +39,8 @@
                 <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
                 <span aria-hidden="true" class="chev">›</span>
               </router-link>
-              <router-link
-                v-if="canScanQr && e.receipt.type !== 'nfce'"
-                class="attach"
-                :to="{ name: 'gasto-editar', params: { id: e.id }, query: { anexar: 'qr' } }"
-              >
-                Anexar QR Code e dispensar aprovação
+              <router-link v-if="e.receipt.type === 'none'" class="attach" :to="{ name: 'gasto-editar', params: { id: e.id } }">
+                Anexar comprovante e dispensar aprovação
               </router-link>
             </div>
             <p v-if="waiting.length === 0" class="empty">Nenhum gasto seu esperando aprovação.</p>
@@ -56,13 +52,15 @@
             <router-link v-for="e in returned" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
               <span class="item-main">
                 <span class="item-name">{{ e.description }}</span>
-                <span class="item-sub danger">{{ e.rejection?.reason ? `"${e.rejection.reason}"` : 'Recusado sem motivo informado' }}</span>
+                <span class="item-sub danger">
+                  {{ e.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' }}{{ e.rejection?.reason ? `: "${e.rejection.reason}"` : ' sem motivo informado' }}
+                </span>
               </span>
               <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="returned.length === 0" class="empty">
-              Nada devolvido. Quando {{ partnerFirstName }} recusar um gasto seu, ele aparece aqui com o motivo.
+              Nada devolvido. Quando {{ partnerFirstName }} recusar ou contestar um gasto seu, ele aparece aqui com o motivo.
             </p>
           </section>
 
@@ -91,7 +89,6 @@ import { formatDateBR, monthName } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
 import { flagLabel, flagsFor } from '@/services/expenseView';
-import { canScanQr } from '@/services/nfce';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const myUid = computed(() => user.value?.uid ?? '');

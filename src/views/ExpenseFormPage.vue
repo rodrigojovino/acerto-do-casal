@@ -248,7 +248,7 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   if (!scanned.spUrl) {
     nfceMessage.value = {
       kind: 'warn',
-      text: `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP; o gasto vai para a aprovação de ${partnerFirstName.value}.`,
+      text: `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP.`,
     };
     return;
   }
@@ -274,8 +274,8 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   const when = nota.date.split('-').reverse().join('/');
   nfceMessage.value =
     totalCents.value === nota.totalCents
-      ? { kind: 'ok', text: `Nota de ${formatBRL(nota.totalCents)} em ${when}. Se o valor continuar igual, o gasto é confirmado sem aprovação.` }
-      : { kind: 'warn', text: `Valor diferente da nota (${formatBRL(nota.totalCents)}). O gasto ficará pendente até ${partnerFirstName.value} aprovar.` };
+      ? { kind: 'ok', text: `Nota de ${formatBRL(nota.totalCents)} em ${when}.` }
+      : { kind: 'warn', text: `Valor diferente da nota (${formatBRL(nota.totalCents)}). ${partnerFirstName.value} verá o aviso e poderá contestar.` };
 }
 
 // ---- Limites de data ----
