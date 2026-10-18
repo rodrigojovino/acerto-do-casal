@@ -278,8 +278,10 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 3. [x] Núcleo do acerto: lançamento, painel com saldo, offline
 4. [x] Comprovantes e aprovação
 5. [x] Recorrentes e parcelados (Cloud Functions)
-6. [ ] Fechamento, reabertura e histórico
+6. [x] Fechamento, reabertura e histórico
+   - Pendência: validar o registro do PIX com foto em produção no fechamento de outubro/2026.
 7. [ ] Notificações, exportação Excel/PDF, versão web
+   - [x] Bloco A: notificações (push, preferências por categoria, contador na aba e no ícone), v0.7.0.
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
    - Pendência herdada da Fase 4 (prioridade baixa): reduzir o tamanho do APK (de ~6 MB para ~31,5 MB com a leitura de QR); avaliar o modelo de QR via Google Play Services em vez do embutido no APK.
    - Pendência da Fase 5: itens da NFC-e de SP.
