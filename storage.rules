@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Comprovantes: groups/{groupId}/receipts/{expenseId}.jpg
+// Comprovantes dos gastos: groups/{groupId}/receipts/{expenseId}.jpg
 // - membros do grupo leem;
 // - só quem lançou o gasto envia, troca ou apaga a foto, e só se o gasto
 //   tiver comprovante do tipo foto;
@@ -30,6 +30,30 @@ service firebase.storage {
 
       allow delete: if request.auth != null
         && expenseDoc(groupId, fileName).data.createdBy == request.auth.uid;
+    }
+
+    // Comprovantes PIX do acerto: groups/{groupId}/settlements/{YYYY-MM}/{paymentId}.jpg
+    // - membros leem;
+    // - membros enviam enquanto o mês não está fechado (quem paga e o valor, a
+    //   Function registerPayment confere); sem trocar nem apagar depois;
+    // - só JPEG, até 1 MB.
+    function monthPath(groupId, month) {
+      return /databases/(default)/documents/groups/$(groupId)/months/$(month);
+    }
+
+    match /groups/{groupId}/settlements/{month}/{fileName} {
+      allow read: if request.auth != null
+        && request.auth.uid in groupDoc(groupId).data.members;
+
+      allow create: if request.auth != null
+        && resource == null
+        && month.matches('[0-9]{4}-(0[1-9]|1[0-2])')
+        && fileName.matches('[A-Za-z0-9]{8,40}[.]jpg')
+        && request.resource.contentType == 'image/jpeg'
+        && request.resource.size < 1024 * 1024
+        && request.auth.uid in groupDoc(groupId).data.members
+        && (!firestore.exists(monthPath(groupId, month))
+            || firestore.get(monthPath(groupId, month)).data.status != 'closed');
     }
   }
 }

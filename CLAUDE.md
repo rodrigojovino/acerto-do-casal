@@ -175,10 +175,14 @@ invites/{code}                   // só Functions; app sem acesso
 joinAttempts/{uid}               // só Functions; app sem acesso
   failures, windowStart
 
-groups/{groupId}/months/{YYYY-MM}
+groups/{groupId}/months/{YYYY-MM}  // sem documento = aberto; só as Functions gravam
   status: 'open' | 'closed'
-  settlement?: { fromUid, toUid, amountCents, method: 'pix' | 'cash', receiptPath?, paidAt }
-  reopenRequest?: { byUid, at, status: 'pending' | 'approved' | 'denied' }
+  payments?: [{ id, fromUid, toUid, amountCents, method: 'pix' | 'cash', receiptPath?, byUid, at }]
+      // acerto como lista: fecha quando a soma líquida bate com o saldo; após reabrir, paga-se o complemento ou a devolução
+  summary?: { expenseCount, totalCents, personalCents, sharedCents, byMember: { [uid]: { shareCents, paidSharedCents, diffCents } }, result }
+      // memória de cálculo guardada ao fechar (sai ao reabrir)
+  closedAt?, closedBy?, reopenedAt?
+  reopenRequest?: { byUid, reason, at, status: 'pending' | 'approved' | 'denied', answeredBy?, answeredAt? }
 
 groups/{groupId}/expenses/{expenseId}
   description, totalCents, personalCents, payerUid, payerSharePct
@@ -207,6 +211,7 @@ groups/{groupId}/recurring/{recurringId}
 ```
 
 Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
+Comprovantes PIX do acerto em `groups/{groupId}/settlements/{YYYY-MM}/{paymentId}.jpg`: membros enviam (arquivo novo, JPEG até 1 MB) enquanto o mês não está fechado e leem; sem troca nem exclusão.
 
 Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
 - `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
@@ -216,7 +221,11 @@ Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators
 - **Nova consulta** ("Tentar conferir de novo"): exceção estreita para quem lançou voltar uma NFC-e de SP `failed` para `pending`, sem mexer em mais nada (nem no status).
 - **Parcelas**: exceção ao limite de datas só dentro de série válida: primeiro mês dentro do limite, competência = primeiro mês + índice − 1, id no padrão e, na criação, a parcela 1 da mesma série (mesmo número de parcelas e primeiro mês) existe no mesmo lote ou antes, do mesmo autor. Na edição, `installment`, valor, parte pessoal, data e competência não mudam. Mês futuro nunca é consultado como fechado (sem leitura), o que deixa um lote de 48 parcelas dentro do limite de leituras das regras; a Fase 6 não pode fechar mês futuro.
 - `recurring`: só membros leem. Ainda não aprovado (novo, pendente, recusado): quem cadastrou grava variável `approved` e fixo `pending_approval`, sem `approval`/`proposal`; o outro aprova ou recusa. Já aprovado: quem cadastrou mantém status, aprovação e versão aprovada; o dinheiro só muda direto entre variáveis, senão vai em `proposal` (diferente da versão aprovada, valores válidos, `at` do servidor); o outro aprova (versão aprovada = `proposal`, nova `approval`) ou recusa (`proposal` some, versão aprovada intacta). Qualquer um desativa; só quem cadastrou exclui. `lastGeneratedMonth` só pelo Admin SDK.
-- Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura (fechamento na Fase 6). Subcoleções sem regra própria ficam fechadas.
+- Exclusão: só quem lançou, nunca em mês fechado. `months`: só leitura para o app; fechamento, pagamento e reabertura só pelas Functions callable (`functions/src/closing.ts`), cada uma numa transação com as mesmas funções de `src/domain/closing.ts`:
+  - `registerPayment`: só quem deve pagar o que falta (saldo − pagamentos), sempre o valor exato; PIX exige a foto já no Storage.
+  - `closeMonth`: qualquer membro; mês atual ou passado (nunca futuro); sem pendentes, devolvidos, recorrentes a confirmar ou fotos não enviadas; acerto pago (saldo zero fecha sem pagamento). Guarda a memória de cálculo.
+  - `requestReopen` (motivo obrigatório), `answerReopen` (só o outro membro; aprovado volta a aberto, os pagamentos continuam valendo) e `cancelReopen` (quem pediu).
+- Subcoleções sem regra própria ficam fechadas.
 - Storage: só quem lançou o gasto (tipo foto) envia/troca/apaga a foto, JPEG até 1 MB; membros leem. Cada regra faz uma única leitura no Firestore (por isso o app apaga a foto antes do documento). Exige a permissão do agente do Storage para ler o Firestore (papel "Firebase Rules Firestore Service Agent").
 - `src/services/expenseData.ts` monta os documentos (gasto, edição, aprovação, recusa) como o app grava; os testes de regras usam as mesmas funções.
 

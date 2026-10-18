@@ -89,3 +89,30 @@ describe('leitura e exclusão', () => {
     await assertSucceeds(storageAs(B).ref(receipt('foto-b')).delete());
   });
 });
+
+describe('comprovante PIX do acerto', () => {
+  const MONTH = '2026-09';
+  const pix = (id: string, month = MONTH) => `groups/${GROUP}/settlements/${month}/${id}.jpg`;
+  const put = (uid: string, path: string, size = 2048, contentType = 'image/jpeg') =>
+    env.authenticatedContext(uid).storage().ref(path).put(jpeg(size), { contentType });
+
+  it('membros enviam e leem enquanto o mês está aberto; terceiro não', async () => {
+    await assertSucceeds(put(A, pix('pagamento0001')));
+    await assertSucceeds(env.authenticatedContext(B).storage().ref(pix('pagamento0001')).getMetadata());
+    await assertFails(put(C, pix('pagamento0002')));
+    await assertFails(env.authenticatedContext(C).storage().ref(pix('pagamento0001')).getMetadata());
+  });
+
+  it('mês fechado não recebe comprovante; nem troca, nem apaga, nem arquivo fora do padrão', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`groups/${GROUP}/months/2026-08`).set({ status: 'closed' });
+    });
+    await assertFails(put(A, pix('pagamento0003', '2026-08')));
+    await assertSucceeds(put(A, pix('pagamento0004')));
+    await assertFails(put(A, pix('pagamento0004')));
+    await assertFails(env.authenticatedContext(A).storage().ref(pix('pagamento0004')).delete());
+    await assertFails(put(A, pix('curto')));
+    await assertFails(put(A, pix('pagamento0005'), 2048, 'image/png'));
+    await assertFails(put(A, pix('pagamento0006'), 2 * 1024 * 1024));
+  });
+});
