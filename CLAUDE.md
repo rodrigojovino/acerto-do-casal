@@ -248,6 +248,12 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - Os itens são extraídos e guardados pela Function no momento da conferência (disponíveis offline). Falha na leitura dos itens não afeta a conferência do valor.
      - Em parcelados, os itens ficam na parcela 1 e aparecem na série toda.
      - Reconsulta única para as notas já conferidas antes da implementação.
+   - Pendência da Fase 5: nome do emitente pelo CNPJ.
+     - Para notas sem consulta à SEFAZ (NF-e, NFC-e de outros estados e chave digitada), uma Function consulta o CNPJ num serviço público (ex.: BrasilAPI) e preenche a descrição com o nome fantasia ou a razão social.
+     - Cache por CNPJ no Firestore, para não consultar o mesmo CNPJ duas vezes.
+     - Offline ou com falha, a descrição fica com o CNPJ formatado (como hoje).
+   - Pendência da Fase 5: campo de observação opcional no lançamento (até ~300 caracteres), visível no Detalhe e resumido em Pendências. Vale para parcelas (é da série) e para a confirmação de recorrente variável. Editar a observação de um gasto confirmado volta para aprovação, como qualquer edição.
+   - Pendência da Fase 5: foto opcional junto com a chave do documento fiscal (QR, código de barras ou digitada), principalmente quando o valor é digitado (NF-e, NFC-e de outro estado, chave digitada). O gasto mantém o selo Automático; o Detalhe mostra os dados da chave e a foto ampliável.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
