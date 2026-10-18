@@ -136,6 +136,11 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 - Fechar e reabrir exigem conexão. Reabrir exige aprovação do outro membro.
 - Gasto lançado com data de um mês fechado entra na competência do mês aberto, mantendo a `date` original.
 - Gastos de mês fechado são imutáveis (garantir também nas regras do Firestore).
+- Tela "Fechar [mês]" (a partir do Painel, só mês atual ou passado): resultado ("Você paga R$ X a Bia", "Bia te paga R$ X" ou "Ninguém deve nada") e memória de cálculo (`monthBreakdown` em `src/domain/closing.ts`: total lançado, partes pessoais, total no rateio, parte de cada um, quanto cada um pagou do rateio e diferença; mesmo arredondamento do saldo). Bloqueada com a lista do que falta (`closeBlockers`) e atalho para Pendências, sem conexão, ou com acerto por pagar (`closeReasons`).
+- Acerto como lista de pagamentos (`remainingTransfer`): quem deve o que falta registra, com foto do PIX ou "Pago em dinheiro", sempre o valor exato. Saldo zero fecha sem pagamento. Depois de reabrir, os pagamentos anteriores continuam valendo e falta só o complemento, ou a devolução no sentido contrário se o saldo diminuiu. Qualquer um dos dois fecha. A lista de pagamentos (componente `PaymentList`, também no Detalhe do mês do Histórico) mostra valor, sentido, forma, quem registrou e quando; no PIX, a miniatura do comprovante abre a foto ampliável, e enquanto a foto sobe aparece "Comprovante sendo enviado".
+- Painel de um mês fechado: o cartão do saldo vira "Acerto de [mês] · pago", com quem pagou quanto a quem, a forma e a data (ou "Ninguém deve nada"), mantendo "Você pagou / [nome] pagou"; no lugar do botão de fechar, a linha "Mês fechado em [data] por [nome] · Ver o acerto · Pedir reabertura" (link discreto).
+- Reabertura: o pedido abre um diálogo com motivo obrigatório e o aviso de que o outro precisa aprovar (`askReopenReason`). Com pedido pendente, aviso em destaque (componente `ReopenPanel`, também na tela do mês fechado e no Histórico): quem pediu vê "Reabertura aguardando [nome]" e pode cancelar; o outro vê o motivo e aprova ou recusa. Só com conexão.
+- Gasto lançado offline num mês que fecha antes de sincronizar é recusado pelas regras; o aviso mostra descrição, valor e data (`expenseLabel`) para relançar à mão.
 
 ### Offline
 
@@ -263,6 +268,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - Cache por CNPJ no Firestore, para não consultar o mesmo CNPJ duas vezes.
      - Offline ou com falha, a descrição fica com o CNPJ formatado (como hoje).
    - Pendência da Fase 5: campo de observação opcional no lançamento (até ~300 caracteres), visível no Detalhe e resumido em Pendências. Vale para parcelas (é da série) e para a confirmação de recorrente variável. Editar a observação de um gasto confirmado volta para aprovação, como qualquer edição.
+   - Pendência da Fase 6: relançar automaticamente no mês aberto o gasto lançado offline num mês que fechou antes de sincronizar (hoje o aviso mostra descrição, valor e data para relançar à mão).
    - Pendência da Fase 5: contador na aba Pendências da barra inferior.
      - Conta só o que depende de ação de quem vê: "Para você aprovar", "Devolvidos para você corrigir" e "Recorrentes para confirmar" (variáveis, cadastros e reajustes). Não conta "Aguardando [nome] aprovar" nem automáticos não validados.
      - Série de parcelas conta 1. Acima de 9, mostra "9+". Sem pendências, o número não aparece.

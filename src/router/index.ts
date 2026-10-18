@@ -9,6 +9,7 @@ import EmBrevePage from '../views/EmBrevePage.vue';
 import AjustesPage from '../views/AjustesPage.vue';
 import RecurringListPage from '../views/RecurringListPage.vue';
 import RecurringFormPage from '../views/RecurringFormPage.vue';
+import ClosingPage from '../views/ClosingPage.vue';
 import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 import ExpenseDetailPage from '../views/ExpenseDetailPage.vue';
@@ -20,6 +21,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/painel', name: 'painel', component: PainelPage },
   { path: '/pendencias', name: 'pendencias', component: PendenciasPage },
   { path: '/historico', name: 'historico', component: EmBrevePage },
+  { path: '/fechar/:mes(\\d{4}-\\d{2})', name: 'fechar', component: ClosingPage },
   { path: '/ajustes', name: 'ajustes', component: AjustesPage },
   { path: '/ajustes/recorrentes', name: 'recorrentes', component: RecurringListPage },
   { path: '/ajustes/recorrentes/nova', name: 'recorrente-novo', component: RecurringFormPage },
@@ -43,7 +45,7 @@ const allowed: Record<SessionStatus, ReadonlySet<string>> = {
   signedOut: new Set(['entrar']),
   noGroup: new Set(['vinculo']),
   waitingPartner: new Set(['vinculo']),
-  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente']),
+  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente', 'fechar']),
 };
 
 const router = createRouter({

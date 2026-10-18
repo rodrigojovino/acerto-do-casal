@@ -18,8 +18,19 @@
         <SyncStatus :pending-writes="hasPendingWrites" />
 
         <section class="balance" aria-labelledby="saldo-titulo">
-          <p id="saldo-titulo" class="muted small">{{ isClosed ? 'Saldo do acerto' : 'Saldo do acerto até agora' }}</p>
-          <div>
+          <p id="saldo-titulo" class="muted small">
+            {{ isClosed ? `Acerto de ${monthName(month)}${closedPayments.length > 0 ? ' · pago' : ''}` : 'Saldo do acerto até agora' }}
+          </p>
+          <!-- Mês fechado: quem pagou quanto a quem, a forma e a data (não "X te deve") -->
+          <template v-if="isClosed">
+            <p v-if="closedPayments.length === 0" class="who">Ninguém deve nada</p>
+            <div v-for="p in closedPayments" :key="p.id">
+              <p class="who">{{ paymentWho(p) }}</p>
+              <p class="amount num">{{ formatBRL(p.amountCents) }}</p>
+              <p class="muted small">{{ p.method === 'pix' ? 'PIX' : 'Dinheiro' }}{{ p.at ? ` · ${formatDateBR(todayInSaoPaulo(p.at))}` : '' }}</p>
+            </div>
+          </template>
+          <div v-else>
             <p class="who">{{ balanceText.who }}</p>
             <p class="amount num">{{ formatBRL(balance?.amountCents ?? 0) }}</p>
           </div>
@@ -38,6 +49,30 @@
             <span class="num strong">{{ formatBRL(forecastFixedCents) }}</span>
           </p>
         </section>
+
+        <!-- Mês fechado: pedido de reabertura pendente em destaque; senão, uma linha simples -->
+        <template v-if="isClosed && monthDoc && group">
+          <ReopenPanel
+            v-if="monthDoc.reopenRequest?.status === 'pending'"
+            :group-id="group.id"
+            :month="month"
+            :month-doc="monthDoc"
+            :viewer-uid="myUid"
+          />
+          <p class="closed-line small">
+            <span>{{ closedLine }}</span>
+            <span aria-hidden="true"> · </span>
+            <router-link class="link" :to="{ name: 'fechar', params: { mes: month } }">Ver o acerto</router-link>
+            <template v-if="monthDoc.reopenRequest?.status !== 'pending'">
+              <span aria-hidden="true"> · </span>
+              <button type="button" class="link subtle" :disabled="!isOnline || reopenBusy" @click="askReopen">Pedir reabertura</button>
+            </template>
+          </p>
+          <p v-if="reopenError" class="alert-error" role="alert">{{ reopenError }}</p>
+        </template>
+        <router-link v-else-if="canOfferClose" class="btn outline close-btn" :to="{ name: 'fechar', params: { mes: month } }">
+          Fechar {{ monthName(month) }}
+        </router-link>
 
         <router-link v-if="pending.open > 0 || pending.awaitingMine > 0" class="pending" :to="{ name: 'pendencias' }">
           <span>{{ pendingText }}</span><span aria-hidden="true">›</span>
@@ -111,6 +146,10 @@ import { formatBRL } from '@/domain/money';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
 import { watchLatestInstallmentMonth, watchMonthExpenses, type Expense } from '@/services/expenses';
 import { navigationLastMonth } from '@/domain/installments';
+import ReopenPanel from '@/components/ReopenPanel.vue';
+import { closingErrorMessage, requestReopen, watchMonth, type MonthDoc, type MonthPayment } from '@/services/closing';
+import { askReopenReason } from '@/components/reopenDialog';
+import { isOnline } from '@/services/sync';
 import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { forecastRecurring, forecastTotal } from '@/domain/recurrence';
@@ -170,6 +209,59 @@ function go(delta: 1 | -1): void {
 }
 
 const isClosed = computed(() => closedMonths.value.has(month.value));
+
+// Documento do mês exibido (pedido de reabertura, pagamentos), em tempo real.
+const monthDoc = ref<MonthDoc | null>(null);
+let stopMonth: (() => void) | null = null;
+watch(
+  [() => group.value?.id, month],
+  ([groupId, m]) => {
+    stopMonth?.();
+    stopMonth = null;
+    monthDoc.value = null;
+    if (groupId) stopMonth = watchMonth(groupId, m, (d) => (monthDoc.value = d), () => undefined);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopMonth?.());
+
+/** Pagamentos do acerto do mês fechado. */
+const closedPayments = computed(() => monthDoc.value?.payments ?? []);
+
+/** "Bia pagou a você", "Você pagou a Bia". */
+function paymentWho(p: MonthPayment): string {
+  const from = p.fromUid === myUid.value ? 'Você' : firstNameOf(p.fromUid);
+  const to = p.toUid === myUid.value ? 'você' : firstNameOf(p.toUid);
+  return `${from} pagou a ${to}`;
+}
+
+/** "Mês fechado em 18/10 por Bia". */
+const closedLine = computed(() => {
+  const d = monthDoc.value;
+  if (!d?.closedAt) return 'Mês fechado';
+  const who = d.closedBy === myUid.value ? 'você' : firstNameOf(d.closedBy ?? '');
+  return `Mês fechado em ${formatDateBR(todayInSaoPaulo(d.closedAt), false)} por ${who}`;
+});
+
+// Pedir reabertura: a tela do pedido (motivo e aviso da aprovação) é um diálogo.
+const reopenBusy = ref(false);
+const reopenError = ref<string | null>(null);
+async function askReopen(): Promise<void> {
+  if (!group.value) return;
+  const reason = await askReopenReason(month.value, partnerFirstName.value);
+  if (!reason) return;
+  reopenBusy.value = true;
+  reopenError.value = null;
+  try {
+    await requestReopen(group.value.id, month.value, reason);
+  } catch (err) {
+    reopenError.value = closingErrorMessage(err);
+  } finally {
+    reopenBusy.value = false;
+  }
+}
+/** Fechar: só mês atual ou passado (mês futuro nunca fecha); fechado, mostra o acerto. */
+const canOfferClose = computed(() => isClosed.value || month.value <= monthOf(today.value));
 
 // ---- Gastos do mês em tempo real (inclusive do cache offline) ----
 const expenses = ref<Expense[]>([]);
@@ -462,6 +554,21 @@ li:last-child .item {
 .item-sub {
   font-size: 12px;
   color: var(--app-muted);
+}
+
+.closed-line {
+  margin: 0;
+  text-align: center;
+  color: var(--app-muted);
+}
+
+.link.subtle {
+  color: var(--app-muted);
+  font-weight: 600;
+}
+
+.close-btn {
+  height: 44px;
 }
 
 .item.forecast {

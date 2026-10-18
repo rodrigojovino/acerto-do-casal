@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
 import { authorStatus } from './expenseData';
-import { badgeFor, canContest, debtView, originLabel, typeBadges, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
+import { badgeFor, canContest, debtView, expenseLabel, originLabel, typeBadges, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -236,5 +236,13 @@ describe('typeBadges', () => {
     expect(typeBadges({ ...expense({ status: 'confirmed', approval: { byUid: B, at: null } }), recurringId: 'r1' })).toEqual([
       'Recorrente',
     ]);
+  });
+});
+
+describe('expenseLabel', () => {
+  it('descrição, valor e data no aviso de gravação recusada', () => {
+    expect(expenseLabel({ description: ' Mercado ', totalCents: 5000, date: '2026-10-18' })).toMatch(
+      /^“Mercado” \(R\$\s50,00, 18\/10\/2026\)$/,
+    );
   });
 });

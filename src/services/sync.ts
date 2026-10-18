@@ -26,7 +26,7 @@ export function trackWrite(write: Promise<unknown>, failMessage: string): void {
       const code = (err as { code?: string })?.code;
       lastError.value =
         code === 'permission-denied'
-          ? `${failMessage} O mês pode ter sido fechado ou o gasto mudou.`
+          ? `${failMessage} O mês pode ter sido fechado ou o gasto mudou; se precisar, lance de novo com esses dados.`
           : `${failMessage} Tente de novo.`;
     })
     .finally(() => inFlight.value--);

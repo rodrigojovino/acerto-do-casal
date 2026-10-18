@@ -192,3 +192,12 @@ export function typeBadges(
   if (expense.recurringId && !recurringStatus) badges.push('Recorrente');
   return badges;
 }
+
+/**
+ * Identifica o gasto no aviso de gravação recusada (ex.: lançado offline num
+ * mês fechado antes de sincronizar), para dar para relançar à mão:
+ * "“Mercado” (R$ 50,00, 18/10/2026)".
+ */
+export function expenseLabel(input: { description: string; totalCents: number; date: string }): string {
+  return `“${input.description.trim()}” (${formatBRL(input.totalCents)}, ${formatDateBR(input.date)})`;
+}

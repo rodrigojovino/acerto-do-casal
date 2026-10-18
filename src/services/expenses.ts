@@ -17,6 +17,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { resolveCompetence, type IsoDate } from '@/domain/calendar';
+import { expenseLabel } from './expenseView';
 import type { InstallmentInfo } from '@/domain/installments';
 import type { Competence, ExpenseStatus, SettlementExpense } from '@/domain/settlement';
 import { deleteObject, getDownloadURL, ref as storageRef } from 'firebase/storage';
@@ -81,6 +82,7 @@ export interface WriteResult {
 }
 
 const expensesCol = (groupId: string) => collection(db, 'groups', groupId, 'expenses');
+
 
 function toExpense(snap: DocumentSnapshot): Expense {
   // 'estimate': enquanto offline, o horário do servidor vira o horário local.
@@ -179,7 +181,7 @@ export function createExpense(
   const competence = resolveCompetence(input.date, closedMonths, today);
   trackWrite(
     setDoc(ref, newExpenseData(input, uid, competence, ids, serverTimestamp())),
-    'Não foi possível salvar o gasto.',
+    `Não foi possível salvar o gasto ${expenseLabel(input)}.`,
   );
   if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, ref.id, photo);
   return { id: ref.id, competence };
@@ -201,7 +203,7 @@ export function updateExpense(
       doc(expensesCol(groupId), current.id),
       expenseUpdateData(input, competence, ids, current, serverTimestamp(), deleteField()),
     ),
-    'Não foi possível salvar a alteração.',
+    `Não foi possível salvar a alteração do gasto ${expenseLabel(input)}.`,
   );
   if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, current.id, photo);
   else if (input.receipt.type !== 'photo') void discardQueuedPhoto(groupId, current.id);
@@ -324,7 +326,7 @@ export function createInstallmentSeries(
   const parcels = newInstallmentSeriesData(input, choice, uid, { groupId, seriesId }, serverTimestamp());
   const batch = writeBatch(db);
   for (const p of parcels) batch.set(doc(expensesCol(groupId), p.id), p.data);
-  trackWrite(batch.commit(), 'Não foi possível salvar a compra parcelada.');
+  trackWrite(batch.commit(), `Não foi possível salvar a compra parcelada ${expenseLabel(input)}.`);
   if (input.receipt.type === 'photo' && photo) void queuePhoto(groupId, seriesId, photo);
   return { id: seriesId, competence: choice.firstMonth };
 }
