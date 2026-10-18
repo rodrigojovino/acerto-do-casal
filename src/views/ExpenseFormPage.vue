@@ -207,7 +207,7 @@ import {
 } from '@/domain/installments';
 import { seriesTargets } from '@/services/series';
 import { MAX_NOTE } from '@/domain/notifications';
-import { fiscalDocName, formatCnpj, lookupNfce, type ScannedNfce } from '@/services/nfce';
+import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, type ScannedNfce } from '@/services/nfce';
 import { debtView } from '@/services/expenseView';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -349,7 +349,8 @@ onIonViewDidEnter(() => {
 async function onScanned(scanned: ScannedNfce): Promise<void> {
   // Pela chave (qualquer estado, sem rede): emitente (CNPJ) e mês de emissão.
   const doc = fiscalDocName(scanned.model);
-  if (description.value.trim() === '') description.value = `${doc} ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
+  const provisional = `${doc} ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
+  if (description.value.trim() === '') description.value = provisional;
   if (!dateTouched.value && monthOf(date.value) !== scanned.yearMonth) {
     // A chave traz só o mês: usa o último dia dele (ou hoje, se for o mês atual) e pede para conferir o dia.
     const [y, m] = scanned.yearMonth.split('-').map(Number);
@@ -366,6 +367,7 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
           ? 'NF-e: digite o valor e confira a data. Não há conferência automática (a consulta de NF-e exige captcha).'
           : `Nota de ${scanned.uf}: digite o valor e confira a data. A conferência automática é só para SP.`,
     };
+    await fillIssuerName(scanned, provisional);
     return;
   }
 
@@ -375,6 +377,7 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if ('error' in result) {
     nfceMessage.value = { kind: 'warn', text: result.error };
+    await fillIssuerName(scanned, provisional);
     return;
   }
   const nota = result.data;
@@ -392,6 +395,18 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
     totalCents.value === nota.totalCents
       ? { kind: 'ok', text: `Nota de ${formatBRL(nota.totalCents)} em ${when}.` }
       : { kind: 'warn', text: `Valor diferente da nota (${formatBRL(nota.totalCents)}). ${partnerFirstName.value} verá o aviso e poderá contestar.` };
+}
+
+/**
+ * Sem consulta à SEFAZ (ou com falha): troca a descrição provisória pelo nome
+ * do emitente (CNPJ). Só se a pessoa ainda não mexeu na descrição; ela pode
+ * editar depois. Offline ou com falha, fica o CNPJ formatado.
+ */
+async function fillIssuerName(scanned: ScannedNfce, provisional: string): Promise<void> {
+  const name = await lookupCnpjName(scanned.cnpj);
+  // Outro comprovante escolhido enquanto consultava, ou descrição já editada: ignora.
+  if (!name || receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
+  if (description.value === provisional) description.value = name.slice(0, 80);
 }
 
 // ---- Limites de data ----

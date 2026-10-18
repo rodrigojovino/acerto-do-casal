@@ -90,6 +90,20 @@ export async function scanNfceQr(): Promise<ScannedNfce | null> {
   }
 }
 
+/**
+ * Nome do emitente pelo CNPJ (Function `lookupCnpj`, com cache): nome fantasia
+ * ou razão social. Offline ou com falha, `null` (fica o CNPJ formatado).
+ */
+export async function lookupCnpjName(cnpj: string): Promise<string | null> {
+  if (!navigator.onLine) return null;
+  try {
+    const call = httpsCallable<{ cnpj: string }, { name: string | null }>(functions, 'lookupCnpj', { timeout: 15_000 });
+    return (await call({ cnpj })).data.name;
+  } catch {
+    return null;
+  }
+}
+
 /** "12345678000190" → "12.345.678/0001-90". */
 export function formatCnpj(cnpj: string): string {
   return cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');

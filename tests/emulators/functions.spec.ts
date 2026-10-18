@@ -1,4 +1,4 @@
-import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import { assertFails, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import { FirebaseError } from 'firebase/app';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { anonymousCaller, clearAuth, closeApps, createTestEnv, signInAs, type TestUser } from './setup';
@@ -206,5 +206,49 @@ describe('renewInvite', () => {
     await b.call('joinGroup', { code: invite.code });
     await expectError(a.call('renewInvite'), 'failed-precondition', /completo/);
     await expectError(c.call('renewInvite'), 'failed-precondition');
+  });
+});
+
+describe('lookupCnpj', () => {
+  // CNPJs fictícios; no emulador a Function responde sem acessar a rede.
+  it('quem tem grupo recebe o nome fantasia e o resultado vai para o cache', async () => {
+    const a = await signInAs('ana', 'Pessoa A');
+    await a.call('createGroup');
+    expect(await a.call('lookupCnpj', { cnpj: '11.222.333/0001-81' })).toEqual({ name: 'Mercado Teste' });
+    expect(await readDoc('cnpjCache/11222333000181')).toMatchObject({
+      name: 'Mercado Teste',
+      fantasyName: 'Mercado Teste',
+      legalName: 'MERCADO TESTE LTDA',
+    });
+  });
+
+  it('sem nome fantasia, a razão social; não encontrado devolve null, sem guardar', async () => {
+    const a = await signInAs('ana', 'Pessoa A');
+    await a.call('createGroup');
+    expect(await a.call('lookupCnpj', { cnpj: '11444777000161' })).toEqual({ name: 'FARMACIA EXEMPLO LTDA' });
+    // Válido, mas fora das respostas fictícias: "não encontrado".
+    expect(await a.call('lookupCnpj', { cnpj: '11222333000262' })).toEqual({ name: null });
+    expect(await readDoc('cnpjCache/11222333000262')).toBeUndefined();
+  });
+
+  it('usa o cache antes da consulta', async () => {
+    const a = await signInAs('ana', 'Pessoa A');
+    await a.call('createGroup');
+    await writeDoc('cnpjCache/11222333000262', { name: 'Padaria do Cache', fantasyName: 'Padaria do Cache', legalName: null });
+    expect(await a.call('lookupCnpj', { cnpj: '11222333000262' })).toEqual({ name: 'Padaria do Cache' });
+  });
+
+  it('CNPJ inválido, sem login ou sem grupo: recusado', async () => {
+    const a = await signInAs('ana', 'Pessoa A');
+    await expectError(a.call('lookupCnpj', { cnpj: '11222333000181' }), 'permission-denied', /grupo/);
+    await a.call('createGroup');
+    await expectError(a.call('lookupCnpj', { cnpj: '11222333000182' }), 'invalid-argument');
+    await expectError(anonymousCaller()('lookupCnpj', { cnpj: '11222333000181' }), 'unauthenticated');
+  });
+
+  it('o app não lê nem grava o cache', async () => {
+    const fs = env.authenticatedContext('qualquer').firestore();
+    await assertFails(fs.doc('cnpjCache/11222333000181').get());
+    await assertFails(fs.doc('cnpjCache/11222333000181').set({ name: 'Forjado' }));
   });
 });
