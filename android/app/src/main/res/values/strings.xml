@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Acerto do Casal</string>
-    <string name="title_activity_main">Acerto do Casal</string>
+    <string name="app_name">Gastos</string>
+    <string name="title_activity_main">Gastos</string>
     <string name="package_name">io.github.rodrigojovino.acerto</string>
     <string name="custom_url_scheme">io.github.rodrigojovino.acerto</string>
 </resources>
