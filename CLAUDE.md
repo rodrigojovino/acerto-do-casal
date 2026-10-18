@@ -239,7 +239,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 2. [x] Acesso: login Google e vínculo do casal por código
 3. [x] Núcleo do acerto: lançamento, painel com saldo, offline
 4. [x] Comprovantes e aprovação
-5. [ ] Recorrentes e parcelados (Cloud Functions)
+5. [x] Recorrentes e parcelados (Cloud Functions)
 6. [ ] Fechamento, reabertura e histórico
 7. [ ] Notificações, exportação Excel/PDF, versão web
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
@@ -254,6 +254,10 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - Cache por CNPJ no Firestore, para não consultar o mesmo CNPJ duas vezes.
      - Offline ou com falha, a descrição fica com o CNPJ formatado (como hoje).
    - Pendência da Fase 5: campo de observação opcional no lançamento (até ~300 caracteres), visível no Detalhe e resumido em Pendências. Vale para parcelas (é da série) e para a confirmação de recorrente variável. Editar a observação de um gasto confirmado volta para aprovação, como qualquer edição.
+   - Pendência da Fase 5: contador na aba Pendências da barra inferior.
+     - Conta só o que depende de ação de quem vê: "Para você aprovar", "Devolvidos para você corrigir" e "Recorrentes para confirmar" (variáveis, cadastros e reajustes). Não conta "Aguardando [nome] aprovar" nem automáticos não validados.
+     - Série de parcelas conta 1. Acima de 9, mostra "9+". Sem pendências, o número não aparece.
+     - O número no ícone do app (launcher) fica para junto das notificações.
    - Pendência da Fase 5: foto opcional junto com a chave do documento fiscal (QR, código de barras ou digitada), principalmente quando o valor é digitado (NF-e, NFC-e de outro estado, chave digitada). O gasto mantém o selo Automático; o Detalhe mostra os dados da chave e a foto ampliável.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
