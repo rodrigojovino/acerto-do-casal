@@ -5,11 +5,12 @@ import { sessionReady, status, type SessionStatus } from '@/services/session';
 import EntradaPage from '../views/EntradaPage.vue';
 import VinculoPage from '../views/VinculoPage.vue';
 import PainelPage from '../views/PainelPage.vue';
-import EmBrevePage from '../views/EmBrevePage.vue';
 import AjustesPage from '../views/AjustesPage.vue';
 import RecurringListPage from '../views/RecurringListPage.vue';
 import RecurringFormPage from '../views/RecurringFormPage.vue';
 import ClosingPage from '../views/ClosingPage.vue';
+import HistoryPage from '../views/HistoryPage.vue';
+import MonthDetailPage from '../views/MonthDetailPage.vue';
 import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 import ExpenseDetailPage from '../views/ExpenseDetailPage.vue';
@@ -20,7 +21,8 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/vinculo', name: 'vinculo', component: VinculoPage },
   { path: '/painel', name: 'painel', component: PainelPage },
   { path: '/pendencias', name: 'pendencias', component: PendenciasPage },
-  { path: '/historico', name: 'historico', component: EmBrevePage },
+  { path: '/historico', name: 'historico', component: HistoryPage },
+  { path: '/historico/:mes(\\d{4}-\\d{2})', name: 'mes', component: MonthDetailPage },
   { path: '/fechar/:mes(\\d{4}-\\d{2})', name: 'fechar', component: ClosingPage },
   { path: '/ajustes', name: 'ajustes', component: AjustesPage },
   { path: '/ajustes/recorrentes', name: 'recorrentes', component: RecurringListPage },
@@ -45,7 +47,7 @@ const allowed: Record<SessionStatus, ReadonlySet<string>> = {
   signedOut: new Set(['entrar']),
   noGroup: new Set(['vinculo']),
   waitingPartner: new Set(['vinculo']),
-  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente', 'fechar']),
+  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente', 'fechar', 'mes']),
 };
 
 const router = createRouter({

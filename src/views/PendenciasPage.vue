@@ -13,6 +13,21 @@
         <p v-else-if="!loaded" class="hint">Carregando…</p>
 
         <template v-else>
+          <!-- 0. Reabertura de mês fechado pedida pelo outro (só aparece quando há) -->
+          <section v-if="reopenToAnswer.length > 0" class="section" aria-labelledby="sec-reabertura">
+            <h2 id="sec-reabertura" class="title warn">Reabertura para aprovar · {{ reopenToAnswer.length }}</h2>
+            <router-link v-for="m in reopenToAnswer" :key="m.month" class="item card" :to="{ name: 'mes', params: { mes: m.month } }">
+              <span class="item-main">
+                <span class="item-name">{{ monthLabel(m.month) }}</span>
+                <span class="item-sub">{{ partnerFirstName }}: “{{ m.reopenRequest?.reason }}”</span>
+              </span>
+              <span aria-hidden="true" class="chev">›</span>
+            </router-link>
+          </section>
+          <p v-if="reopenWaiting.length > 0" class="hint">
+            Sua reabertura de {{ reopenWaiting.map((m) => monthName(m.month)).join(', ') }} aguarda {{ partnerFirstName }}.
+          </p>
+
           <!-- 1. Para você aprovar -->
           <section class="section" aria-labelledby="sec-aprovar">
             <h2 id="sec-aprovar" class="title warn">Para você aprovar · {{ toApprove.length }}</h2>
@@ -133,9 +148,10 @@ import { IonContent, IonFooter, IonPage } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
-import { formatDateBR, monthName } from '@/domain/calendar';
+import { formatDateBR, monthLabel, monthName } from '@/domain/calendar';
 import TypeBadge from '@/components/TypeBadge.vue';
 import { collapseSeries } from '@/services/series';
+import { watchMonths, type MonthDoc } from '@/services/closing';
 import { installmentSummary } from '@/domain/installments';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
@@ -215,6 +231,24 @@ watch(
   { immediate: true },
 );
 onBeforeUnmount(() => stopRecurring?.());
+// Pedidos de reabertura de meses fechados.
+const monthDocs = ref<MonthDoc[]>([]);
+let stopMonths: (() => void) | null = null;
+watch(
+  () => group.value?.id,
+  (groupId) => {
+    stopMonths?.();
+    stopMonths = groupId ? watchMonths(groupId, (l) => (monthDocs.value = l), () => undefined) : null;
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => stopMonths?.());
+const pendingReopens = computed(() =>
+  monthDocs.value.filter((m) => m.status === 'closed' && m.reopenRequest?.status === 'pending'),
+);
+const reopenToAnswer = computed(() => pendingReopens.value.filter((m) => m.reopenRequest?.byUid !== myUid.value));
+const reopenWaiting = computed(() => pendingReopens.value.filter((m) => m.reopenRequest?.byUid === myUid.value));
+
 const recurringToApprove = computed(() => recurrings.value.filter((r) => awaitsApproval(r) && r.createdBy !== myUid.value));
 const recurringWaiting = computed(() => recurrings.value.filter((r) => awaitsApproval(r) && r.createdBy === myUid.value));
 

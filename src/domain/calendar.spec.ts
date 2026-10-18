@@ -6,6 +6,7 @@ import {
   lastAllowedDate,
   lastAllowedMonth,
   monthLabel,
+  monthsDesc,
   resolveCompetence,
   todayInSaoPaulo,
 } from './calendar';
@@ -74,5 +75,13 @@ describe('formatação', () => {
     expect(monthLabel('2026-03')).toBe('Março 2026');
     expect(formatDateBR('2026-10-05')).toBe('05/10/2026');
     expect(formatDateBR('2026-10-05', false)).toBe('05/10');
+  });
+});
+
+describe('monthsDesc', () => {
+  it('do mais recente ao mais antigo, atravessando o ano', () => {
+    expect(monthsDesc('2026-11', '2027-02')).toEqual(['2027-02', '2027-01', '2026-12', '2026-11']);
+    expect(monthsDesc('2026-10', '2026-10')).toEqual(['2026-10']);
+    expect(monthsDesc('2026-11', '2026-10')).toEqual([]);
   });
 });

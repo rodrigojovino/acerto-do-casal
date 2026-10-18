@@ -20,26 +20,7 @@
             <p v-if="breakdown.result" class="amount num">{{ formatBRL(breakdown.result.amountCents) }}</p>
           </section>
 
-          <!-- Memória de cálculo -->
-          <section class="card calc" aria-labelledby="calc-titulo">
-            <h2 id="calc-titulo" class="calc-title">Memória de cálculo</h2>
-            <dl>
-              <div class="row"><dt>Total lançado ({{ breakdown.expenseCount }} {{ breakdown.expenseCount === 1 ? 'gasto' : 'gastos' }})</dt><dd class="num">{{ formatBRL(breakdown.totalCents) }}</dd></div>
-              <div class="row"><dt>Partes pessoais</dt><dd class="num">− {{ formatBRL(breakdown.personalCents) }}</dd></div>
-              <div class="row strong"><dt>Total no rateio</dt><dd class="num">{{ formatBRL(breakdown.sharedCents) }}</dd></div>
-            </dl>
-            <table class="members">
-              <thead>
-                <tr><th scope="col"></th><th scope="col">Você</th><th scope="col">{{ partnerFirstName }}</th></tr>
-              </thead>
-              <tbody>
-                <tr><th scope="row">Parte no rateio</th><td class="num">{{ formatBRL(mine.shareCents) }}</td><td class="num">{{ formatBRL(theirs.shareCents) }}</td></tr>
-                <tr><th scope="row">Pagou do rateio</th><td class="num">{{ formatBRL(mine.paidSharedCents) }}</td><td class="num">{{ formatBRL(theirs.paidSharedCents) }}</td></tr>
-                <tr class="diff"><th scope="row">Diferença</th><td class="num">{{ signedBRL(mine.diffCents) }}</td><td class="num">{{ signedBRL(theirs.diffCents) }}</td></tr>
-              </tbody>
-            </table>
-            <p class="hint">Diferença positiva: pagou mais que a parte e tem a receber. As partes pessoais ficam com quem pagou.</p>
-          </section>
+          <BreakdownCard :breakdown="breakdown" :viewer-uid="myUid" />
 
           <!-- Mês já fechado -->
           <template v-if="monthDoc?.status === 'closed'">
@@ -49,7 +30,7 @@
               <PaymentList :payments="monthDoc.payments" :viewer-uid="myUid" />
             </section>
             <ReopenPanel v-if="group" :group-id="group.id" :month="month" :month-doc="monthDoc" :viewer-uid="myUid" />
-            <router-link class="btn outline" :to="{ name: 'historico' }">Ver no histórico</router-link>
+            <router-link class="btn outline" :to="{ name: 'mes', params: { mes: month } }">Ver no histórico</router-link>
           </template>
 
           <template v-else>
@@ -113,6 +94,7 @@ import {
 } from '@/services/closing';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
 import PaymentList from '@/components/PaymentList.vue';
+import BreakdownCard from '@/components/BreakdownCard.vue';
 import ReopenPanel from '@/components/ReopenPanel.vue';
 import type { Transfer } from '@/domain/settlement';
 import { PhotoError, pickReceiptPhoto, type PhotoSource } from '@/services/photo';
@@ -166,9 +148,6 @@ const breakdown = computed(() =>
     ? monthDoc.value.summary
     : monthBreakdown(expenses.value, members.value),
 );
-const zero = { shareCents: 0, paidSharedCents: 0, diffCents: 0 };
-const mine = computed(() => breakdown.value.byMember[myUid.value] ?? zero);
-const theirs = computed(() => breakdown.value.byMember[partnerUid.value ?? ''] ?? zero);
 const blockers = computed(() => closeBlockers(expenses.value));
 const remaining = computed(() => remainingTransfer(breakdown.value.result, monthDoc.value?.payments ?? [], members.value));
 const reasons = computed(() =>
@@ -189,8 +168,6 @@ const resultText = computed(() => {
     ? { who: `Você paga a ${partnerFirstName.value}` }
     : { who: `${partnerFirstName.value} te paga` };
 });
-
-const signedBRL = (cents: number) => (cents > 0 ? `+ ${formatBRL(cents)}` : cents < 0 ? `− ${formatBRL(-cents)}` : formatBRL(0));
 
 const BLOCKERS: Record<Blocker['kind'], [string, string]> = {
   pending: ['gasto pendente de aprovação', 'gastos pendentes de aprovação'],
@@ -338,7 +315,6 @@ function goBack(): void {
   font-weight: 800;
 }
 
-.calc,
 .blockers,
 .payments,
 .pay {
@@ -352,59 +328,6 @@ function goBack(): void {
   margin: 0;
   font-size: 15px;
   font-weight: 800;
-}
-
-dl {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 14px;
-}
-
-.row dd {
-  margin: 0;
-}
-
-.row.strong {
-  font-weight: 800;
-  border-top: 1px solid var(--app-subtle);
-  padding-top: 4px;
-}
-
-.members {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.members th,
-.members td {
-  padding: 4px 0;
-  text-align: right;
-}
-
-.members th[scope='row'] {
-  text-align: left;
-  font-weight: 600;
-  color: var(--app-muted);
-}
-
-.members thead th {
-  font-weight: 800;
-}
-
-.members .diff td,
-.members .diff th {
-  border-top: 1px solid var(--app-subtle);
-  font-weight: 800;
-  color: var(--app-text);
 }
 
 .blockers ul {

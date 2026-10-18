@@ -100,3 +100,10 @@ export function formatDateBR(date: IsoDate, withYear = true): string {
   const [y, m, d] = date.split('-');
   return withYear ? `${d}/${m}/${y}` : `${d}/${m}`;
 }
+
+/** Meses de `first` a `last` (inclusive), do mais recente para o mais antigo. */
+export function monthsDesc(first: Competence, last: Competence): Competence[] {
+  const out: Competence[] = [];
+  for (let m = last; m >= first; m = addMonths(m, -1)) out.push(m);
+  return out;
+}
