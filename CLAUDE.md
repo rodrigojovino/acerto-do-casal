@@ -36,6 +36,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Textos com o primeiro nome da outra pessoa ("Bia te deve", "Você deve para Bia"); nada de "Ela/Ele" nem crase que suponha gênero.
 - Gravações no Firestore não são aguardadas na tela (offline, a promessa só termina ao sincronizar): usar `trackWrite` (`src/services/sync.ts`) e seguir. Nada de transação no app.
 - Ionic mantém vivas as telas visitadas: cada tela fixa sua rota (`useRoute().name`, `params`) na criação. Ler a rota de forma reativa faz a tela reagir às rotas das outras e já quebrou a navegação.
+- Áreas seguras: usar `--app-safe-top/-bottom/-left/-right` (`src/theme/variables.css`), nunca `env(safe-area-inset-*)` direto. No Android 15+ (edge-to-edge, obrigatório no Android 16) o `env()` pode vir zerado e a barra inferior já ficou atrás da navegação por 3 botões; o Capacitor injeta os valores reais (`SystemBars.insetsHandling: 'css'`).
 
 ## Repositório público: segurança
 
@@ -162,7 +163,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 
 1. [x] Fundação: scaffold, Firebase, domínio + testes, build no GitHub Actions, prova de conceito da SEFAZ
 2. [x] Acesso: login Google e vínculo do casal por código
-3. [ ] Núcleo do acerto: lançamento, painel com saldo, offline
+3. [x] Núcleo do acerto: lançamento, painel com saldo, offline
 4. [ ] Comprovantes e aprovação
 5. [ ] Recorrentes e parcelados (Cloud Functions)
 6. [ ] Fechamento, reabertura e histórico
