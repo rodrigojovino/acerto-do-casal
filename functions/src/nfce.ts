@@ -212,8 +212,16 @@ export function parseNfceQr(raw: string): QrData {
   return data;
 }
 
+/** Acentos das entidades com nome (&Atilde;, &ecirc;, &ccedil;…): letra base + acento. */
+const ACCENTS: Record<string, string> = { acute: '\u0301', grave: '\u0300', circ: '\u0302', tilde: '\u0303', uml: '\u0308', cedil: '\u0327' };
+
 function decodeEntities(s: string): string {
   return s
+    .replace(/&([A-Za-z])(acute|grave|circ|tilde|uml|cedil);/g, (_, letter: string, accent: string) =>
+      (letter + ACCENTS[accent]).normalize('NFC'),
+    )
+    .replace(/&ordm;/g, 'º')
+    .replace(/&ordf;/g, 'ª')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -299,4 +307,129 @@ export async function fetchNfce(qrContent: string, timeoutMs = 15_000): Promise<
   const timing = { status: res.status, ms: Date.now() - started };
   if (!res.ok) throw new NfceError('network', `A SEFAZ respondeu com erro (${res.status}).`);
   return { result: toResult(qr, parsePage(html)), timing };
+}
+
+// ---- Itens da nota (NFC-e de SP) ----
+
+export interface NfceItem {
+  description: string;
+  code?: string;
+  /** Quantidade (pode ser fracionada, ex.: 0.535 kg). */
+  quantity: number;
+  unit: string;
+  /** Valor unitário como aparece na nota (às vezes com 3 casas). */
+  unitPrice: string;
+  totalCents: number;
+}
+
+export interface NfceItems {
+  items: NfceItem[];
+  /** "Valor total" antes dos descontos, quando a nota mostra. */
+  grossCents?: number;
+  discountCents: number;
+  /** "Valor a pagar". */
+  totalCents: number;
+  payments: Array<{ method: string; amountCents: number }>;
+  changeCents?: number;
+  /** Soma dos totais dos itens. */
+  itemsSumCents: number;
+  /** Soma dos itens − descontos = valor a pagar. */
+  consistent: boolean;
+}
+
+/** "1,535" ou "1.234,5" → 1.535 / 1234.5 (só para quantidade; dinheiro vai em centavos). */
+function brlNumber(text: string): number {
+  const n = Number(text.trim().replace(/\./g, '').replace(',', '.'));
+  if (!Number.isFinite(n)) throw new NfceError('unparsed', `Número em formato inesperado: "${text}".`);
+  return n;
+}
+
+const centsOrNull = (text: string): number | null => {
+  try {
+    return brlToCents(text);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Consistência dos itens: a soma dos itens menos os descontos deve bater com
+ * o valor a pagar (e, quando a nota mostra o valor total, ele deve ser a soma).
+ */
+export function checkItems(input: { itemsSumCents: number; discountCents: number; totalCents: number; grossCents?: number }): boolean {
+  const grossOk = input.grossCents === undefined || input.grossCents === input.itemsSumCents;
+  return grossOk && input.itemsSumCents - input.discountCents === input.totalCents;
+}
+
+/**
+ * Lê os itens, os descontos, o valor a pagar, as formas de pagamento e o troco
+ * da página de consulta da SEFAZ-SP. `null` se não achar itens ou o total:
+ * a conferência do valor (`parsePage`) não depende disto.
+ */
+export function parseItems(html: string): NfceItems | null {
+  const items: NfceItem[] = [];
+  for (const row of html.matchAll(/<tr id="Item \+ \d+">([\s\S]*?)<\/tr>/g)) {
+    const r = row[1];
+    const description = r.match(/class="txtTit">([^<]*)</)?.[1];
+    const quantity = r.match(/class="Rqtd">\s*<strong>[^<]*<\/strong>\s*([\d.,]+)/)?.[1];
+    const unit = r.match(/class="RUN">\s*<strong>[^<]*<\/strong>\s*([^<]*)</)?.[1];
+    const unitPrice = r.match(/class="RvlUnit">\s*<strong>[^<]*<\/strong>\s*([\d.,]+)/)?.[1];
+    const total = r.match(/class="valor">\s*([\d.,]+)\s*</)?.[1];
+    const code = r.match(/class="RCod">\s*\([^:]*:\s*([^)]*?)\s*\)/)?.[1];
+    if (!description || !quantity || !unit || !unitPrice || !total) return null; // layout inesperado: nada inventado
+    items.push({
+      description: decodeEntities(description).slice(0, 120),
+      ...(code ? { code: decodeEntities(code).slice(0, 40) } : {}),
+      quantity: brlNumber(quantity),
+      unit: decodeEntities(unit).slice(0, 10),
+      unitPrice: unitPrice.trim(),
+      totalCents: brlToCents(total),
+    });
+  }
+  if (items.length === 0) return null;
+
+  const block = html.slice(html.indexOf('id="totalNota"'));
+  if (!block.startsWith('id="totalNota"')) return null;
+  const formIndex = block.indexOf('id="linhaForma"');
+  const totalsPart = formIndex >= 0 ? block.slice(0, formIndex) : block;
+  const paymentsPart = formIndex >= 0 ? block.slice(formIndex) : '';
+  const lines = (part: string) =>
+    [...part.matchAll(/<label[^>]*>([^<]*)<\/label>\s*<span class="totalNumb[^"]*">([^<]*)<\/span>/g)].map((m) => {
+      const label = decodeEntities(m[1]).replace(/:$/, '');
+      return { label, key: label.toLowerCase(), value: decodeEntities(m[2]) };
+    });
+
+  let totalCents: number | null = null;
+  let grossCents: number | undefined;
+  let discountCents = 0;
+  for (const { key, value } of lines(totalsPart)) {
+    const cents = centsOrNull(value);
+    if (cents === null) continue;
+    if (key.startsWith('valor a pagar')) totalCents = cents;
+    else if (key.startsWith('valor total')) grossCents = cents;
+    else if (key.startsWith('desconto')) discountCents += cents;
+  }
+  if (totalCents === null) return null;
+
+  const payments: NfceItems['payments'] = [];
+  let changeCents: number | undefined;
+  for (const { label, key, value } of lines(paymentsPart)) {
+    if (key.startsWith('forma de pagamento') || key.startsWith('informa')) continue;
+    const cents = centsOrNull(value);
+    if (cents === null) continue;
+    if (key.startsWith('troco')) changeCents = cents;
+    else payments.push({ method: label.slice(0, 40), amountCents: cents });
+  }
+
+  const itemsSumCents = items.reduce((sum, i) => sum + i.totalCents, 0);
+  return {
+    items,
+    ...(grossCents !== undefined ? { grossCents } : {}),
+    discountCents,
+    totalCents,
+    payments,
+    ...(changeCents !== undefined ? { changeCents } : {}),
+    itemsSumCents,
+    consistent: checkItems({ itemsSumCents, discountCents, totalCents, grossCents }),
+  };
 }

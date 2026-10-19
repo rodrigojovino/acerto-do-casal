@@ -4,8 +4,10 @@ import {
   SEFAZ_SP_CANONICAL,
   brlToCents,
   checkDigit,
+  checkItems,
   parseAccessKey,
   parseFiscalCode,
+  parseItems,
   parseNfceQr,
   parsePage,
   parseTypedKey,
@@ -215,5 +217,88 @@ describe('brlToCents', () => {
     expect(brlToCents('1.234,56')).toBe(123456);
     expect(brlToCents('0,05')).toBe(5);
     expect(() => brlToCents('55.48')).toThrow(NfceError);
+  });
+});
+
+// ---- Itens da nota: HTML fictício com a mesma estrutura da página da SEFAZ-SP ----
+
+function itemRow(n: number, item: { name: string; code?: string; qty: string; unit: string; unitPrice: string; total: string }): string {
+  return `<tr id="Item + ${n}">
+    <td valign="top">
+      <span class="txtTit">${item.name}</span>
+      ${item.code ? `<span class="RCod"> (Código: ${item.code} ) </span>` : ''}
+      <br>
+      <span class="Rqtd"> <strong>Qtde.:</strong>${item.qty}</span>
+      <span class="RUN"> <strong>UN: </strong>${item.unit}</span>
+      <span class="RvlUnit"> <strong>Vl. Unit.:</strong> ${item.unitPrice}</span>
+    </td>
+    <td align="right" valign="top" class="txtTit noWrap"> Vl. Total <br><span class="valor">${item.total}</span></td>
+  </tr>`;
+}
+
+function itemsPage(rows: string[], totals: string, payments: string): string {
+  return `<html><body>
+    <table border="0" id="tabResult" class="filterable">${rows.join('\n')}</table>
+    <div id="totalNota" class="txtRight">
+      <div id="linhaTotal"><label>Qtd. total de itens:</label><span class="totalNumb">${rows.length}</span></div>
+      ${totals}
+      <div id="linhaForma"><label>Forma de pagamento:</label><span class="totalNumb txtTitR">Valor pago R$:</span></div>
+      ${payments}
+      <div id="linhaTotal" class="spcTop"><label class="txtObs">Informação dos Tributos Totais Incidentes</label><span class="totalNumb txtObs">3,21</span></div>
+    </div>
+  </body></html>`;
+}
+
+const total = (label: string, value: string, extra = '') =>
+  `<div id="linhaTotal"${extra}><label>${label}</label><span class="totalNumb${extra ? ' txtMax' : ''}">${value}</span></div>`;
+const pay = (method: string, value: string) => `<div id="linhaTotal"><label class="tx"> ${method} </label><span class="totalNumb">${value}</span></div>`;
+
+describe('parseItems', () => {
+  const rows = [
+    itemRow(1, { name: 'ARROZ TIPO 1 5KG', code: '7891', qty: '2', unit: 'UN', unitPrice: '25,90', total: '51,80' }),
+    itemRow(2, { name: 'BANANA PRATA', code: '12', qty: '1,535', unit: 'KG', unitPrice: '6,999', total: '10,74' }),
+    itemRow(3, { name: 'P&Atilde;O FRANC&Ecirc;S', qty: '6', unit: 'UN', unitPrice: '0,90', total: '5,40' }),
+  ];
+
+  it('lê itens (quantidade fracionada, unitário com 3 casas, entidades) e o pagamento', () => {
+    const page = itemsPage(rows, total('Valor a pagar R$:', '67,94', ' class="linhaShade"'), pay('Cartão de Crédito', '67,94'));
+    const r = parseItems(page);
+    expect(r?.items).toEqual([
+      { description: 'ARROZ TIPO 1 5KG', code: '7891', quantity: 2, unit: 'UN', unitPrice: '25,90', totalCents: 5180 },
+      { description: 'BANANA PRATA', code: '12', quantity: 1.535, unit: 'KG', unitPrice: '6,999', totalCents: 1074 },
+      { description: 'PÃO FRANCÊS', quantity: 6, unit: 'UN', unitPrice: '0,90', totalCents: 540 },
+    ]);
+    expect(r).toMatchObject({ itemsSumCents: 6794, discountCents: 0, totalCents: 6794, consistent: true });
+    expect(r?.payments).toEqual([{ method: 'Cartão de Crédito', amountCents: 6794 }]);
+  });
+
+  it('com desconto, valor total, dois meios de pagamento e troco', () => {
+    const totals = total('Valor total R$:', '67,94') + total('Descontos R$:', '2,94') + total('Valor a pagar R$:', '65,00', ' class="linhaShade"');
+    const r = parseItems(itemsPage(rows, totals, pay('Dinheiro', '50,00') + pay('Cartão de Débito', '20,00') + pay('Troco', '5,00')));
+    expect(r).toMatchObject({ grossCents: 6794, discountCents: 294, totalCents: 6500, changeCents: 500, consistent: true });
+    expect(r?.payments.map((p) => p.method)).toEqual(['Dinheiro', 'Cartão de Débito']);
+  });
+
+  it('soma que não bate: guarda os itens, com consistent false', () => {
+    const r = parseItems(itemsPage(rows, total('Valor a pagar R$:', '70,00', ' class="linhaShade"'), pay('Pix', '70,00')));
+    expect(r).toMatchObject({ itemsSumCents: 6794, totalCents: 7000, consistent: false });
+    expect(r?.items).toHaveLength(3);
+  });
+
+  it('sem itens, sem total ou com layout desconhecido: null (nada inventado)', () => {
+    expect(parseItems(itemsPage([], total('Valor a pagar R$:', '0,00'), ''))).toBeNull();
+    expect(parseItems(itemsPage(rows, '', ''))).toBeNull();
+    expect(parseItems('<html>nova página</html>')).toBeNull();
+    const broken = rows[0].replace('class="valor"', 'class="outro"');
+    expect(parseItems(itemsPage([broken], total('Valor a pagar R$:', '51,80'), ''))).toBeNull();
+  });
+});
+
+describe('checkItems', () => {
+  it('soma − descontos = total; valor total, se houver, = soma', () => {
+    expect(checkItems({ itemsSumCents: 1000, discountCents: 0, totalCents: 1000 })).toBe(true);
+    expect(checkItems({ itemsSumCents: 1000, discountCents: 100, totalCents: 900 })).toBe(true);
+    expect(checkItems({ itemsSumCents: 1000, discountCents: 100, totalCents: 1000 })).toBe(false);
+    expect(checkItems({ itemsSumCents: 1000, discountCents: 0, totalCents: 1000, grossCents: 990 })).toBe(false);
   });
 });
