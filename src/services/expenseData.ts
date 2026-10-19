@@ -324,3 +324,31 @@ export function installmentUpdateData<T, D>(
     updatedAt: now,
   };
 }
+
+// ---- Nota fiscal lançada uma vez só ----
+
+/** Chave da nota no comprovante gravado (o que vai para `fiscalKeys`), ou null. */
+export function fiscalKeyOf(receipt: StoredReceipt | undefined): string | null {
+  return receipt?.type === 'nfce' ? receipt.nfceKey : null;
+}
+
+/**
+ * Registro da chave (`groups/{g}/fiscalKeys/{chave}`), gravado no mesmo lote
+ * que o gasto: aponta para o gasto que usa a nota (numa série, a parcela 1).
+ */
+export function fiscalKeyData<T>(expenseId: string, uid: string, now: T) {
+  return { expenseId, createdBy: uid, createdAt: now };
+}
+
+/**
+ * O que muda no registro quando o comprovante muda (criar: `before` ausente;
+ * excluir: `after` ausente): a chave a soltar e a chave a registrar.
+ */
+export function fiscalKeyChange(
+  before: StoredReceipt | undefined,
+  after: StoredReceipt | undefined,
+): { release: string | null; register: string | null } {
+  const old = fiscalKeyOf(before);
+  const next = fiscalKeyOf(after);
+  return old === next ? { release: null, register: null } : { release: old, register: next };
+}

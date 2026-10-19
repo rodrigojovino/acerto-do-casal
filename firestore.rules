@@ -357,6 +357,52 @@ service cloud.firestore {
           );
       }
 
+      // ---- Nota fiscal lançada uma vez só ----
+      // Registro por chave (`fiscalKeys/{chave}`) apontando para o gasto que a
+      // usa (numa série, a parcela 1). Gravado no mesmo lote que o gasto: criar
+      // ou trocar a chave exige o registro novo; excluir o gasto ou tirar a
+      // chave exige apagar o registro. Como o registro só é criado se não
+      // existe, a mesma nota não entra duas vezes (QR, código de barras ou
+      // digitada, NF-e ou NFC-e). Em mês fechado o gasto não muda, então a
+      // chave fica presa. Gastos anteriores ao registro (sem ele) continuam
+      // editáveis enquanto mantêm a mesma chave.
+
+      function expensePath(expenseId) {
+        return /databases/$(database)/documents/groups/$(groupId)/expenses/$(expenseId);
+      }
+
+      function fiscalKeyPath(key) {
+        return /databases/$(database)/documents/groups/$(groupId)/fiscalKeys/$(key);
+      }
+
+      function fiscalKey(data) {
+        return data.receipt.get('nfceKey', null);
+      }
+
+      // Depois do lote, a chave do gasto (se houver) está registrada para ele (ou a série).
+      function holdsRegisteredKey(data, expenseId) {
+        return fiscalKey(data) == null
+          || getAfter(fiscalKeyPath(fiscalKey(data))).data.expenseId == receiptOwner(data, expenseId);
+      }
+
+      // Depois do lote, a chave que o gasto deixou não fica registrada para ele:
+      // o registro saiu, é de outro gasto (duplicata anterior ao registro) ou o
+      // dono do registro (a parcela 1, num mês fechado) ainda usa a chave.
+      function releasedKey(key, owner) {
+        return key == null
+          || !existsAfter(fiscalKeyPath(key))
+          || getAfter(fiscalKeyPath(key)).data.expenseId != owner
+          || existsAfter(expensePath(owner)) && fiscalKey(getAfter(expensePath(owner)).data) == key;
+      }
+
+      // Edição de quem lançou: chave trocada (ou tirada) registra a nova e solta a antiga.
+      function keyChangeRegistered(expenseId) {
+        let before = fiscalKey(resource.data);
+        return fiscalKey(request.resource.data) == before
+          || holdsRegisteredKey(request.resource.data, expenseId)
+            && releasedKey(before, receiptOwner(resource.data, expenseId));
+      }
+
       match /expenses/{expenseId} {
         allow read: if isMember(groupId);
 
@@ -365,7 +411,8 @@ service cloud.firestore {
           && isAuthorWrite(true)
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt == request.time
-          && validExpense(request.resource.data, expenseId, true);
+          && validExpense(request.resource.data, expenseId, true)
+          && holdsRegisteredKey(request.resource.data, expenseId);
 
         // Autor: edita (status pelo comprovante; devolvido vai para aprovação;
         // descarta aprovação/recusa). Outro membro: aprova, recusa ou contesta.
@@ -378,6 +425,7 @@ service cloud.firestore {
               && request.resource.data.createdBy == resource.data.createdBy
               && request.resource.data.createdAt == resource.data.createdAt
               && validExpense(request.resource.data, expenseId, false)
+              && keyChangeRegistered(expenseId)
             || resource.data.createdBy == request.auth.uid && isPhotoUploadedMark()
             || resource.data.createdBy == request.auth.uid && isNfceRetry()
             || isReviewWrite()
@@ -385,7 +433,32 @@ service cloud.firestore {
 
         allow delete: if isMember(groupId)
           && resource.data.createdBy == request.auth.uid
-          && !isClosed(resource.data.competence);
+          && !isClosed(resource.data.competence)
+          && releasedKey(fiscalKey(resource.data), receiptOwner(resource.data, expenseId));
+      }
+
+      // Registro da chave: criado só se não existe, por quem lançou o gasto que
+      // passa a usá-la no mesmo lote; nunca alterado; apagado só quando, depois
+      // do lote, o gasto apontado não existe mais ou não usa mais a chave.
+      match /fiscalKeys/{key} {
+        allow read: if isMember(groupId);
+
+        allow create: if isMember(groupId)
+          && request.resource.data.keys().hasOnly(['expenseId', 'createdBy', 'createdAt'])
+          && request.resource.data.keys().hasAll(['expenseId', 'createdBy', 'createdAt'])
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.expenseId is string
+          && getAfter(expensePath(request.resource.data.expenseId)).data.createdBy == request.auth.uid
+          && fiscalKey(getAfter(expensePath(request.resource.data.expenseId)).data) == key;
+
+        allow update: if false;
+
+        allow delete: if isMember(groupId)
+          && (
+            !existsAfter(expensePath(resource.data.expenseId))
+            || fiscalKey(getAfter(expensePath(resource.data.expenseId)).data) != key
+          );
       }
 
       // ---- Itens da nota (NFC-e de SP) ----

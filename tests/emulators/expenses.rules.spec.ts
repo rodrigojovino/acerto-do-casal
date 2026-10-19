@@ -11,6 +11,7 @@ import {
   contestData,
   validationData,
   expenseUpdateData,
+  fiscalKeyData,
   newExpenseData,
   rejectionData,
   type ExpenseInput,
@@ -140,9 +141,31 @@ beforeEach(async () => {
 
 const db = (uid: string) => env.authenticatedContext(uid).firestore();
 
-/** Edição parcial como o app faz: updatedAt do servidor. */
+/** Chave da nota no comprovante, se houver. */
+function keyIn(data: Record<string, unknown>): string | undefined {
+  return (data.receipt as { nfceKey?: string } | undefined)?.nfceKey;
+}
+
+/** Criação como o app faz: com chave, o registro da nota vai no mesmo lote. */
+function create(uid: string, id: string, data: Record<string, unknown>) {
+  const fs = db(uid);
+  const batch = fs.batch().set(fs.doc(path(id)), data);
+  const key = keyIn(data);
+  if (key) batch.set(fs.doc(`groups/${GROUP}/fiscalKeys/${key}`), fiscalKeyData(id, uid, serverTime()));
+  return batch.commit();
+}
+
+/**
+ * Edição parcial como o app faz: updatedAt do servidor. Com chave no
+ * comprovante, registra a nota no mesmo lote (os gastos semeados com chave são
+ * anteriores ao registro, então não há registro antigo a soltar).
+ */
 function edit(uid: string, id: string, changes: Record<string, unknown>) {
-  return db(uid).doc(path(id)).update({ ...changes, updatedAt: serverTime() });
+  const fs = db(uid);
+  const batch = fs.batch().update(fs.doc(path(id)), { ...changes, updatedAt: serverTime() });
+  const key = keyIn(changes);
+  if (key) batch.set(fs.doc(`groups/${GROUP}/fiscalKeys/${key}`), fiscalKeyData(id, uid, serverTime()));
+  return batch.commit();
 }
 
 /** Aprovação e recusa exatamente como o app grava (approvalData/rejectionData). */
@@ -174,125 +197,125 @@ describe('leitura', () => {
 
 describe('criação', () => {
   it('membro lança gasto válido, pago por ele ou pelo outro', async () => {
-    await assertSucceeds(db(A).doc(path('n1')).set(expense()));
-    await assertSucceeds(db(A).doc(path('n2')).set(expense({ payerUid: B, personalCents: 0, payerSharePct: 70 })));
-    await assertSucceeds(db(B).doc(path('n3')).set(expense({ createdBy: B, payerUid: B })));
+    await assertSucceeds(create(A, 'n1', expense()));
+    await assertSucceeds(create(A, 'n2', expense({ payerUid: B, personalCents: 0, payerSharePct: 70 })));
+    await assertSucceeds(create(B, 'n3', expense({ createdBy: B, payerUid: B })));
   });
 
   it('aceita pessoal igual ao total e divisões 0 e 100', async () => {
-    await assertSucceeds(db(A).doc(path('n4')).set(expense({ personalCents: 20000 })));
-    await assertSucceeds(db(A).doc(path('n5')).set(expense({ payerSharePct: 0 })));
-    await assertSucceeds(db(A).doc(path('n6')).set(expense({ payerSharePct: 100 })));
+    await assertSucceeds(create(A, 'n4', expense({ personalCents: 20000 })));
+    await assertSucceeds(create(A, 'n5', expense({ payerSharePct: 0 })));
+    await assertSucceeds(create(A, 'n6', expense({ payerSharePct: 100 })));
   });
 
   it('terceiro e visitante não lançam', async () => {
-    await assertFails(db(C).doc(path('x')).set(expense({ createdBy: C, payerUid: C })));
-    await assertFails(db(C).doc(path('x')).set(expense()));
+    await assertFails(create(C, 'x', expense({ createdBy: C, payerUid: C })));
+    await assertFails(create(C, 'x', expense()));
     await assertFails(env.unauthenticatedContext().firestore().doc(path('x')).set(expense()));
   });
 
   it('não lança em nome do outro', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ createdBy: B })));
+    await assertFails(create(A, 'x', expense({ createdBy: B })));
   });
 
   it('recusa valores fora de centavos inteiros', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ totalCents: 200.5 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ totalCents: '20000' })));
-    await assertFails(db(A).doc(path('x')).set(expense({ totalCents: 0 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ totalCents: -100 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ personalCents: -1 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ personalCents: 10.5 })));
+    await assertFails(create(A, 'x', expense({ totalCents: 200.5 })));
+    await assertFails(create(A, 'x', expense({ totalCents: '20000' })));
+    await assertFails(create(A, 'x', expense({ totalCents: 0 })));
+    await assertFails(create(A, 'x', expense({ totalCents: -100 })));
+    await assertFails(create(A, 'x', expense({ personalCents: -1 })));
+    await assertFails(create(A, 'x', expense({ personalCents: 10.5 })));
   });
 
   it('recusa parte pessoal maior que o total', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ personalCents: 20001 })));
+    await assertFails(create(A, 'x', expense({ personalCents: 20001 })));
   });
 
   it('recusa divisão fora de 0 a 100 ou não inteira', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ payerSharePct: 101 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ payerSharePct: -5 })));
-    await assertFails(db(A).doc(path('x')).set(expense({ payerSharePct: 33.3 })));
+    await assertFails(create(A, 'x', expense({ payerSharePct: 101 })));
+    await assertFails(create(A, 'x', expense({ payerSharePct: -5 })));
+    await assertFails(create(A, 'x', expense({ payerSharePct: 33.3 })));
   });
 
   it('recusa pagador de fora do grupo', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ payerUid: C })));
+    await assertFails(create(A, 'x', expense({ payerUid: C })));
   });
 
   it('recusa descrição vazia ou longa demais', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ description: '   ' })));
-    await assertFails(db(A).doc(path('x')).set(expense({ description: 'x'.repeat(81) })));
+    await assertFails(create(A, 'x', expense({ description: '   ' })));
+    await assertFails(create(A, 'x', expense({ description: 'x'.repeat(81) })));
   });
 
   it('recusa campo extra ou faltando', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ extra: true })));
+    await assertFails(create(A, 'x', expense({ extra: true })));
     const missing = expense();
     delete missing.personalCents;
-    await assertFails(db(A).doc(path('x')).set(missing));
+    await assertFails(create(A, 'x', missing));
   });
 
   it('exige horário do servidor', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ createdAt: new Date(2020, 0, 1) })));
+    await assertFails(create(A, 'x', expense({ createdAt: new Date(2020, 0, 1) })));
   });
 
   it('recusa data mal formatada', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ date: '05/10/2026' })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${CURRENT}-32` })));
+    await assertFails(create(A, 'x', expense({ date: '05/10/2026' })));
+    await assertFails(create(A, 'x', expense({ date: `${CURRENT}-32` })));
   });
 
   it('data futura só até o fim do mês seguinte', async () => {
-    await assertSucceeds(db(A).doc(path('n7')).set(expense({ date: `${NEXT}-28`, competence: NEXT })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${TOO_FAR}-01`, competence: TOO_FAR })));
+    await assertSucceeds(create(A, 'n7', expense({ date: `${NEXT}-28`, competence: NEXT })));
+    await assertFails(create(A, 'x', expense({ date: `${TOO_FAR}-01`, competence: TOO_FAR })));
   });
 
   it('competência é o mês da data', async () => {
-    await assertSucceeds(db(A).doc(path('n8')).set(expense({ date: `${OPEN_PAST}-20`, competence: OPEN_PAST })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${OPEN_PAST}-20`, competence: CURRENT })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${CURRENT}-05`, competence: OPEN_PAST })));
+    await assertSucceeds(create(A, 'n8', expense({ date: `${OPEN_PAST}-20`, competence: OPEN_PAST })));
+    await assertFails(create(A, 'x', expense({ date: `${OPEN_PAST}-20`, competence: CURRENT })));
+    await assertFails(create(A, 'x', expense({ date: `${CURRENT}-05`, competence: OPEN_PAST })));
   });
 
   it('data de mês fechado entra num mês aberto posterior, nunca no fechado', async () => {
-    await assertSucceeds(db(A).doc(path('n9')).set(expense({ date: `${CLOSED}-15`, competence: CURRENT })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${CLOSED}-15`, competence: CLOSED })));
-    await assertFails(db(A).doc(path('x')).set(expense({ date: `${CURRENT}-05`, competence: CLOSED })));
+    await assertSucceeds(create(A, 'n9', expense({ date: `${CLOSED}-15`, competence: CURRENT })));
+    await assertFails(create(A, 'x', expense({ date: `${CLOSED}-15`, competence: CLOSED })));
+    await assertFails(create(A, 'x', expense({ date: `${CURRENT}-05`, competence: CLOSED })));
   });
 });
 
 describe('comprovante na criação', () => {
   it('foto: caminho do próprio gasto e ainda não enviada', async () => {
     const photo = { type: 'photo', photoPath: photoPath('f1'), photoUploaded: false };
-    await assertSucceeds(db(A).doc(path('f1')).set(expense({ receipt: photo })));
+    await assertSucceeds(create(A, 'f1', expense({ receipt: photo })));
   });
 
   it('foto: recusa caminho de outro gasto e "já enviada" na criação', async () => {
-    await assertFails(db(A).doc(path('f2')).set(expense({ receipt: { type: 'photo', photoPath: photoPath('outro'), photoUploaded: false } })));
-    await assertFails(db(A).doc(path('f3')).set(expense({ receipt: { type: 'photo', photoPath: photoPath('f3'), photoUploaded: true } })));
+    await assertFails(create(A, 'f2', expense({ receipt: { type: 'photo', photoPath: photoPath('outro'), photoUploaded: false } })));
+    await assertFails(create(A, 'f3', expense({ receipt: { type: 'photo', photoPath: photoPath('f3'), photoUploaded: true } })));
   });
 
   it('QR: só pendente de conferência e sem dados da nota', async () => {
-    await assertSucceeds(db(A).doc(path('q1')).set(expense({ receipt: nfcePending })));
+    await assertSucceeds(create(A, 'q1', expense({ receipt: nfcePending })));
   });
 
   it('QR: recusa forjar nfceStatus ok ou os dados da nota', async () => {
-    await assertFails(db(A).doc(path('q2')).set(expense({ receipt: nfceOk })));
-    await assertFails(db(A).doc(path('q3')).set(expense({ receipt: { ...nfcePending, nfceStatus: 'ok' } })));
-    await assertFails(db(A).doc(path('q4')).set(expense({ receipt: { ...nfcePending, nfceData: nfceOk.nfceData } })));
+    await assertFails(create(A, 'q2', expense({ receipt: nfceOk })));
+    await assertFails(create(A, 'q3', expense({ receipt: { ...nfcePending, nfceStatus: 'ok' } })));
+    await assertFails(create(A, 'q4', expense({ receipt: { ...nfcePending, nfceData: nfceOk.nfceData } })));
   });
 
   it('QR: recusa chave mal formada, NF-e pedindo consulta e URL fora da montada da chave', async () => {
-    await assertFails(db(A).doc(path('q5')).set(expense({ receipt: { ...nfcePending, nfceKey: '123' } })));
+    await assertFails(create(A, 'q5', expense({ receipt: { ...nfcePending, nfceKey: '123' } })));
     const nfe = NFCE_KEY.slice(0, 20) + '55' + NFCE_KEY.slice(22);
     await assertFails(
-      db(A).doc(path('q5b')).set(expense({ receipt: { ...nfcePending, nfceKey: nfe, nfceUrl: SEFAZ_SP_CANONICAL + nfe } })),
+      create(A, 'q5b', expense({ receipt: { ...nfcePending, nfceKey: nfe, nfceUrl: SEFAZ_SP_CANONICAL + nfe } })),
     );
-    await assertFails(db(A).doc(path('q6')).set(expense({ receipt: { ...nfcePending, nfceUrl: 'https://evil.example.com/x' } })));
+    await assertFails(create(A, 'q6', expense({ receipt: { ...nfcePending, nfceUrl: 'https://evil.example.com/x' } })));
     await assertFails(
-      db(A).doc(path('q7')).set(
+      create(A, 'q7', 
         expense({ receipt: { ...nfcePending, nfceUrl: `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${NFCE_KEY}|2|1` } }),
       ),
     );
     // Com o hash do QR versão 2: o comprovante guarda só a URL montada da chave.
     await assertFails(
-      db(A).doc(path('q7b')).set(
+      create(A, 'q7b', 
         expense({ receipt: { ...nfcePending, nfceUrl: `${SEFAZ_SP_CANONICAL}${NFCE_KEY}|2|1|1|${'A'.repeat(40)}` } }),
       ),
     );
@@ -301,69 +324,70 @@ describe('comprovante na criação', () => {
   it('NF-e (modelo 55) de qualquer estado vale como "unchecked", lida ou digitada, sem consulta', async () => {
     const model = (key: string, m: string) => key.slice(0, 20) + m + key.slice(22);
     const nfe = (key: string, entry: string) => ({ type: 'nfce', nfceKey: key, entry, nfceStatus: 'unchecked' });
-    await assertSucceeds(db(A).doc(path('nfe1')).set(expense({ receipt: nfe(model(NFCE_KEY, '55'), 'read') })));
-    await assertSucceeds(db(A).doc(path('nfe2')).set(expense({ receipt: nfe(model(NFCE_KEY, '55'), 'typed') })));
-    await assertSucceeds(db(A).doc(path('nfe3')).set(expense({ receipt: nfe(model(NFCE_KEY_MG, '55'), 'read') })));
+    await assertSucceeds(create(A, 'nfe1', expense({ receipt: nfe(model(NFCE_KEY, '55'), 'read') })));
+    // Outra nota (a mesma chave não entra duas vezes: ver fiscalKeys.rules.spec.ts).
+    await assertSucceeds(create(A, 'nfe2', expense({ receipt: nfe(model(NFCE_KEY, '55').slice(0, 34) + '8888888888', 'typed') })));
+    await assertSucceeds(create(A, 'nfe3', expense({ receipt: nfe(model(NFCE_KEY_MG, '55'), 'read') })));
     // Outro modelo (ex.: 57, CT-e) não é comprovante.
-    await assertFails(db(A).doc(path('cte')).set(expense({ receipt: nfe(model(NFCE_KEY, '57'), 'read') })));
+    await assertFails(create(A, 'cte', expense({ receipt: nfe(model(NFCE_KEY, '57'), 'read') })));
   });
 
   it('origem da chave obrigatória: lida ou digitada', async () => {
     const withoutEntry: Record<string, unknown> = { ...nfcePending };
     delete withoutEntry.entry;
-    await assertFails(db(A).doc(path('e1')).set(expense({ receipt: withoutEntry })));
-    await assertFails(db(A).doc(path('e2')).set(expense({ receipt: { ...nfcePending, entry: 'colada' } })));
-    await assertSucceeds(db(A).doc(path('e3')).set(expense({ receipt: { ...nfcePending, entry: 'typed' } })));
+    await assertFails(create(A, 'e1', expense({ receipt: withoutEntry })));
+    await assertFails(create(A, 'e2', expense({ receipt: { ...nfcePending, entry: 'colada' } })));
+    await assertSucceeds(create(A, 'e3', expense({ receipt: { ...nfcePending, entry: 'typed' } })));
   });
 
   it('QR: a URL de SP precisa ser da própria chave', async () => {
     const other = NFCE_KEY.slice(0, 34) + '9999999999';
     await assertFails(
-      db(A).doc(path('q8')).set(expense({ receipt: { ...nfcePending, nfceUrl: `${SEFAZ_SP_CANONICAL}${other}|2|1` } })),
+      create(A, 'q8', expense({ receipt: { ...nfcePending, nfceUrl: `${SEFAZ_SP_CANONICAL}${other}|2|1` } })),
     );
   });
 
   it('QR de outro estado: vale como "unchecked", sem URL', async () => {
-    await assertSucceeds(db(A).doc(path('mg1')).set(expense({ receipt: nfceUnchecked })));
+    await assertSucceeds(create(A, 'mg1', expense({ receipt: nfceUnchecked })));
   });
 
   it('QR de outro estado não pede conferência; QR de SP não fica "unchecked"', async () => {
     await assertFails(
-      db(A).doc(path('mg3')).set(
+      create(A, 'mg3', 
         expense({ receipt: { ...nfceUnchecked, nfceStatus: 'pending', nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } }),
       ),
     );
-    await assertFails(db(A).doc(path('mg4')).set(expense({ receipt: { ...nfceUnchecked, nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } })));
+    await assertFails(create(A, 'mg4', expense({ receipt: { ...nfceUnchecked, nfceUrl: SEFAZ_SP_CANONICAL + NFCE_KEY_MG } })));
     await assertFails(
-      db(A).doc(path('sp-unchecked')).set(
+      create(A, 'sp-unchecked', 
         expense({ receipt: { type: 'nfce', nfceKey: NFCE_KEY, entry: 'read', nfceStatus: 'unchecked' } }),
       ),
     );
   });
 
   it('tipo desconhecido ou campos extras no comprovante são recusados', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ receipt: { type: 'pix' } })));
-    await assertFails(db(A).doc(path('x')).set(expense({ receipt: { type: 'none', extra: 1 } })));
+    await assertFails(create(A, 'x', expense({ receipt: { type: 'pix' } })));
+    await assertFails(create(A, 'x', expense({ receipt: { type: 'none', extra: 1 } })));
   });
 });
 
 describe('status pelo comprovante (quem lança)', () => {
   it('sem comprovante nasce pendente; não pode nascer confirmado', async () => {
-    await assertSucceeds(db(A).doc(path('s1')).set(expense()));
-    await assertFails(db(A).doc(path('s2')).set(expense({ status: 'confirmed' })));
+    await assertSucceeds(create(A, 's1', expense()));
+    await assertFails(create(A, 's2', expense({ status: 'confirmed' })));
   });
 
   it('com foto ou QR (SP ou outro estado) nasce confirmado; não pode nascer pendente', async () => {
     const photo = (id: string) => ({ type: 'photo', photoPath: photoPath(id), photoUploaded: false });
-    await assertSucceeds(db(A).doc(path('c1')).set(expense({ receipt: photo('c1') })));
-    await assertSucceeds(db(A).doc(path('c2')).set(expense({ receipt: nfcePending })));
-    await assertSucceeds(db(A).doc(path('c3')).set(expense({ receipt: nfceUnchecked })));
-    await assertFails(db(A).doc(path('c4')).set(expense({ receipt: photo('c4'), status: 'pending_approval' })));
+    await assertSucceeds(create(A, 'c1', expense({ receipt: photo('c1') })));
+    await assertSucceeds(create(A, 'c2', expense({ receipt: nfcePending })));
+    await assertSucceeds(create(A, 'c3', expense({ receipt: nfceUnchecked })));
+    await assertFails(create(A, 'c4', expense({ receipt: photo('c4'), status: 'pending_approval' })));
   });
 
   it('não cria com aprovação, nem a da conferência do QR', async () => {
-    await assertFails(db(A).doc(path('x')).set(expense({ approval: { byUid: A, at: serverTime() } })));
-    await assertFails(db(A).doc(path('x')).set(expense({ approval: { byUid: 'nfce', at: serverTime() } })));
+    await assertFails(create(A, 'x', expense({ approval: { byUid: A, at: serverTime() } })));
+    await assertFails(create(A, 'x', expense({ approval: { byUid: 'nfce', at: serverTime() } })));
   });
 
   it('anexar comprovante a um pendente o confirma; sem trocar o status é recusado', async () => {
@@ -672,11 +696,11 @@ describe('foto da nota junto com a chave', () => {
   const keyPhoto = (id: string, uploaded = false) => ({ ...nfceUnchecked, photoPath: photoPath(id), photoUploaded: uploaded });
 
   it('criar com chave e foto: continua confirmado automático; caminho errado ou já enviada é recusado', async () => {
-    await assertSucceeds(db(A).doc(path('kf1')).set(expense({ receipt: keyPhoto('kf1') })));
-    await assertSucceeds(db(A).doc(path('kf2')).set(expense({ receipt: { ...nfcePending, photoPath: photoPath('kf2'), photoUploaded: false } })));
-    await assertFails(db(A).doc(path('kf3')).set(expense({ receipt: keyPhoto('outro') })));
-    await assertFails(db(A).doc(path('kf4')).set(expense({ receipt: keyPhoto('kf4', true) })));
-    await assertFails(db(A).doc(path('kf5')).set(expense({ receipt: { ...nfceUnchecked, photoPath: photoPath('kf5') } })));
+    await assertSucceeds(create(A, 'kf1', expense({ receipt: keyPhoto('kf1') })));
+    await assertSucceeds(create(A, 'kf2', expense({ receipt: { ...nfcePending, photoPath: photoPath('kf2'), photoUploaded: false } })));
+    await assertFails(create(A, 'kf3', expense({ receipt: keyPhoto('outro') })));
+    await assertFails(create(A, 'kf4', expense({ receipt: keyPhoto('kf4', true) })));
+    await assertFails(create(A, 'kf5', expense({ receipt: { ...nfceUnchecked, photoPath: photoPath('kf5') } })));
   });
 
   it('anexar a foto depois num confirmado com chave conferida: a conferência fica e volta para aprovação', async () => {
@@ -712,30 +736,30 @@ describe('relançar no mês aberto (mês fechou enquanto o gasto estava offline)
     };
     // O que o app gravou offline: competência = mês da data, que depois fechou.
     const offline = newExpenseData(input, A, CLOSED, { groupId: GROUP, expenseId: 'off1' }, serverTime());
-    await assertFails(db(A).doc(path('off1')).set(offline));
+    await assertFails(create(A, 'off1', offline));
     // "Lançar no mês aberto": mesmos dados, competência resolvida com o mês fechado.
     const competence = resolveCompetence(input.date, new Set([CLOSED]), `${CURRENT}-01`);
     expect(competence).not.toBe(CLOSED);
     const relaunched = newExpenseData(input, A, competence, { groupId: GROUP, expenseId: 'off2' }, serverTime());
     expect(relaunched.date).toBe(`${CLOSED}-20`);
-    await assertSucceeds(db(A).doc(path('off2')).set(relaunched));
+    await assertSucceeds(create(A, 'off2', relaunched));
   });
 });
 
 describe('observação', () => {
   it('opcional, até 300 caracteres; vazia ou de outro tipo é recusada', async () => {
-    await assertSucceeds(db(A).doc(path('n1')).set(expense({ note: 'churrasco do sábado' })));
-    await assertSucceeds(db(A).doc(path('n2')).set(expense({ note: 'x'.repeat(300) })));
-    await assertFails(db(A).doc(path('n3')).set(expense({ note: 'x'.repeat(301) })));
-    await assertFails(db(A).doc(path('n4')).set(expense({ note: '   ' })));
-    await assertFails(db(A).doc(path('n5')).set(expense({ note: 42 })));
+    await assertSucceeds(create(A, 'n1', expense({ note: 'churrasco do sábado' })));
+    await assertSucceeds(create(A, 'n2', expense({ note: 'x'.repeat(300) })));
+    await assertFails(create(A, 'n3', expense({ note: 'x'.repeat(301) })));
+    await assertFails(create(A, 'n4', expense({ note: '   ' })));
+    await assertFails(create(A, 'n5', expense({ note: 42 })));
   });
 
   it('o app grava a observação aparada; vazia sai do documento', async () => {
     const input = { description: 'Mercado', totalCents: 20000, personalCents: 0, payerUid: A, payerSharePct: 50, date: `${CURRENT}-05`, receipt: { type: 'none' as const } };
     const withNote = newExpenseData({ ...input, note: '  dividido com a família  ' }, A, CURRENT, { groupId: GROUP, expenseId: 'n6' }, serverTime());
     expect(withNote.note).toBe('dividido com a família');
-    await assertSucceeds(db(A).doc(path('n6')).set(withNote));
+    await assertSucceeds(create(A, 'n6', withNote));
     const cleared = expenseUpdateData({ ...input, note: '' }, CURRENT, { groupId: GROUP, expenseId: 'n6' }, { receipt: { type: 'none' }, status: 'pending_approval' }, serverTime(), removeField());
     await assertSucceeds(db(A).doc(path('n6')).update(cleared));
   });
@@ -770,13 +794,13 @@ describe('documentos montados pelo app', () => {
   const ids = (expenseId: string) => ({ groupId: GROUP, expenseId });
 
   it('gasto novo do app passa nas regras, com cada comprovante', async () => {
-    await assertSucceeds(db(A).doc(path('app-1')).set(newExpenseData(input, A, CURRENT, ids('app-1'), serverTime())));
+    await assertSucceeds(create(A, 'app-1', newExpenseData(input, A, CURRENT, ids('app-1'), serverTime())));
     const photo = { ...input, receipt: { type: 'photo' as const, replaced: true } };
-    await assertSucceeds(db(A).doc(path('app-2')).set(newExpenseData(photo, A, CURRENT, ids('app-2'), serverTime())));
+    await assertSucceeds(create(A, 'app-2', newExpenseData(photo, A, CURRENT, ids('app-2'), serverTime())));
     const qr = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY, entry: 'read' as const } };
-    await assertSucceeds(db(A).doc(path('app-3')).set(newExpenseData(qr, A, CURRENT, ids('app-3'), serverTime())));
+    await assertSucceeds(create(A, 'app-3', newExpenseData(qr, A, CURRENT, ids('app-3'), serverTime())));
     const qrMg = { ...input, receipt: { type: 'nfce' as const, nfceKey: NFCE_KEY_MG, entry: 'read' as const } };
-    await assertSucceeds(db(A).doc(path('app-4')).set(newExpenseData(qrMg, A, CURRENT, ids('app-4'), serverTime())));
+    await assertSucceeds(create(A, 'app-4', newExpenseData(qrMg, A, CURRENT, ids('app-4'), serverTime())));
   });
 
   it('QR e código de barras da mesma nota: mesmo comprovante; digitada de SP também vai para a consulta', async () => {
@@ -789,7 +813,7 @@ describe('documentos montados pelo app', () => {
     const typed = parseTypedKey(NFCE_KEY.replace(/(\d{4})(?=\d)/g, '$1 '));
     expect(asReceipt(typed.key, 'typed')).toMatchObject({ nfceStatus: 'pending', nfceUrl: NFCE_URL, entry: 'typed' });
     const typedInput = { ...input, receipt: { type: 'nfce' as const, nfceKey: typed.key, entry: 'typed' as const } };
-    await assertSucceeds(db(A).doc(path('app-typed')).set(newExpenseData(typedInput, A, CURRENT, ids('app-typed'), serverTime())));
+    await assertSucceeds(create(A, 'app-typed', newExpenseData(typedInput, A, CURRENT, ids('app-typed'), serverTime())));
 
     // Dígito verificador inválido: recusado ao digitar, antes de gravar (as regras não calculam o módulo 11).
     expect(() => parseTypedKey(NFCE_KEY.slice(0, 43) + ((Number(NFCE_KEY[43]) + 1) % 10))).toThrow(/dígito verificador/);
