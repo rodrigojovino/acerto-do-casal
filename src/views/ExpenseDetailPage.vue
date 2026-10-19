@@ -86,6 +86,9 @@
             <p class="strong">{{ receiptTitle }}</p>
             <p v-if="receiptDetail" class="hint">{{ receiptDetail }}</p>
             <button v-if="canRetryNfce" type="button" class="link" @click="retryNfce">Tentar conferir de novo</button>
+            <button v-if="noteItems" type="button" class="btn outline items-btn" @click="itemsOpen = true">
+              Ver itens da nota ({{ noteItems.items.length }})
+            </button>
           </div>
 
           <p class="hint">
@@ -171,6 +174,16 @@
         </template>
       </main>
 
+      <!-- Itens da NFC-e de SP conferida (do cache: abre offline) -->
+      <ion-modal :is-open="itemsOpen && !!noteItems" @did-dismiss="itemsOpen = false">
+        <NfceItemsSheet
+          v-if="noteItems"
+          :items="noteItems"
+          :issuer="expense?.receipt.type === 'nfce' ? expense.receipt.nfceData?.issuerName : undefined"
+          @close="itemsOpen = false"
+        />
+      </ion-modal>
+
       <!-- Foto ampliada: toque para aproximar e afastar -->
       <ion-modal :is-open="zoomOpen" @did-dismiss="zoomOpen = false">
         <div class="zoom">
@@ -221,6 +234,8 @@ import { seriesTargets, type SeriesAction } from '@/services/series';
 import { installmentSummary } from '@/domain/installments';
 import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
+import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
+import { nfceItemsByKey } from '@/services/nfceItems';
 import StatusBadge from '@/components/StatusBadge.vue';
 import { closedMonths } from '@/services/months';
 import { formatCnpj } from '@/services/nfce';
@@ -448,6 +463,14 @@ const receiptDetail = computed(() => {
   return parts.join(' ') || null;
 });
 
+// ---- Itens da nota: só NFC-e de SP conferida, com os itens lidos ----
+const itemsOpen = ref(false);
+const noteItems = computed(() => {
+  const r = expense.value?.receipt;
+  if (r?.type !== 'nfce' || !r.nfceUrl || r.nfceStatus !== 'ok') return null;
+  return nfceItemsByKey.value.get(r.nfceKey) ?? null;
+});
+
 const canRetryNfce = computed(
   () =>
     isCreator.value &&
@@ -612,6 +635,12 @@ function goBack(): void {
 .note-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.items-btn {
+  margin-top: 8px;
+  height: 44px;
+  width: 100%;
 }
 
 .series {

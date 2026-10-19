@@ -2,6 +2,8 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router';
 import { initPush } from './services/push';
+// Itens das notas no cache local desde a abertura (a lista abre offline).
+import './services/nfceItems';
 
 import { IonicVue } from '@ionic/vue';
 
