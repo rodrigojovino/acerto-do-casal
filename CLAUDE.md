@@ -21,6 +21,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 
 - **Regra obrigatória de deploy:** só depois que o CI do commit passar nos dois jobs (`tests` e `android-debug`), e sempre com confirmação explícita do Rodrigo antes de executar, mesmo em modo automático. O mesmo vale para criar e enviar tags de versão (`vX.Y.Z`). O `.claude/settings.json` do projeto marca esses comandos como "ask" (sempre pedem aprovação).
 - `npm run emulators` sobe Auth, Firestore, Functions e Storage locais; o app usa os emuladores em dev com `VITE_USE_EMULATORS=true`.
+- `node --experimental-transform-types scripts/admin/reconsultar-itens.ts [--gravar]`: reconsulta única dos itens das NFC-e de SP conferidas sem itens (as anteriores ao bloco C da Fase 7). Usa o login da CLI (dono), projeto fixo; por padrão só simula e mostra contagens; `--gravar` cria `nfceItems` com `source: 'backfill'` sem sobrescrever. Rodar com a VPN desligada e só com confirmação explícita do Rodrigo.
 - `npm run recorrentes:gerar -- [YYYY-MM | YYYY-MM-DD]` dispara a geração de recorrentes no emulador simulando o dia 1 do mês (padrão: mês atual) ou um dia qualquer. O agendamento não roda no emulador.
 - Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
 - Antes de um deploy que inclua Firestore ou Storage, confirmar que o banco e o bucket existem e em qual região: o `firebase deploy` cria o banco sozinho na região padrão (`nam5`) quando ele não existe, e a região não muda depois.
@@ -296,17 +297,13 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
 7. [ ] Notificações, exportação Excel/PDF, versão web
    - [x] Bloco A: notificações (push, preferências por categoria, contador na aba e no ícone), v0.7.0.
    - [x] Bloco B: lançamento (observação, foto da nota junto com a chave, nome do emitente pelo CNPJ, "Lançar no mês aberto" para gasto recusado na sincronização), v0.7.1.
+   - [x] Bloco C: itens da NFC-e de SP (lidos pela `checkNfce`, "Ver itens da nota" no Detalhe, offline; reconsulta das notas antigas por `scripts/admin/reconsultar-itens.ts`), v0.7.1.
    - [ ] Bloco D: exportação Excel/PDF (do mês e do histórico).
    - [ ] Bloco E: segurança do projeto.
      - Restringir as chaves de API do Firebase (web e Android) no Google Cloud Console: só as APIs usadas, com restrição por site (web) e por pacote + SHA-1 da assinatura (Android).
      - Proteger as tags `v*` no GitHub (Rulesets): só o dono cria, ninguém move nem apaga; a tag dispara o release do APK assinado.
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
    - Pendência herdada da Fase 4 (prioridade baixa): reduzir o tamanho do APK (de ~6 MB para ~31,5 MB com a leitura de QR); avaliar o modelo de QR via Google Play Services em vez do embutido no APK.
-   - Pendência da Fase 5: itens da NFC-e de SP.
-     - Botão "Ver itens da nota" no Detalhe, só para NFC-e de SP conferida: descrição, quantidade, valor unitário e total de cada item, descontos e forma de pagamento.
-     - Os itens são extraídos e guardados pela Function no momento da conferência (disponíveis offline). Falha na leitura dos itens não afeta a conferência do valor.
-     - Em parcelados, os itens ficam na parcela 1 e aparecem na série toda.
-     - Reconsulta única para as notas já conferidas antes da implementação.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
