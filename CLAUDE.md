@@ -135,7 +135,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 ### Mês (competência)
 
 - Fecha só sem gastos `pending_approval`, `returned` ou `awaiting_confirmation`, e com o pagamento do acerto registrado (comprovante PIX ou "pago em dinheiro").
-- Fecha só sem foto de comprovante pendente de envio (`receipt.type: 'photo'` com `photoUploaded: false`); a aprovação não depende da foto ter chegado.
+- Fecha só sem foto de comprovante pendente de envio (foto de recibo ou da nota junto com a chave, com `photoUploaded: false`); a aprovação não depende da foto ter chegado.
 - Só fecha mês passado ou atual, nunca futuro (as regras tratam mês futuro como aberto sem consultar o banco).
 - Fechar e reabrir exigem conexão. Reabrir exige aprovação do outro membro.
 - Gasto lançado com data de um mês fechado entra na competência do mês aberto, mantendo a `date` original.
@@ -289,6 +289,11 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
    - Pendência: validar o registro do PIX com foto em produção no fechamento de outubro/2026.
 7. [ ] Notificações, exportação Excel/PDF, versão web
    - [x] Bloco A: notificações (push, preferências por categoria, contador na aba e no ícone), v0.7.0.
+   - [x] Bloco B: lançamento (observação, foto da nota junto com a chave, nome do emitente pelo CNPJ, "Lançar no mês aberto" para gasto recusado na sincronização), v0.7.1.
+   - [ ] Bloco D: exportação Excel/PDF (do mês e do histórico).
+   - [ ] Bloco E: segurança do projeto.
+     - Restringir as chaves de API do Firebase (web e Android) no Google Cloud Console: só as APIs usadas, com restrição por site (web) e por pacote + SHA-1 da assinatura (Android).
+     - Proteger as tags `v*` no GitHub (Rulesets): só o dono cria, ninguém move nem apaga; a tag dispara o release do APK assinado.
    - Pendência herdada da Fase 4: limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline).
    - Pendência herdada da Fase 4 (prioridade baixa): reduzir o tamanho do APK (de ~6 MB para ~31,5 MB com a leitura de QR); avaliar o modelo de QR via Google Play Services em vez do embutido no APK.
    - Pendência da Fase 5: itens da NFC-e de SP.
@@ -296,13 +301,6 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - Os itens são extraídos e guardados pela Function no momento da conferência (disponíveis offline). Falha na leitura dos itens não afeta a conferência do valor.
      - Em parcelados, os itens ficam na parcela 1 e aparecem na série toda.
      - Reconsulta única para as notas já conferidas antes da implementação.
-   - Pendência da Fase 5: nome do emitente pelo CNPJ.
-     - Para notas sem consulta à SEFAZ (NF-e, NFC-e de outros estados e chave digitada), uma Function consulta o CNPJ num serviço público (ex.: BrasilAPI) e preenche a descrição com o nome fantasia ou a razão social.
-     - Cache por CNPJ no Firestore, para não consultar o mesmo CNPJ duas vezes.
-     - Offline ou com falha, a descrição fica com o CNPJ formatado (como hoje).
-   - Pendência da Fase 5: campo de observação opcional no lançamento (até ~300 caracteres), visível no Detalhe e resumido em Pendências. Vale para parcelas (é da série) e para a confirmação de recorrente variável. Editar a observação de um gasto confirmado volta para aprovação, como qualquer edição.
-   - Pendência da Fase 6: relançar automaticamente no mês aberto o gasto lançado offline num mês que fechou antes de sincronizar (hoje o aviso mostra descrição, valor e data para relançar à mão).
-   - Pendência da Fase 5: foto opcional junto com a chave do documento fiscal (QR, código de barras ou digitada), principalmente quando o valor é digitado (NF-e, NFC-e de outro estado, chave digitada). O gasto mantém o selo Automático; o Detalhe mostra os dados da chave e a foto ampliável.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
