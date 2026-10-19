@@ -289,7 +289,7 @@ export interface FetchTiming {
  * Busca e interpreta uma nota de SP. Única função com acesso à rede, e só na
  * URL canônica da SEFAZ-SP (montada por `parseNfceQr`), sem redirecionamentos.
  */
-export async function fetchNfce(qrContent: string, timeoutMs = 15_000): Promise<{ result: NfceResult; timing: FetchTiming }> {
+export async function fetchNfce(qrContent: string, timeoutMs = 15_000): Promise<{ result: NfceResult; timing: FetchTiming; html: string }> {
   const qr = parseNfceQr(qrContent);
   if (!qr.spUrl) throw new NfceError('not_sp', 'A conferência automática é só para notas de SP.');
   const started = Date.now();
@@ -306,7 +306,24 @@ export async function fetchNfce(qrContent: string, timeoutMs = 15_000): Promise<
   const html = await res.text();
   const timing = { status: res.status, ms: Date.now() - started };
   if (!res.ok) throw new NfceError('network', `A SEFAZ respondeu com erro (${res.status}).`);
-  return { result: toResult(qr, parsePage(html)), timing };
+  return { result: toResult(qr, parsePage(html)), timing, html };
+}
+
+/**
+ * Confere a nota a partir do HTML já obtido (a mesma página da consulta): o
+ * resultado da conferência e, à parte, os itens. Falha na leitura dos itens
+ * nunca derruba a conferência (`items: null`).
+ */
+export function readNfcePage(qrContent: string, html: string): { result: NfceResult; items: NfceItems | null } {
+  const qr = parseNfceQr(qrContent);
+  const result = toResult(qr, parsePage(html));
+  let items: NfceItems | null = null;
+  try {
+    items = parseItems(html);
+  } catch {
+    items = null;
+  }
+  return { result, items };
 }
 
 // ---- Itens da nota (NFC-e de SP) ----

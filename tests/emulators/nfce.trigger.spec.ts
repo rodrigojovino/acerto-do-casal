@@ -1,4 +1,4 @@
-import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
+import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
@@ -98,6 +98,25 @@ async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean
   return data;
 }
 
+async function readAt(fullPath: string): Promise<Record<string, unknown> | undefined> {
+  let data: Record<string, unknown> | undefined;
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    data = (await ctx.firestore().doc(fullPath).get()).data();
+  });
+  return data;
+}
+
+/** Espera um documento existir (gravado por um gatilho) ou o tempo acabar. */
+async function waitForDoc(fullPath: string, ms = 20000): Promise<Record<string, unknown> | undefined> {
+  const until = Date.now() + ms;
+  let data = await readAt(fullPath);
+  while (Date.now() < until && !data) {
+    await new Promise((r) => setTimeout(r, 250));
+    data = await readAt(fullPath);
+  }
+  return data;
+}
+
 const okData = (totalCents: number) => ({ issuerName: 'LOJA TESTE LTDA', totalCents, date: '2026-10-05' });
 
 describe('checkNfce: só registra, nunca muda o status', () => {
@@ -192,5 +211,76 @@ describe('checkNfce: compra parcelada', () => {
     );
     await new Promise((r) => setTimeout(r, 3000));
     expect(((await read('avulsa-2'))?.receipt as { nfceStatus: string }).nfceStatus).toBe('pending');
+  });
+});
+
+describe('checkNfce: itens da nota', () => {
+  // Página fictícia no formato da SEFAZ-SP (CNPJ e mês batem com a chave de teste).
+  function sefazPage(items: Array<{ name: string; total: string }>, payable: string): string {
+    const rows = items
+      .map(
+        (it, i) => `<tr id="Item + ${i + 1}"><td valign="top"><span class="txtTit">${it.name}</span>
+          <span class="RCod"> (Código: ${i + 1} ) </span><br>
+          <span class="Rqtd"> <strong>Qtde.:</strong>1</span><span class="RUN"> <strong>UN: </strong>UN</span>
+          <span class="RvlUnit"> <strong>Vl. Unit.:</strong> ${it.total}</span></td>
+          <td class="txtTit noWrap"> Vl. Total <br><span class="valor">${it.total}</span></td></tr>`,
+      )
+      .join('');
+    return `<html><body>
+      <div id="u20" class="txtTopo">LOJA TESTE LTDA</div>
+      <div class="text">CNPJ: 11.222.333/0001-81</div>
+      <table id="tabResult" class="filterable">${rows}</table>
+      <div id="totalNota" class="txtRight">
+        <div id="linhaTotal" class="linhaShade"><label>Valor a pagar R$:</label><span class="totalNumb txtMax">${payable}</span></div>
+        <div id="linhaForma"><label>Forma de pagamento:</label><span class="totalNumb txtTitR">Valor pago R$:</span></div>
+        <div id="linhaTotal"><label class="tx"> Pix </label><span class="totalNumb">${payable}</span></div>
+      </div>
+      <li><strong>Emissão: </strong>05/10/2026 11:56:22 - Via Consumidor</li>
+    </body></html>`;
+  }
+
+  async function fixture(html: string): Promise<void> {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`emulatorFixtures/sefaz_${KEY}`).set({ html });
+    });
+  }
+
+  const itemsPath = `groups/${GROUP}/nfceItems/${KEY}`;
+
+  it('nota conferida: grava os itens fora do gasto, com a soma conferida; o status não muda', async () => {
+    await fixture(sefazPage([{ name: 'ARROZ 5KG', total: '25,90' }, { name: 'FEIJ&Atilde;O', total: '29,58' }], '55,48'));
+    await write('itens', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'pending' }, { status: 'confirmed' }));
+    const d = await waitFor('itens', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
+    expect((d?.receipt as { nfceStatus: string }).nfceStatus).toBe('ok');
+    expect(d?.status).toBe('confirmed');
+    const items = await waitForDoc(itemsPath);
+    expect(items).toMatchObject({ totalCents: 5548, itemsSumCents: 5548, consistent: true, source: 'checkNfce', payments: [{ method: 'Pix', amountCents: 5548 }] });
+    expect((items?.items as Array<{ description: string }>).map((i) => i.description)).toEqual(['ARROZ 5KG', 'FEIJÃO']);
+  });
+
+  it('soma que não bate: guarda os itens com o aviso (consistent false)', async () => {
+    await fixture(sefazPage([{ name: 'ITEM A', total: '10,00' }], '55,48'));
+    await write('soma', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'pending' }, { status: 'confirmed' }));
+    expect(await waitForDoc(itemsPath)).toMatchObject({ itemsSumCents: 1000, totalCents: 5548, consistent: false });
+  });
+
+  it('itens ilegíveis: a conferência fica ok e nenhum documento de itens é criado', async () => {
+    const html = sefazPage([{ name: 'ITEM A', total: '55,48' }], '55,48').replace('class="valor"', 'class="outro"');
+    await fixture(html);
+    await write('ilegivel', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'pending' }, { status: 'confirmed' }));
+    const d = await waitFor('ilegivel', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
+    expect((d?.receipt as { nfceStatus: string }).nfceStatus).toBe('ok');
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(await readAt(itemsPath)).toBeUndefined();
+  });
+
+  it('regras: membros leem os itens; terceiro não; o app não grava', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(itemsPath).set({ items: [], totalCents: 1, itemsSumCents: 1, discountCents: 0, payments: [], consistent: true });
+    });
+    await assertSucceeds(env.authenticatedContext(A).firestore().doc(itemsPath).get());
+    await assertFails(env.authenticatedContext('uid-c').firestore().doc(itemsPath).get());
+    await assertFails(env.authenticatedContext(A).firestore().doc(itemsPath).set({ items: [] }));
+    await assertFails(env.authenticatedContext(A).firestore().doc(`emulatorFixtures/sefaz_${KEY}`).get());
   });
 });

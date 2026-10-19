@@ -388,6 +388,14 @@ service cloud.firestore {
           && !isClosed(resource.data.competence);
       }
 
+      // ---- Itens da nota (NFC-e de SP) ----
+      // Um documento por chave, gravado só pela Function de conferência (e pela
+      // reconsulta, com credencial de dono). Membros leem; o app não grava.
+      match /nfceItems/{nfceKey} {
+        allow read: if isMember(groupId);
+        allow write: if false;
+      }
+
       // ---- Contas recorrentes ----
       // Fixo novo: vai para aprovação do outro membro. Variável: não precisa de
       // aprovação (cada mês passa pela confirmação do valor). Num cadastro já

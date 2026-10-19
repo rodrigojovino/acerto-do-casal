@@ -1,12 +1,27 @@
 import './options.js';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { logger } from 'firebase-functions';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { NfceError, fetchNfce, type NfceResult } from './nfce.js';
+import { NfceError, fetchNfce, readNfcePage, type NfceItems, type NfceResult } from './nfce.js';
 
 if (getApps().length === 0) initializeApp();
 const db = getFirestore();
+
+/**
+ * Página da nota: a da SEFAZ-SP ou, no emulador, uma página fictícia gravada
+ * pelos testes em `emulatorFixtures/sefaz_{chave}` (sem rede). A conferência e
+ * os itens saem da mesma página.
+ */
+async function consultSefaz(url: string, key: string): Promise<{ result: NfceResult; items: NfceItems | null }> {
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    const fixture = await db.doc(`emulatorFixtures/sefaz_${key}`).get();
+    if (fixture.exists) return readNfcePage(url, fixture.get('html') as string);
+  }
+  const { html } = await fetchNfce(url);
+  return readNfcePage(url, html);
+}
 
 /** `approval.byUid` quando quem confirma é a conferência da nota, não uma pessoa. */
 export const NFCE_APPROVER = 'nfce';
@@ -63,10 +78,12 @@ export const checkNfce = onDocumentWritten(
 
     if (receipt.nfceStatus === 'pending') {
       let update: Partial<NfceReceipt>;
+      let items: NfceItems | null = null;
       try {
         if (!receipt.nfceUrl) throw new NfceError('not_sp', 'Nota sem URL de consulta.');
-        const { result } = await fetchNfce(receipt.nfceUrl);
+        const { result, items: read } = await consultSefaz(receipt.nfceUrl, receipt.nfceKey);
         if (result.key !== receipt.nfceKey) throw new NfceError('mismatch', 'A chave da nota não confere.');
+        items = read;
         update = {
           nfceStatus: 'ok',
           nfceData: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date },
@@ -93,6 +110,15 @@ export const checkNfce = onDocumentWritten(
           });
         }
       });
+
+      // Itens da nota: um documento por chave, fora do gasto (numa série, vale
+      // para todas as parcelas). Falha aqui não afeta a conferência já gravada.
+      if (update.nfceStatus === 'ok' && items) {
+        await db
+          .doc(`groups/${event.params.groupId}/nfceItems/${receipt.nfceKey}`)
+          .set({ ...items, fetchedAt: FieldValue.serverTimestamp(), source: 'checkNfce' })
+          .catch((err) => logger.warn('Itens da nota não gravados', { err: String(err) }));
+      }
     }
   },
 );
