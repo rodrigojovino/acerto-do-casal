@@ -7,7 +7,7 @@
         {{ modelValue.type === 'photo' ? 'Foto ✓' : 'Foto' }}
       </button>
       <button
-        v-if="canScanQr"
+        v-if="canScanQr && allowKey"
         type="button"
         class="option"
         :aria-pressed="modelValue.type === 'nfce' && modelValue.entry === 'read'"
@@ -18,6 +18,7 @@
         Ler QR ou<br />código de barras
       </button>
       <button
+        v-if="allowKey"
         type="button"
         class="option"
         :aria-pressed="typing || (modelValue.type === 'nfce' && modelValue.entry === 'typed')"
@@ -99,7 +100,10 @@ export type ReceiptState =
       photo?: { data?: Blob; previewUrl: string | null };
     };
 
-const props = defineProps<{ modelValue: ReceiptState; partnerName: string }>();
+/** `allowKey`: falso esconde ler e digitar chave (série com a parcela 1 em mês fechado). */
+const props = withDefaults(defineProps<{ modelValue: ReceiptState; partnerName: string; allowKey?: boolean }>(), {
+  allowKey: true,
+});
 const emit = defineEmits<{
   'update:modelValue': [value: ReceiptState];
   /** Chave lida ou digitada: o formulário pré-preenche (e consulta a NFC-e de SP). */

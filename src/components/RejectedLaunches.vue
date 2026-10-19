@@ -5,35 +5,46 @@
       <p class="hint">{{ reason(launch) }}</p>
       <div class="actions">
         <button class="btn outline" type="button" @click="discard(launch)">Descartar</button>
-        <button v-if="launch.kind === 'single'" class="btn primary" type="button" @click="relaunch(launch)">Lançar no mês aberto</button>
+        <button v-if="launch.duplicateOf" class="btn primary" type="button" @click="openDuplicate(launch)">Ver o gasto</button>
+        <button v-else-if="launch.kind === 'single'" class="btn primary" type="button" @click="relaunch(launch)">Lançar no mês aberto</button>
       </div>
     </li>
   </ul>
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { createExpense } from '@/services/expenses';
-import { expenseLabel } from '@/services/expenseView';
-import { forgetLaunch, rejectedLaunches, type GuardedLaunch } from '@/services/launchGuard';
+import { duplicateNoteText, expenseLabel } from '@/services/expenseView';
+import { forgetLaunch, rejectedLaunches, type RejectedLaunch } from '@/services/launchGuard';
 import { closedMonths } from '@/services/months';
-import { group, user } from '@/services/session';
+import { firstNameOf, group, user } from '@/services/session';
+
+const router = useRouter();
 
 /**
  * Lançamentos recusados na sincronização (o mês fechou enquanto estavam
  * offline): mostra o gasto e oferece relançar com os mesmos dados no mês
  * aberto, mantendo a data. Compra parcelada: só o aviso (relançar mudaria os
- * meses da série).
+ * meses da série). Nota fiscal já lançada: mostra quem lançou e o gasto, sem
+ * relançar.
  */
 
-function reason(launch: GuardedLaunch): string {
+function reason(launch: RejectedLaunch): string {
+  const dup = launch.duplicateOf;
+  if (dup) {
+    return dup.date
+      ? `Nota já lançada. ${duplicateNoteText(dup, firstNameOf(dup.createdBy), 'A mesma nota foi lançada')}`
+      : 'Nota já lançada em outro gasto.';
+  }
   const month = monthName(monthOf(launch.input.date));
   return launch.kind === 'series'
     ? `O mês de ${month} fechou antes de sincronizar. Lance a compra de novo pelo formulário, se precisar.`
     : `O mês de ${month} fechou antes de sincronizar. Relançado, entra no mês aberto, com a mesma data.`;
 }
 
-async function relaunch(launch: GuardedLaunch): Promise<void> {
+async function relaunch(launch: RejectedLaunch): Promise<void> {
   const uid = user.value?.uid;
   if (!group.value || !uid) return;
   // Mesmos dados; a competência sai do mês aberto (a data fica a original).
@@ -41,8 +52,13 @@ async function relaunch(launch: GuardedLaunch): Promise<void> {
   await forgetLaunch(launch.groupId, launch.expenseId);
 }
 
-function discard(launch: GuardedLaunch): void {
+function discard(launch: RejectedLaunch): void {
   void forgetLaunch(launch.groupId, launch.expenseId);
+}
+
+/** Abre o gasto que tem a nota; o aviso continua até ser descartado. */
+function openDuplicate(launch: RejectedLaunch): void {
+  if (launch.duplicateOf) void router.push({ name: 'gasto', params: { id: launch.duplicateOf.expenseId } });
 }
 </script>
 

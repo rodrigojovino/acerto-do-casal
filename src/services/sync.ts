@@ -29,12 +29,19 @@ export function trackWrite(write: Promise<unknown>, failMessage: string, onDenie
         onDenied();
         return;
       }
-      lastError.value =
-        code === 'permission-denied'
-          ? `${failMessage} O mês pode ter sido fechado ou o gasto mudou; se precisar, lance de novo com esses dados.`
-          : `${failMessage} Tente de novo.`;
+      lastError.value = code === 'permission-denied' ? deniedText(failMessage) : `${failMessage} Tente de novo.`;
     })
     .finally(() => inFlight.value--);
+}
+
+/** Texto padrão de uma gravação recusada pelas regras. */
+export function deniedText(failMessage: string): string {
+  return `${failMessage} O mês pode ter sido fechado ou o gasto mudou; se precisar, lance de novo com esses dados.`;
+}
+
+/** Aviso de gravação recusada com texto próprio (de quem trata a recusa em `onDenied`). */
+export function reportWriteError(text: string): void {
+  lastError.value = text;
 }
 
 export const isOnline = readonly(online);

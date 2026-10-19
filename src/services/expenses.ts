@@ -1,7 +1,6 @@
 import {
   Timestamp,
   collection,
-  deleteDoc,
   deleteField,
   doc,
   limit,
@@ -9,7 +8,6 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
   writeBatch,
@@ -39,7 +37,8 @@ import {
 } from './expenseData';
 import { db, storage } from './firebase';
 import { discardQueuedPhoto, queuePhoto, queuedPhotoUrl } from './photoQueue';
-import { trackWrite } from './sync';
+import { deniedText, reportWriteError, trackWrite } from './sync';
+import { applyFiscalKeyChange, serverUsedByOther } from './fiscalKeys';
 import { checkLaunchesSoon, forgetLaunch, rememberLaunch } from './launchGuard';
 
 export type { ExpenseInput, InstallmentChoice, ReceiptChoice, SeriesEditInput } from './expenseData';
@@ -89,6 +88,20 @@ const expensesCol = (groupId: string) => collection(db, 'groups', groupId, 'expe
 
 /** O comprovante escolhido tem foto: de recibo, ou da nota junto com a chave. */
 const choiceHasPhoto = (c: ReceiptChoice) => c.type === 'photo' || (c.type === 'nfce' && !!c.photo);
+
+/**
+ * Edição recusada pelas regras: se a nota escolhida já é de outro gasto (o
+ * aparelho ainda não sabia, ex.: lançada offline pelos dois), diz isso; senão,
+ * o aviso padrão.
+ */
+function onEditDenied(groupId: string, ownerId: string, receipt: ReceiptChoice, failMessage: string): () => void {
+  return () => {
+    void (async () => {
+      const used = receipt.type === 'nfce' ? await serverUsedByOther(groupId, receipt.nfceKey, ownerId) : null;
+      reportWriteError(used ? `${failMessage} Esta nota já foi lançada em outro gasto; a alteração não foi salva.` : deniedText(failMessage));
+    })();
+  };
+}
 
 
 function toExpense(snap: DocumentSnapshot): Expense {
@@ -189,11 +202,11 @@ export function createExpense(
   const competence = resolveCompetence(input.date, closedMonths, today);
   // Guardado no aparelho até o servidor confirmar (recusado: "Lançar no mês aberto").
   rememberLaunch({ groupId, expenseId: ref.id, kind: 'single', input, photo: choiceHasPhoto(input.receipt) ? photo : undefined });
-  trackWrite(
-    setDoc(ref, newExpenseData(input, uid, competence, ids, serverTimestamp())),
-    `Não foi possível salvar o gasto ${expenseLabel(input)}.`,
-    checkLaunchesSoon,
-  );
+  const data = newExpenseData(input, uid, competence, ids, serverTimestamp());
+  // Com nota fiscal, o registro da chave vai no mesmo lote (a mesma nota não entra duas vezes).
+  const batch = writeBatch(db).set(ref, data);
+  applyFiscalKeyChange(batch, groupId, ref.id, uid, undefined, data.receipt);
+  trackWrite(batch.commit(), `Não foi possível salvar o gasto ${expenseLabel(input)}.`, checkLaunchesSoon);
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, ref.id, photo);
   return { id: ref.id, competence };
 }
@@ -201,7 +214,7 @@ export function createExpense(
 /** Edita um gasto de quem lançou. Status pelo comprovante; descarta aprovação ou recusa anteriores. */
 export function updateExpense(
   groupId: string,
-  current: Pick<Expense, 'id' | 'receipt' | 'status'>,
+  current: Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy'>,
   input: ExpenseInput,
   closedMonths: ReadonlySet<Competence>,
   today: IsoDate,
@@ -209,13 +222,12 @@ export function updateExpense(
 ): WriteResult {
   const ids = { groupId, expenseId: current.id };
   const competence = resolveCompetence(input.date, closedMonths, today);
-  trackWrite(
-    updateDoc(
-      doc(expensesCol(groupId), current.id),
-      expenseUpdateData(input, competence, ids, current, serverTimestamp(), deleteField()),
-    ),
-    `Não foi possível salvar a alteração do gasto ${expenseLabel(input)}.`,
-  );
+  const data = expenseUpdateData(input, competence, ids, current, serverTimestamp(), deleteField());
+  // Chave trocada ou tirada: registra a nova e solta a antiga no mesmo lote.
+  const batch = writeBatch(db).update(doc(expensesCol(groupId), current.id), data);
+  applyFiscalKeyChange(batch, groupId, current.id, current.createdBy, current.receipt, data.receipt);
+  const failure = `Não foi possível salvar a alteração do gasto ${expenseLabel(input)}.`;
+  trackWrite(batch.commit(), failure, onEditDenied(groupId, current.id, input.receipt, failure));
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, current.id, photo);
   else if (!choiceHasPhoto(input.receipt)) void discardQueuedPhoto(groupId, current.id);
   return { id: current.id, competence };
@@ -234,7 +246,10 @@ export async function deleteExpense(groupId: string, expense: Pick<Expense, 'id'
     const timeout = new Promise((resolve) => setTimeout(resolve, 4000));
     await Promise.race([photo, timeout]);
   }
-  trackWrite(deleteDoc(doc(expensesCol(groupId), expense.id)), 'Não foi possível excluir o gasto.');
+  // Com nota fiscal, o registro sai junto (a nota fica livre para outro lançamento).
+  const batch = writeBatch(db).delete(doc(expensesCol(groupId), expense.id));
+  applyFiscalKeyChange(batch, groupId, expense.id, '', expense.receipt, undefined);
+  trackWrite(batch.commit(), 'Não foi possível excluir o gasto.');
 }
 
 /**
@@ -338,6 +353,8 @@ export function createInstallmentSeries(
   const parcels = newInstallmentSeriesData(input, choice, uid, { groupId, seriesId }, serverTimestamp());
   const batch = writeBatch(db);
   for (const p of parcels) batch.set(doc(expensesCol(groupId), p.id), p.data);
+  // Um registro da nota para a série inteira, apontando para a parcela 1.
+  applyFiscalKeyChange(batch, groupId, seriesId, uid, undefined, parcels[0].data.receipt);
   rememberLaunch({ groupId, expenseId: seriesId, kind: 'series', input, installment: choice });
   trackWrite(batch.commit(), `Não foi possível salvar a compra parcelada ${expenseLabel(input)}.`, checkLaunchesSoon);
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, seriesId, photo);
@@ -367,19 +384,24 @@ export function watchSeries(
 export function updateSeries(
   groupId: string,
   seriesId: string,
-  parcels: ReadonlyArray<Pick<Expense, 'id' | 'receipt' | 'status'>>,
+  parcels: ReadonlyArray<Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy'>>,
   input: SeriesEditInput,
   photo?: Blob,
 ): void {
   if (parcels.length === 0) return;
   const batch = writeBatch(db);
+  let after: StoredReceipt | undefined;
   for (const p of parcels) {
-    batch.update(
-      doc(expensesCol(groupId), p.id),
-      installmentUpdateData(input, p, { groupId, seriesId }, serverTimestamp(), deleteField()),
-    );
+    const data = installmentUpdateData(input, p, { groupId, seriesId }, serverTimestamp(), deleteField());
+    after = data.receipt;
+    batch.update(doc(expensesCol(groupId), p.id), data);
   }
-  trackWrite(batch.commit(), 'Não foi possível salvar a alteração da série.');
+  // O registro da nota é da parcela 1: só muda quando ela está entre as editadas
+  // (com a parcela 1 em mês fechado, a chave fica com a série e o formulário não a troca).
+  const withFirst = parcels.some((p) => p.id === seriesId);
+  applyFiscalKeyChange(batch, groupId, seriesId, parcels[0].createdBy, parcels[0].receipt, after, withFirst);
+  const failure = 'Não foi possível salvar a alteração da série.';
+  trackWrite(batch.commit(), failure, onEditDenied(groupId, seriesId, input.receipt, failure));
   if (choiceHasPhoto(input.receipt) && photo) void queuePhoto(groupId, seriesId, photo);
   else if (!choiceHasPhoto(input.receipt)) void discardQueuedPhoto(groupId, seriesId);
 }
@@ -404,6 +426,8 @@ export async function deleteSeries(
   }
   const batch = writeBatch(db);
   for (const p of parcels) batch.delete(doc(expensesCol(groupId), p.id));
+  // Com a parcela 1 excluída, a nota fica livre; se ela é de mês fechado, a chave fica com a série.
+  applyFiscalKeyChange(batch, groupId, seriesId, '', receipt, undefined, parcels.some((p) => p.id === seriesId));
   trackWrite(batch.commit(), 'Não foi possível excluir a compra parcelada.');
 }
 

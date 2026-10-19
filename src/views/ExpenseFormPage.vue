@@ -151,9 +151,15 @@
             ref="picker"
             v-model="receipt"
             :partner-name="partnerFirstName"
+            :allow-key="!keyLocked"
             @scanned="onScanned"
           />
-          <p v-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
+          <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
+          <div v-if="duplicate" class="alert-error duplicate" role="alert">
+            <p>{{ duplicateText }}</p>
+            <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
+          </div>
+          <p v-else-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
 
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
@@ -190,6 +196,7 @@ import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/spl
 import {
   createExpense,
   createInstallmentSeries,
+  receiptOwnerId,
   receiptPhotoUrl,
   updateExpense,
   updateSeries,
@@ -208,7 +215,8 @@ import {
 import { seriesTargets } from '@/services/series';
 import { MAX_NOTE } from '@/domain/notifications';
 import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, type ScannedNfce } from '@/services/nfce';
-import { debtView } from '@/services/expenseView';
+import { debtView, duplicateNoteText } from '@/services/expenseView';
+import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 
@@ -347,6 +355,8 @@ onIonViewDidEnter(() => {
 
 // ---- Chave lida ou digitada: pré-preenchimento (NFC-e de SP pela SEFAZ, online) ----
 async function onScanned(scanned: ScannedNfce): Promise<void> {
+  // Nota já lançada em outro gasto: só o aviso, sem preencher nada.
+  if (duplicate.value) return;
   // Pela chave (qualquer estado, sem rede): emitente (CNPJ) e mês de emissão.
   const doc = fiscalDocName(scanned.model);
   const provisional = `${doc} ${scanned.uf} · CNPJ ${formatCnpj(scanned.cnpj)}`;
@@ -408,6 +418,46 @@ async function fillIssuerName(scanned: ScannedNfce, provisional: string): Promis
   if (!name || receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if (description.value === provisional) description.value = name.slice(0, 80);
 }
+
+// ---- Nota fiscal já lançada em outro gasto ----
+/** O gasto em edição (numa série, a parcela 1), dono do registro da nota. */
+const ownerId = (): string | undefined => (editing ? receiptOwnerId(editing) : undefined);
+
+const duplicate = computed(() => {
+  const key = receipt.value.type === 'nfce' ? receipt.value.nfceKey : null;
+  // A nota que o gasto já tinha continua valendo (inclusive numa duplicata anterior ao registro).
+  if (editing?.receipt.type === 'nfce' && editing.receipt.nfceKey === key) return null;
+  return usedByOther(key, ownerId());
+});
+const duplicateExpense = ref<Expense | null>(null);
+let stopDuplicate: (() => void) | null = null;
+watch(
+  () => duplicate.value?.expenseId ?? null,
+  (id) => {
+    stopDuplicate?.();
+    stopDuplicate = null;
+    duplicateExpense.value = null;
+    if (!id || !group.value) return;
+    stopDuplicate = watchExpense(group.value.id, id, (e) => (duplicateExpense.value = e), () => undefined);
+  },
+);
+onBeforeUnmount(() => stopDuplicate?.());
+
+/** "Esta nota já foi lançada em 12/10/2026 por Bia: Mercado, R$ 200,00." */
+const duplicateText = computed(() => {
+  const e = duplicateExpense.value;
+  return e ? duplicateNoteText(e, firstNameOf(e.createdBy)) : 'Esta nota já foi lançada em outro gasto.';
+});
+
+function openDuplicate(): void {
+  if (duplicate.value) void router.push({ name: 'gasto', params: { id: duplicate.value.expenseId } });
+}
+
+/** Série com a parcela 1 em mês fechado: a chave é dela e não pode ser trocada. */
+const keyLocked = computed(() => {
+  const first = editingSeries.value ? editing?.installment?.firstMonth : undefined;
+  return !!first && closedMonths.value.has(first);
+});
 
 // ---- Limites de data ----
 const firstMonth = computed(() => {
@@ -526,7 +576,7 @@ const errors = computed(() => {
 // ---- Ações ----
 function save(): void {
   showErrors.value = true;
-  if (Object.keys(errors.value).length > 0 || !group.value || !competence.value) return;
+  if (Object.keys(errors.value).length > 0 || duplicate.value || !group.value || !competence.value) return;
 
   const input = {
     description: description.value,
@@ -621,6 +671,17 @@ textarea.note {
 
 .counter {
   text-align: right;
+}
+
+.duplicate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.duplicate p {
+  margin: 0;
 }
 
 .nfce-msg {

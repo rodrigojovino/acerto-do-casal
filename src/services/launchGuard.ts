@@ -4,6 +4,7 @@ import { readonly, ref, watch } from 'vue';
 import { launchState } from '@/domain/launches';
 import type { ExpenseInput, InstallmentChoice } from './expenseData';
 import { db } from './firebase';
+import { serverUsedByOther } from './fiscalKeys';
 import { group } from './session';
 import { isOnline } from './sync';
 
@@ -11,7 +12,9 @@ import { isOnline } from './sync';
  * Lançamentos novos guardados no aparelho (IndexedDB) até o servidor
  * confirmar. Se o mês fechou enquanto o gasto estava offline, as regras
  * recusam a gravação: o app mostra o gasto (descrição, valor, data) com
- * "Lançar no mês aberto". Sobrevive a fechar e reabrir o app.
+ * "Lançar no mês aberto". Se a recusa foi porque a nota fiscal já tinha sido
+ * lançada (pelo outro membro, por exemplo), mostra o gasto que tem a nota e
+ * não oferece relançar. Sobrevive a fechar e reabrir o app.
  */
 
 export interface GuardedLaunch {
@@ -29,7 +32,22 @@ export interface GuardedLaunch {
 const store = createStore('acerto-lancamentos', 'aguardando-servidor');
 const keyOf = (groupId: string, expenseId: string) => `${groupId}/${expenseId}`;
 
-const rejected = ref<GuardedLaunch[]>([]);
+/** Gasto que já tinha a nota fiscal do lançamento recusado. */
+export interface DuplicateOf {
+  expenseId: string;
+  description: string;
+  totalCents: number;
+  date: string;
+  createdBy: string;
+  installment?: { purchaseCents: number };
+}
+
+export interface RejectedLaunch extends GuardedLaunch {
+  /** Recusado por nota já lançada (sem relançar); ausente: mês fechado. */
+  duplicateOf?: DuplicateOf;
+}
+
+const rejected = ref<RejectedLaunch[]>([]);
 /** Lançamentos recusados pelas regras na sincronização (deste aparelho). */
 export const rejectedLaunches = readonly(rejected);
 
@@ -56,7 +74,7 @@ export function checkLaunches(): Promise<void> {
       const groupId = group.value?.id;
       if (!groupId) return;
       const all = (await entries<string, GuardedLaunch>(store).catch(() => [])).map(([, l]) => l).filter((l) => l.groupId === groupId);
-      const found: GuardedLaunch[] = [];
+      const found: RejectedLaunch[] = [];
       for (const launch of all) {
         const ref = doc(db, 'groups', groupId, 'expenses', launch.expenseId);
         let onServer: boolean | null = null;
@@ -64,7 +82,7 @@ export function checkLaunches(): Promise<void> {
         const cached = await getDocFromCache(ref).catch(() => null);
         const state = launchState({ onServer, pendingInCache: !!cached?.exists() && cached.metadata.hasPendingWrites });
         if (state === 'confirmed') await del(keyOf(groupId, launch.expenseId), store).catch(() => undefined);
-        else if (state === 'rejected') found.push(launch);
+        else if (state === 'rejected') found.push({ ...launch, duplicateOf: await duplicateOf(groupId, launch) });
       }
       rejected.value = found.sort((a, b) => a.savedAt - b.savedAt);
     } finally {
@@ -72,6 +90,28 @@ export function checkLaunches(): Promise<void> {
     }
   })();
   return checking;
+}
+
+/**
+ * Lançamento recusado com nota fiscal: o gasto que já tem a nota no servidor,
+ * se houver (senão a recusa foi pelo mês fechado).
+ */
+async function duplicateOf(groupId: string, launch: GuardedLaunch): Promise<DuplicateOf | undefined> {
+  const receipt = launch.input.receipt;
+  if (receipt.type !== 'nfce') return undefined;
+  const entry = await serverUsedByOther(groupId, receipt.nfceKey, launch.expenseId);
+  if (!entry) return undefined;
+  const snap = await getDocFromServer(doc(db, 'groups', groupId, 'expenses', entry.expenseId)).catch(() => null);
+  const d = snap?.data();
+  // Sem acesso ao gasto (excluído no meio do caminho): só o essencial.
+  return {
+    expenseId: entry.expenseId,
+    description: d?.description ?? 'outro gasto',
+    totalCents: d?.totalCents ?? 0,
+    date: d?.date ?? '',
+    createdBy: entry.createdBy,
+    installment: d?.installment,
+  };
 }
 
 /** Depois de uma recusa na sincronização: dá tempo ao cache de descartar a gravação. */

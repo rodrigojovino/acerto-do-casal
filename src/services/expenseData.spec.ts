@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closeBlockers } from '@/domain/closing';
-import { receiptData, type StoredReceipt } from './expenseData';
+import { fiscalKeyChange, receiptData, type StoredReceipt } from './expenseData';
 import { flagsFor, originLabel } from './expenseView';
 
 // Chaves fictícias (NF-e de MG, modelo 55): sem consulta, comprovante "unchecked".
@@ -36,5 +36,30 @@ describe('foto da nota junto com a chave', () => {
     expect(closeBlockers([{ status: 'confirmed', receipt }])).toEqual([{ kind: 'photo', count: 1 }]);
     expect(closeBlockers([{ status: 'confirmed', receipt: { ...receipt, photoUploaded: true } }])).toEqual([]);
     expect(originLabel({ status: 'confirmed', receipt }, () => '')).toBe('NF-e · chave lida · com foto');
+  });
+});
+
+describe('registro da nota fiscal (fiscalKeyChange)', () => {
+  const OTHER = '35' + '2'.repeat(18) + '65' + '4'.repeat(22);
+  const nfce = (nfceKey: string): StoredReceipt & { type: 'nfce' } => ({ type: 'nfce', nfceKey, entry: 'read', nfceStatus: 'unchecked' });
+  const none: StoredReceipt = { type: 'none' };
+
+  it('criar com chave registra; sem chave, nada', () => {
+    expect(fiscalKeyChange(undefined, nfce(KEY))).toEqual({ release: null, register: KEY });
+    expect(fiscalKeyChange(undefined, none)).toEqual({ release: null, register: null });
+  });
+
+  it('editar mantendo a chave (até só a foto) não mexe no registro', () => {
+    expect(fiscalKeyChange(nfce(KEY), { ...nfce(KEY), photoPath, photoUploaded: false })).toEqual({ release: null, register: null });
+  });
+
+  it('trocar a chave solta a antiga e registra a nova; tirar a chave só solta', () => {
+    expect(fiscalKeyChange(nfce(KEY), nfce(OTHER))).toEqual({ release: KEY, register: OTHER });
+    expect(fiscalKeyChange(nfce(KEY), none)).toEqual({ release: KEY, register: null });
+    expect(fiscalKeyChange(none, nfce(OTHER))).toEqual({ release: null, register: OTHER });
+  });
+
+  it('excluir solta a chave', () => {
+    expect(fiscalKeyChange(nfce(KEY), undefined)).toEqual({ release: KEY, register: null });
   });
 });

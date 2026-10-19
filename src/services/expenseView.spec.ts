@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense } from './expenses';
 import { authorStatus } from './expenseData';
-import { badgeFor, canContest, debtView, expenseLabel, originLabel, typeBadges, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
+import { badgeFor, canContest, debtView, duplicateNoteText, expenseLabel, originLabel, typeBadges, expenseSubtitle, flagsFor, isAutoConfirmed, splitLabel, tagFor } from './expenseView';
 
 const A = 'uid-a';
 const B = 'uid-b';
@@ -243,6 +243,21 @@ describe('expenseLabel', () => {
   it('descrição, valor e data no aviso de gravação recusada', () => {
     expect(expenseLabel({ description: ' Mercado ', totalCents: 5000, date: '2026-10-18' })).toMatch(
       /^“Mercado” \(R\$\s50,00, 18\/10\/2026\)$/,
+    );
+  });
+});
+
+describe('nota fiscal já lançada (duplicateNoteText)', () => {
+  it('data, quem lançou, descrição e valor', () => {
+    expect(duplicateNoteText({ description: 'Mercado ', totalCents: 20000, date: '2026-10-12' }, 'Bia')).toBe(
+      'Esta nota já foi lançada em 12/10/2026 por Bia: Mercado, R$ 200,00.',
+    );
+  });
+
+  it('a própria pessoa aparece como "você"; numa série, o total da compra', () => {
+    const parcel = { description: 'Geladeira', totalCents: 21400, date: '2026-10-05', installment: { purchaseCents: 214000 } };
+    expect(duplicateNoteText(parcel, 'Você', 'A mesma nota foi lançada')).toBe(
+      'A mesma nota foi lançada em 05/10/2026 por você: Geladeira, R$ 2.140,00.',
     );
   });
 });

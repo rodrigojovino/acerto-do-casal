@@ -2,8 +2,9 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router';
 import { initPush } from './services/push';
-// Itens das notas no cache local desde a abertura (a lista abre offline).
+// Itens das notas e notas já lançadas no cache local desde a abertura (abrem offline).
 import './services/nfceItems';
+import './services/fiscalKeys';
 
 import { IonicVue } from '@ionic/vue';
 

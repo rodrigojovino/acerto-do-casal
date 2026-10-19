@@ -195,6 +195,21 @@ export function typeBadges(
 }
 
 /**
+ * Nota fiscal já usada em outro gasto: "Esta nota já foi lançada em
+ * 12/10/2026 por Bia: Mercado, R$ 200,00." Numa série, o valor é o total da
+ * compra e a data, a da compra (parcela 1).
+ */
+export function duplicateNoteText(
+  other: Pick<Expense, 'description' | 'totalCents' | 'date'> & { installment?: { purchaseCents: number } },
+  byName: string,
+  lead = 'Esta nota já foi lançada',
+): string {
+  const who = byName === 'Você' ? 'você' : byName;
+  const value = other.installment?.purchaseCents ?? other.totalCents;
+  return `${lead} em ${formatDateBR(other.date)} por ${who}: ${other.description.trim()}, ${formatBRL(value)}.`;
+}
+
+/**
  * Identifica o gasto no aviso de gravação recusada (ex.: lançado offline num
  * mês fechado antes de sincronizar), para dar para relançar à mão:
  * "“Mercado” (R$ 50,00, 18/10/2026)".
