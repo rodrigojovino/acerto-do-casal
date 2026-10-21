@@ -1,6 +1,7 @@
 import './options.js';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { logger } from 'firebase-functions';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { fetchCnpjName, isValidCnpj, parseCnpjResponse, type CnpjName } from './cnpj.js';
 
@@ -38,7 +39,7 @@ export const lookupCnpj = onCall({ timeoutSeconds: 20 }, async (request): Promis
 
   const found: CnpjName | null = inEmulator()
     ? parseCnpjResponse(EMULATOR_RESPONSES[cnpj] ?? null)
-    : await fetchCnpjName(cnpj);
+    : await fetchCnpjName(cnpj, 8000, (reason) => logger.warn('BrasilAPI recusou a consulta do CNPJ', { reason }));
   // Só guarda o que achou: falha ou ausência pode ser tentada de novo depois.
   if (found) await cacheRef.set({ ...found, fetchedAt: FieldValue.serverTimestamp() });
   return { name: found?.name ?? null };

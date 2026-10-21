@@ -99,7 +99,35 @@
             </div>
           </div>
 
-          <div v-if="!isEdit" class="card installments">
+          <div class="field">
+            <label for="obs" class="label">Observação (opcional)</label>
+            <textarea
+              id="obs"
+              v-model="note"
+              class="input note"
+              rows="2"
+              :maxlength="MAX_NOTE"
+              placeholder="Ex.: churrasco do sábado, dividido com a família"
+            />
+            <p class="hint counter" aria-live="polite">{{ note.length }}/{{ MAX_NOTE }}</p>
+          </div>
+
+          <ReceiptPicker
+            ref="picker"
+            v-model="receipt"
+            :partner-name="partnerFirstName"
+            :allow-key="!keyLocked"
+            @scanned="onScanned"
+          />
+          <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
+          <div v-if="duplicate" class="alert-error duplicate" role="alert">
+            <p>{{ duplicateText }}</p>
+            <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
+          </div>
+          <p v-else-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
+
+          <!-- Depois do comprovante, em linha compacta: abre os campos só quando marcada -->
+          <div v-if="!isEdit" class="card installments" :class="{ open: installmentOn }">
             <label class="check">
               <input v-model="installmentOn" type="checkbox" />
               <span class="strong">Compra parcelada</span>
@@ -133,33 +161,6 @@
               <p class="hint">O comprovante da compra vale para todas as parcelas; sem ele, a série inteira vai para aprovação uma vez.</p>
             </template>
           </div>
-
-          <div class="field">
-            <label for="obs" class="label">Observação (opcional)</label>
-            <textarea
-              id="obs"
-              v-model="note"
-              class="input note"
-              rows="2"
-              :maxlength="MAX_NOTE"
-              placeholder="Ex.: churrasco do sábado, dividido com a família"
-            />
-            <p class="hint counter" aria-live="polite">{{ note.length }}/{{ MAX_NOTE }}</p>
-          </div>
-
-          <ReceiptPicker
-            ref="picker"
-            v-model="receipt"
-            :partner-name="partnerFirstName"
-            :allow-key="!keyLocked"
-            @scanned="onScanned"
-          />
-          <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
-          <div v-if="duplicate" class="alert-error duplicate" role="alert">
-            <p>{{ duplicateText }}</p>
-            <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
-          </div>
-          <p v-else-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
 
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
@@ -636,12 +637,23 @@ function goBack(): void {
 </script>
 
 <style scoped>
-.series-summary,
-.installments {
+.series-summary {
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Linha compacta (metade da altura de antes); marcada, abre os campos. */
+.installments {
+  padding: 3px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.installments.open {
+  padding: 8px 12px 12px;
 }
 
 .series-summary p {
@@ -652,12 +664,14 @@ function goBack(): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
+  min-height: 22px;
+  font-size: 14px;
 }
 
 .check input {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 textarea.note {

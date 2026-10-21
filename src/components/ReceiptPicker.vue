@@ -12,10 +12,15 @@
         class="option"
         :aria-pressed="modelValue.type === 'nfce' && modelValue.entry === 'read'"
         :disabled="busy"
+        aria-label="Ler QR Code ou código de barras"
         @click="scanQr"
       >
-        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2z" /></svg>
-        Ler QR ou<br />código de barras
+        <!-- Só os ícones na tela; o nome completo fica para leitores de tela -->
+        <span class="scan-icons" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2z" /></svg>
+          <span class="or">ou</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5v14M6 5v14M9.5 5v14M13 5v14M15.5 5v14M18.5 5v14M21 5v14" /></svg>
+        </span>
       </button>
       <button
         v-if="allowKey"
@@ -237,19 +242,29 @@ defineExpose({ scanQr });
 
 <style scoped>
 .options {
+  /* A letra dos botões acompanha a largura das colunas (unidade cqi). */
+  container-type: inline-size;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   grid-auto-flow: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .option {
+  min-width: 0;
   min-height: 64px;
+  padding: 2px;
   border-radius: var(--app-radius-control);
   border: 1px solid var(--app-border);
   background: var(--app-surface);
   font: inherit;
-  font-size: 12px;
+  /* Cabe nos quatro botões em qualquer largura: a maior palavra
+     ("comprovante", ~6,6 vezes o tamanho da letra) ocupa no máximo a coluna
+     menos o contorno; de 12px nas telas largas até 9px nas mais estreitas. */
+  font-size: clamp(9px, calc(((100cqi - 12px) / 4 - 8px) / 6.8), 12px);
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: break-word;
   font-weight: 700;
   color: #3f3f3b;
   display: flex;
@@ -258,6 +273,23 @@ defineExpose({ scanQr });
   justify-content: center;
   gap: 4px;
   cursor: pointer;
+}
+
+.scan-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.scan-icons svg {
+  width: clamp(14px, 5.2cqi, 20px);
+  height: clamp(14px, 5.2cqi, 20px);
+  flex: none;
+}
+
+.scan-icons .or {
+  font-weight: 600;
 }
 
 .option.dashed {

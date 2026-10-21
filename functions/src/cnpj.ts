@@ -7,6 +7,16 @@
 
 export const BRASIL_API_CNPJ = 'https://brasilapi.com.br/api/cnpj/v1/';
 
+/**
+ * Cabeçalhos da consulta. O Cloudflare da BrasilAPI recusa (403) o User-Agent
+ * padrão do `fetch` do Node: sem um User-Agent próprio, toda consulta voltava
+ * "não encontrado" e a descrição ficava com o CNPJ.
+ */
+export const BRASIL_API_HEADERS = {
+  'User-Agent': 'acerto-do-casal/1.0 (+https://github.com/rodrigojovino/acerto-do-casal)',
+  Accept: 'application/json',
+};
+
 /** CNPJ numérico de 14 dígitos com os dois dígitos verificadores certos. */
 export function isValidCnpj(cnpj: string): boolean {
   if (!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false;
@@ -45,14 +55,27 @@ export function parseCnpjResponse(json: unknown): CnpjName | null {
 
 /**
  * Consulta a BrasilAPI. `null` quando o CNPJ não existe ou a consulta falha:
- * a descrição fica com o CNPJ formatado.
+ * a descrição fica com o CNPJ formatado. `onFailure` recebe o motivo (status
+ * HTTP ou erro) de uma consulta recusada, para o log; 404 é só não encontrado.
  */
-export async function fetchCnpjName(cnpj: string, timeoutMs = 8000): Promise<CnpjName | null> {
+export async function fetchCnpjName(
+  cnpj: string,
+  timeoutMs = 8000,
+  onFailure?: (reason: string) => void,
+): Promise<CnpjName | null> {
   try {
-    const res = await fetch(BRASIL_API_CNPJ + cnpj, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return null;
+    const res = await fetch(BRASIL_API_CNPJ + cnpj, {
+      redirect: 'error',
+      headers: BRASIL_API_HEADERS,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      if (res.status !== 404) onFailure?.(`HTTP ${res.status}`);
+      return null;
+    }
     return parseCnpjResponse(await res.json());
-  } catch {
+  } catch (err) {
+    onFailure?.(err instanceof Error ? err.message : String(err));
     return null;
   }
 }

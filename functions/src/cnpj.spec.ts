@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isValidCnpj, parseCnpjResponse } from './cnpj';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BRASIL_API_CNPJ, fetchCnpjName, isValidCnpj, parseCnpjResponse } from './cnpj';
 
 // CNPJs e respostas fictícios (formato da BrasilAPI), nenhuma empresa real.
 
@@ -29,5 +29,30 @@ describe('parseCnpjResponse', () => {
     expect(parseCnpjResponse({ nome_fantasia: ' ', razao_social: '' })).toBeNull();
     expect(parseCnpjResponse(null)).toBeNull();
     expect(parseCnpjResponse('erro')).toBeNull();
+  });
+});
+
+describe('fetchCnpjName', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('manda User-Agent próprio (o Cloudflare da BrasilAPI recusa o padrão do Node)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ nome_fantasia: 'Mercado Teste' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await fetchCnpjName('11222333000181'))?.name).toBe('Mercado Teste');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${BRASIL_API_CNPJ}11222333000181`);
+    expect((init.headers as Record<string, string>)['User-Agent']).toMatch(/^acerto-do-casal\//);
+    expect(init.redirect).toBe('error');
+  });
+
+  it('recusa (403) vai para o log; não encontrado (404) não; os dois devolvem null', async () => {
+    const reasons: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Forbidden', { status: 403 })));
+    expect(await fetchCnpjName('11222333000181', 8000, (r) => reasons.push(r))).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    expect(await fetchCnpjName('11222333000181', 8000, (r) => reasons.push(r))).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new Error('rede fora'))));
+    expect(await fetchCnpjName('11222333000181', 8000, (r) => reasons.push(r))).toBeNull();
+    expect(reasons).toEqual(['HTTP 403', 'rede fora']);
   });
 });
