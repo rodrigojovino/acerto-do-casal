@@ -95,7 +95,8 @@
             Lançado por {{ creatorLabel }}{{ createdText }}.<br />
             <template v-if="expense.pendingWrite">Ainda não sincronizado: será enviado quando houver conexão.<br /></template>
             <template v-if="approvalText">{{ approvalText }}<br /></template>
-            Já conta no saldo do mês{{ expense.status === 'confirmed' ? '' : ', destacado como pendente' }}.
+            <template v-if="expense.status === 'awaiting_confirmation'">Ainda não conta no saldo: falta confirmar o valor deste mês.</template>
+            <template v-else>Já conta no saldo do mês{{ expense.status === 'confirmed' ? '' : ', destacado como pendente' }}.</template>
           </p>
 
           <div class="actions">

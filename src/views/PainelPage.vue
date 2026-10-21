@@ -122,7 +122,7 @@
           </li>
           <!-- Previsão de recorrentes (calculada, não gravada; fora do saldo) -->
           <li v-for="f in forecast" :key="`previsto-${f.recurringId}`">
-            <router-link class="item forecast" :to="{ name: 'recorrente', params: { id: f.recurringId } }">
+            <button type="button" class="item forecast" @click="openForecast(f)">
               <span class="avatar" aria-hidden="true">{{ initials(f.payerUid) }}</span>
               <span class="item-main">
                 <span class="item-name">{{ f.description }}</span>
@@ -135,7 +135,7 @@
                   <StatusBadge v-bind="FORECAST_BADGE" />
                 </span>
               </span>
-            </router-link>
+            </button>
           </li>
         </ul>
       </main>
@@ -147,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonFooter, IonPage, onIonViewWillEnter } from '@ionic/vue';
+import { IonContent, IonFooter, IonPage, alertController, onIonViewWillEnter } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
@@ -165,7 +165,8 @@ import { isOnline } from '@/services/sync';
 import { dismissPushInvite, enablePush, pushAskedBefore, pushPermission } from '@/services/push';
 import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
-import { forecastRecurring, forecastTotal } from '@/domain/recurrence';
+import { forecastRecurring, forecastTotal, type Forecast } from '@/domain/recurrence';
+import { forecastNotice } from '@/services/recurringView';
 import { watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -340,6 +341,24 @@ const forecast = computed(() => {
   return forecastRecurring(recurrings.value, month.value, today.value, generated);
 });
 const forecastFixedCents = computed(() => forecastTotal(forecast.value));
+
+/**
+ * Previsão não é gasto: o toque explica quando ele será gerado (e, no
+ * variável, onde informar o valor), com atalho para o cadastro.
+ */
+async function openForecast(f: Forecast): Promise<void> {
+  const alert = await alertController.create({
+    header: 'Previsto',
+    message: forecastNotice(f, myUid.value, firstNameOf),
+    buttons: [
+      { text: 'Fechar', role: 'cancel' },
+      { text: 'Ver cadastro', role: 'confirm' },
+    ],
+  });
+  await alert.present();
+  const { role } = await alert.onDidDismiss();
+  if (role === 'confirm') void router.push({ name: 'recorrente', params: { id: f.recurringId } });
+}
 
 // ---- Saldo e resumos: só funções de src/domain ----
 const balance = computed(() => (partnerUid.value ? monthBalance(expenses.value, members.value) : null));
@@ -608,6 +627,13 @@ li:last-child .item {
 }
 
 .item.forecast {
+  width: 100%;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(0, 0, 0, 0.025) 8px 16px);
 }
 
