@@ -32,6 +32,10 @@
   --app-radius-button: 14px;
   --app-radius-card: 18px;
 
+  /* Fonte da linha de dados das listas (quem pagou · data · divisão) e dos
+     selos de status e de tipo: um valor só, para mudarem juntos. */
+  --app-meta-font: 11px;
+
   --ion-font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
   --ion-background-color: var(--app-bg);
   --ion-background-color-rgb: 246, 246, 244;

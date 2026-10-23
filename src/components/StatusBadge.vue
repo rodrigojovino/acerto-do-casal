@@ -24,26 +24,27 @@ defineProps<{ kind: BadgeKind; label: string }>();
    foto do recibo (lilás claro, tracejado roxo) → recorrente aprovado (verde-azulado
    médio, contorno contínuo) → validado (verde escuro preenchido).
    Demais: pendente = âmbar claro; devolvido e a confirmar = médio. */
-/* Tamanho padronizado (~30% menor que antes), a mesma altura para todos,
-   inclusive os sem contorno (borda transparente), e a mesma do selo de tipo. */
+/* Tamanho padronizado: a fonte da linha de dados (--app-meta-font) e as
+   medidas em em, para manter a proporção se ela mudar. A mesma altura para
+   todos, inclusive os sem contorno (borda transparente), e a do selo de tipo. */
 .badge {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: 16px;
-  padding: 0 6px 0 4px;
+  gap: 0.3em;
+  height: 1.8em;
+  padding: 0 0.65em 0 0.45em;
   border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 8.5px;
+  font-size: var(--app-meta-font);
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
 
 .badge svg {
-  width: 9px;
-  height: 9px;
+  width: 1.05em;
+  height: 1.05em;
   flex: none;
 }
 

@@ -5,10 +5,12 @@
       <svg v-if="syncing" class="sync-icon" role="img" aria-label="Sincronizando" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
       {{ amount }}
     </span>
-    <span class="sub">{{ sub }}</span>
-    <span v-if="badge || types.length > 0" class="badges">
-      <TypeBadge v-for="t in types" :key="t" :label="t" />
-      <StatusBadge v-if="badge" v-bind="badge" />
+    <span class="meta">
+      <span class="sub">{{ sub }}</span>
+      <span v-if="badge || types.length > 0" class="badges">
+        <TypeBadge v-for="t in types" :key="t" :label="t" />
+        <StatusBadge v-if="badge" v-bind="badge" />
+      </span>
     </span>
     <span v-if="$slots.default" class="extra"><slot /></span>
   </span>
@@ -73,10 +75,24 @@ withDefaults(
   white-space: nowrap;
 }
 
-/* Linha de dados (quem pagou · data · divisão): menor que a descrição. */
+/* Segunda linha, na largura toda: dados à esquerda e selos à direita. Se não
+   couberem juntos (tela estreita, dois selos longos), os selos descem para a
+   linha de baixo, alinhados à direita; a descrição nunca é apertada por eles. */
+.meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px 12px;
+  min-width: 0;
+}
+
+/* Linha de dados (quem pagou · data · divisão): menor que a descrição; o mesmo tamanho dos selos. */
 .sub {
-  grid-column: 1;
-  font-size: 9px;
+  flex: 1 1 9em;
+  min-width: 0;
+  font-size: var(--app-meta-font);
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -84,9 +100,10 @@ withDefaults(
 }
 
 .badges {
-  grid-column: 2;
-  justify-self: end;
+  margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
 }

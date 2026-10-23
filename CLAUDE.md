@@ -43,7 +43,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Textos com o primeiro nome da outra pessoa ("Bia te deve", "Você deve para Bia"); nada de "Ela/Ele" nem crase que suponha gênero.
 - Gravações no Firestore não são aguardadas na tela (offline, a promessa só termina ao sincronizar): usar `trackWrite` (`src/services/sync.ts`) e seguir. Nada de transação no app.
 - Ionic mantém vivas as telas visitadas: cada tela fixa sua rota (`useRoute().name`, `params`) na criação. Ler a rota de forma reativa faz a tela reagir às rotas das outras e já quebrou a navegação.
-- Listas de gastos (Painel, Pendências, Detalhe do mês): componente `ExpenseRow`. À esquerda, descrição (uma linha, com reticências) e linha de dados menor; à direita, o valor e, embaixo, os selos alinhados à direita (status na ponta, tipo à esquerda). Selos de status e de tipo com a mesma altura (16px).
+- Listas de gastos (Painel, Pendências, Detalhe do mês): componente `ExpenseRow`. Primeira linha: descrição (uma linha, com reticências) e o valor à direita. Segunda linha: a linha de dados à esquerda e os selos à direita (status na ponta, tipo à esquerda); se não couberem juntos, os selos descem para a linha de baixo, alinhados à direita. A linha de dados e os selos (status e tipo) usam a mesma fonte, `--app-meta-font` (`src/theme/variables.css`, 11px), e os selos têm medidas em `em` (mesma altura para todos).
 - Áreas seguras: usar `--app-safe-top/-bottom/-left/-right` (`src/theme/variables.css`), nunca `env(safe-area-inset-*)` direto. Uma faixa fixa da cor da página cobre a barra de status (`.status-scrim` em `App.vue`), e as telas sem barra inferior reservam no mínimo 48px para a navegação do Android. No Android 15+ (edge-to-edge, obrigatório no Android 16) o `env()` pode vir zerado e a barra inferior já ficou atrás da navegação por 3 botões; o Capacitor injeta os valores reais (`SystemBars.insetsHandling: 'css'`).
 
 ## Repositório público: segurança
@@ -326,7 +326,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - Série de parcelas: o pedido vale para a série inteira (meses abertos). A chave da nota (`fiscalKeys`) só é liberada quando a exclusão é aprovada.
      - Mês fechado continua sem exclusão (precisa reabrir antes).
      - As regras do Firestore impedem a exclusão direta de gasto aprovado.
-     - Linha de dados da lista de gastos (quem pagou · data · divisão, `ExpenseRow`): fonte cerca de 20% maior que a atual (de 9px para ~11px).
+     - [x] Linha de dados e selos com a mesma fonte, cerca de 20% maior (`--app-meta-font`, 11px), num só lugar.
      - Visualizador de fotos (comprovantes de gasto, foto da nota e PIX), como a galeria do celular: abre com a foto inteira ajustada à tela; pinça com dois dedos aproxima e afasta centrada nos dedos (até ~5x); toque duplo alterna entre a foto inteira e ~2,5x no ponto tocado; arrastar alcança todas as bordas da foto, sem passar delas; fecha com ✕ e com o botão voltar do Android. Pode usar uma biblioteca de gestos consolidada. Testar com uma foto na vertical e uma na horizontal. Hoje o zoom não mostra a foto inteira e o arraste não alcança as bordas.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
