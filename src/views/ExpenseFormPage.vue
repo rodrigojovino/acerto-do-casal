@@ -22,15 +22,12 @@
 
           <div v-else class="card amount">
             <label for="valor" class="label">{{ installmentOn ? 'Valor total da compra' : 'Valor total' }}</label>
-            <input
+            <MoneyInput
               id="valor"
+              v-model="totalCents"
               class="amount-input num"
-              inputmode="numeric"
-              autocomplete="off"
-              :value="formatBRL(totalCents)"
               :aria-invalid="showErrors && !!errors.total"
               aria-describedby="valor-erro"
-              @input="onMoney($event, 'total')"
             />
             <p v-if="showErrors && errors.total" id="valor-erro" class="field-error">{{ errors.total }}</p>
           </div>
@@ -78,14 +75,11 @@
           <div class="grid-2">
             <div v-if="!editingSeries" class="field">
               <label for="pessoal" class="label">{{ personalLabel }}</label>
-              <input
+              <MoneyInput
                 id="pessoal"
+                v-model="personalCents"
                 class="input num"
-                inputmode="numeric"
-                autocomplete="off"
-                :value="formatBRL(personalCents)"
                 :aria-invalid="showErrors && !!errors.personal"
-                @input="onMoney($event, 'personal')"
               />
               <p v-if="showErrors && errors.personal" class="field-error">{{ errors.personal }}</p>
             </div>
@@ -191,7 +185,8 @@ import {
   resolveCompetence,
   todayInSaoPaulo,
 } from '@/domain/calendar';
-import { centsFromDigits, formatBRL } from '@/domain/money';
+import { formatBRL } from '@/domain/money';
+import MoneyInput from '@/components/MoneyInput.vue';
 import type { Members } from '@/domain/settlement';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
 import {
@@ -468,17 +463,7 @@ const firstMonth = computed(() => {
 const minDate = computed(() => firstDayOf(firstMonth.value));
 const maxDate = computed(() => lastAllowedDate(today.value));
 
-// ---- Valores ----
-function onMoney(event: Event, field: 'total' | 'personal'): void {
-  const input = event.target as HTMLInputElement;
-  const cents = centsFromDigits(input.value);
-  if (field === 'total') totalCents.value = cents;
-  else personalCents.value = cents;
-  // Reescreve já formatado e mantém o cursor no fim.
-  input.value = formatBRL(cents);
-  input.setSelectionRange(input.value.length, input.value.length);
-}
-
+// ---- Valores (campos MoneyInput, estilo app do banco) ----
 const personalLabel = computed(() =>
   payerUid.value === myUid.value ? 'Parte só minha' : `Parte só de ${partnerFirstName.value}`,
 );

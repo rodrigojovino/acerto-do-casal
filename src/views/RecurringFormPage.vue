@@ -89,7 +89,7 @@
           <div class="grid-2">
             <div v-if="kind === 'fixed'" class="field">
               <label for="valor" class="label">Valor</label>
-              <input id="valor" class="input num" inputmode="numeric" :value="formatBRL(amountCents)" :aria-invalid="showErrors && !!errors.amount" @input="onMoney" />
+              <MoneyInput id="valor" v-model="amountCents" class="input num" :aria-invalid="showErrors && !!errors.amount" />
               <p v-if="showErrors && errors.amount" class="field-error">{{ errors.amount }}</p>
             </div>
             <div class="field">
@@ -150,7 +150,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import StatusBadge from '@/components/StatusBadge.vue';
 import { monthLabel, monthOf, todayInSaoPaulo } from '@/domain/calendar';
-import { centsFromDigits, formatBRL } from '@/domain/money';
+import { formatBRL } from '@/domain/money';
+import MoneyInput from '@/components/MoneyInput.vue';
 import type { RecurringKind } from '@/domain/recurrence';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
 import type { RecurringTerms } from '@/domain/recurrence';
@@ -241,13 +242,6 @@ function step(direction: 1 | -1): void {
   payerSharePct.value = payerSharePctFromViewer(stepSplit(split.value.mine, direction), payerUid.value, myUid.value);
 }
 const viewerSplitOf = (r: RecurringDoc) => splitForViewer(r.payerSharePct, r.payerUid, myUid.value);
-
-function onMoney(event: Event): void {
-  const input = event.target as HTMLInputElement;
-  amountCents.value = centsFromDigits(input.value);
-  input.value = formatBRL(amountCents.value);
-  input.setSelectionRange(input.value.length, input.value.length);
-}
 
 function periodText(r: RecurringDoc): string {
   const from = monthLabel(r.startMonth).toLowerCase();
