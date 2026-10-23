@@ -122,6 +122,9 @@ jobs:
           mv "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
+      - name: Tamanho do APK
+        run: python3 scripts/ci/tamanho-apk.py "${{ steps.apk.outputs.path }}"
+
       - name: Publicar no Release
         env:
           GH_TOKEN: ${{ github.token }}

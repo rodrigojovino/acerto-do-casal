@@ -22,6 +22,16 @@ allprojects {
         google()
         mavenCentral()
     }
+    // Leitor de código: o app usa só o scan() do Google (Play Services, módulo
+    // barcode_ui baixado pelo Play). O plugin também traz o ML Kit embutido
+    // (libbarhopper, ~20 MB nas 4 arquiteturas, e os modelos) para o startScan(),
+    // que o app não usa. A versão fina tem a mesma interface, com o modelo vindo
+    // do Play Services.
+    configurations.configureEach {
+        resolutionStrategy.dependencySubstitution {
+            substitute module('com.google.mlkit:barcode-scanning') using module('com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1')
+        }
+    }
 }
 
 task clean(type: Delete) {

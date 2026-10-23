@@ -87,3 +87,6 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
+
+      - name: Tamanho do APK
+        run: python3 scripts/ci/tamanho-apk.py android/app/build/outputs/apk/debug/app-debug.apk
