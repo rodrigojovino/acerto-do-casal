@@ -11,9 +11,11 @@ A config web e o `google-services.json` são públicos por natureza; a proteçã
 | chave | onde está | quem usa |
 | --- | --- | --- |
 | **Browser key** (termina em `mVR0`) | `.env` / variáveis do GitHub (`VITE_FIREBASE_API_KEY`) | Firebase JS SDK: login (Auth), Firestore e Storage, **na web e dentro do app Android** (WebView com origem `https://localhost`) |
-| **Android key** (termina em `Ja4A`) | `android/app/google-services.json` | SDKs nativos: avisos (FCM, com Firebase Installations) |
+| **Android key** (termina em `Ja4A`) | `android/app/google-services.json` | SDKs nativos: avisos (FCM, com Firebase Installations) e o Firebase Auth nativo, que o plugin de login (`@capacitor-firebase/authentication`) inicializa mesmo com `skipNativeAuth` |
 
-As Functions callable (`lookupCnpj`, `closeMonth` etc.) não usam chave de API. O login Google no Android usa o cliente OAuth, não a chave.
+As Functions callable (`lookupCnpj`, `closeMonth` etc.) não usam chave de API. O login Google em si usa o cliente OAuth; a chave Android é usada pelo Firebase Auth nativo (Identity Toolkit e Token Service).
+
+**Aviso de "uso ativo" no console:** ao restringir as APIs de uma chave, o console avisa quando uma API que vai ficar de fora teve uso recente com aquela chave. Isso indica que o app está usando essa API: não confirme sem revisar. Mantenha a API na lista (ou entenda antes de onde vem o uso). Foi esse aviso que mostrou que a Android key também usa a Identity Toolkit, que faltava na primeira versão deste guia.
 
 ### Lista exata
 
@@ -33,9 +35,11 @@ As Functions callable (`lookupCnpj`, `closeMonth` etc.) não usam chave de API. 
 - Restrição de aplicativo: **Apps Android**
   - Nome do pacote: `io.github.rodrigojovino.acerto`
   - Impressão digital SHA-1: `44:13:82:B3:F0:5F:5B:74:41:CC:1A:20:A8:30:2F:95:16:03:71:D2` (a da assinatura do APK publicado, conferida no v0.7.4; é a mesma do `google-services.json`)
-- Restrição de API (**Restringir chave**), 2 APIs:
+- Restrição de API (**Restringir chave**), 4 APIs:
   - Firebase Installations API
   - FCM Registration API
+  - Identity Toolkit API
+  - Token Service API
 
 O APK de debug do CI tem outra assinatura e, com esta restrição, não recebe avisos. Não é usado no dia a dia; se precisar, acrescente o SHA-1 dele na mesma chave.
 
@@ -43,12 +47,12 @@ O APK de debug do CI tem outra assinatura e, com esta restrição, não recebe a
 
 1. Abra o [Google Cloud Console › APIs e serviços › Credenciais](https://console.cloud.google.com/apis/credentials?project=acerto-do-casal) e **confira no topo que o projeto é `acerto-do-casal`**.
 2. Em "Chaves de API", identifique as duas pelo final (botão "Mostrar chave"): `…mVR0` (Browser key, criada pelo Firebase) e `…Ja4A` (Android key).
-3. **Uma chave de cada vez, começando pela Android key** (só os avisos dependem dela):
+3. **Uma chave de cada vez, começando pela Android key** (os avisos e o Firebase Auth nativo dependem dela):
    1. Clique no nome da chave.
    2. Em "Restrições do aplicativo", escolha o tipo da lista acima e preencha (para Android: "Adicionar", pacote e SHA-1).
-   3. Em "Restrições da API", escolha "Restringir chave" e marque só as APIs da lista.
+   3. Em "Restrições da API", escolha "Restringir chave" e marque só as APIs da lista. Se o console avisar "uso ativo" de uma API que vai ficar de fora, pare e revise (veja o aviso acima) antes de salvar.
    4. Salve. A mudança leva até 5 minutos para valer.
-4. Teste a Android key no celular: saia da conta e entre de novo (o aparelho registra o token de novo), depois peça para a outra pessoa lançar um gasto e veja se o aviso chega.
+4. Teste a Android key no celular: saia da conta e entre de novo com o Google (o login usa o Auth nativo e o aparelho registra o token de novo), depois peça para a outra pessoa lançar um gasto e veja se o aviso chega.
 5. Repita o passo 3 para a Browser key e teste:
    - no celular: sair e entrar de novo com o Google, lançar um gasto com foto, abrir o Detalhe com a foto;
    - na web (https://acerto-do-casal.web.app): entrar com o Google (popup) e abrir o Painel.
