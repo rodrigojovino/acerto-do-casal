@@ -32,25 +32,12 @@
     </li>
   </ul>
 
-  <!-- Foto ampliada: toque para aproximar e afastar (como no Detalhe do gasto) -->
-  <ion-modal :is-open="!!zoomUrl" @did-dismiss="closeZoom">
-    <div class="zoom">
-      <div class="zoom-head">
-        <span class="strong">Comprovante do PIX</span>
-        <button class="icon-btn light" type="button" aria-label="Fechar" @click="closeZoom">
-          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-      </div>
-      <div class="zoom-body">
-        <img v-if="zoomUrl" :src="zoomUrl" alt="Comprovante do PIX ampliado" :class="{ big: zoomed }" @click="zoomed = !zoomed" />
-      </div>
-      <p class="zoom-hint">Toque na foto para {{ zoomed ? 'afastar' : 'aproximar' }}</p>
-    </div>
-  </ion-modal>
+  <!-- Foto ampliada, com pinça, toque duplo e arraste até as bordas (como no Detalhe do gasto) -->
+  <PhotoViewer :url="zoomUrl" title="Comprovante do PIX" alt="Comprovante do PIX ampliado" @close="zoomUrl = null" />
 </template>
 
 <script setup lang="ts">
-import { IonModal } from '@ionic/vue';
+import PhotoViewer from './PhotoViewer.vue';
 import { reactive, ref, watch } from 'vue';
 import type { Transfer } from '@/domain/settlement';
 import { formatBRL } from '@/domain/money';
@@ -85,11 +72,6 @@ watch(
 );
 
 const zoomUrl = ref<string | null>(null);
-const zoomed = ref(false);
-function closeZoom(): void {
-  zoomUrl.value = null;
-  zoomed.value = false;
-}
 
 const name = (uid: string, lower = false) => {
   if (uid === props.viewerUid) return lower ? 'você' : 'Você';
@@ -189,53 +171,8 @@ const dateTime = (d: Date) => fmt.format(d).replace(', ', ' às ');
   font-weight: 700;
 }
 
-.zoom {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #111;
-  color: #fff;
-  padding-top: var(--app-safe-top);
-  padding-bottom: var(--app-safe-bottom);
-}
-
-.zoom-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 8px 8px 16px;
-}
-
 .icon-btn.light {
   color: #fff;
 }
 
-.zoom-body {
-  flex: 1;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.zoom-body img {
-  max-width: 100%;
-  max-height: 100%;
-  cursor: zoom-in;
-}
-
-.zoom-body img.big {
-  max-width: none;
-  max-height: none;
-  width: 250%;
-  cursor: zoom-out;
-}
-
-.zoom-hint {
-  margin: 0;
-  padding: 10px;
-  text-align: center;
-  font-size: 12px;
-  color: #c9c8c2;
-}
 </style>

@@ -185,27 +185,8 @@
         />
       </ion-modal>
 
-      <!-- Foto ampliada: toque para aproximar e afastar -->
-      <ion-modal :is-open="zoomOpen" @did-dismiss="zoomOpen = false">
-        <div class="zoom">
-          <div class="zoom-head">
-            <span class="strong">Comprovante</span>
-            <button class="icon-btn light" type="button" aria-label="Fechar" @click="zoomOpen = false">
-              <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-          </div>
-          <div class="zoom-body">
-            <img
-              v-if="photoUrl"
-              :src="photoUrl"
-              alt="Foto do comprovante ampliada"
-              :class="{ big: zoomed }"
-              @click="zoomed = !zoomed"
-            />
-          </div>
-          <p class="zoom-hint">Toque na foto para {{ zoomed ? 'afastar' : 'aproximar' }}</p>
-        </div>
-      </ion-modal>
+      <!-- Foto ampliada, com pinça, toque duplo e arraste até as bordas -->
+      <PhotoViewer :url="zoomOpen ? photoUrl : null" title="Comprovante" alt="Foto do comprovante ampliada" @close="zoomOpen = false" />
     </ion-content>
   </ion-page>
 </template>
@@ -235,6 +216,7 @@ import { seriesTargets, type SeriesAction } from '@/services/series';
 import { installmentSummary } from '@/domain/installments';
 import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
+import PhotoViewer from '@/components/PhotoViewer.vue';
 import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
 import { nfceItemsByKey } from '@/services/nfceItems';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -345,7 +327,6 @@ function actionVerb(verb: string): string {
 // ---- Foto ----
 const photoUrl = ref<string | null>(null);
 const zoomOpen = ref(false);
-const zoomed = ref(false);
 const photoQueuedHere = computed(() => pendingPhotoIds.value.has(expense.value?.installment?.seriesId ?? expenseId));
 
 watch(
@@ -815,53 +796,8 @@ function goBack(): void {
   font-size: 14px;
 }
 
-.zoom {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #111;
-  color: #fff;
-  padding-top: var(--app-safe-top);
-  padding-bottom: var(--app-safe-bottom);
-}
-
-.zoom-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 8px 8px 16px;
-}
-
 .icon-btn.light {
   color: #fff;
 }
 
-.zoom-body {
-  flex: 1;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.zoom-body img {
-  max-width: 100%;
-  max-height: 100%;
-  cursor: zoom-in;
-}
-
-.zoom-body img.big {
-  max-width: none;
-  max-height: none;
-  width: 250%;
-  cursor: zoom-out;
-}
-
-.zoom-hint {
-  margin: 0;
-  padding: 10px;
-  text-align: center;
-  font-size: 12px;
-  color: #c9c8c2;
-}
 </style>
