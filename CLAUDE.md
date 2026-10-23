@@ -311,7 +311,8 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - [ ] Limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline). Herdada da Fase 4.
      - [ ] Reduzir o tamanho do APK (de ~6 MB para ~32 MB com a leitura de QR): avaliar o modelo de QR via Google Play Services em vez do embutido no APK. Herdada da Fase 4.
      - [ ] Restringir as chaves de API do Firebase (Android e web) no Google Cloud Console. Configuração do Rodrigo, passo a passo e lista exata em `docs/bloco-e-consoles.md`: a Browser key é usada também pelo app Android (Firebase JS no WebView, origem `https://localhost`), e a Android key só pelos SDKs nativos (avisos).
-     - [ ] Proteger as tags `v*` no GitHub com Rulesets: só o dono cria, ninguém move nem apaga (dois rulesets). Configuração do Rodrigo, passo a passo em `docs/bloco-e-consoles.md`.
+     - [ ] Proteger as tags `v*` no GitHub com Rulesets: só o dono (admin) cria e apaga; ninguém altera uma tag existente (dois rulesets). Configuração do Rodrigo, passo a passo em `docs/bloco-e-consoles.md`.
+     - [ ] Backups agendados do Firestore (recomendado: diário com retenção de 14 dias), pelo comando ou pelo console, e como restaurar (sempre num banco novo, nunca por cima do `(default)`): `docs/bloco-e-consoles.md`. Comandos de backup e de restauração só com confirmação explícita do Rodrigo.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.

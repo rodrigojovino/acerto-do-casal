@@ -56,27 +56,77 @@ O APK de debug do CI tem outra assinatura e, com esta restrição, não recebe a
 
 ## 2. Proteger as tags `v*` no GitHub
 
-A tag `vX.Y.Z` dispara o `release.yml`, que gera e publica o APK assinado. A proteção garante que só o dono cria tags de versão e que ninguém (nem o dono) move ou apaga uma tag publicada. O `release.yml` não cria tags (só publica o Release de uma tag existente), então não precisa de exceção.
+A tag `vX.Y.Z` dispara o `release.yml`, que gera e publica o APK assinado. A proteção garante que só o dono (admin) cria e apaga tags de versão, e que ninguém, nem o dono, altera (move para outro commit) uma tag existente. O `release.yml` não cria tags (só publica o Release de uma tag existente), então não precisa de exceção.
 
-São **dois rulesets**, porque a exceção do dono (bypass) vale para todas as regras do mesmo ruleset: num só, o dono também conseguiria mover e apagar.
+São **dois rulesets**, porque a exceção do dono (bypass) vale para todas as regras do mesmo ruleset: num só, o dono também conseguiria mover uma tag.
 
 ### Passo a passo
 
 1. No repositório `rodrigojovino/acerto-do-casal`: **Settings › Rules › Rulesets › New ruleset › New tag ruleset**.
-2. **Ruleset 1: "Criar tags de versão"**
-   - Ruleset name: `Criar tags de versão`
+2. **Ruleset 1: "Criar e apagar tags de versão"** (só o admin)
+   - Ruleset name: `Criar e apagar tags de versão`
    - Enforcement status: **Active**
    - Bypass list: **Add bypass › Repository admin**, com "Always allow"
    - Target tags: **Add target › Include by pattern** › `v*`
-   - Rules: marque só **Restrict creations**
+   - Rules: marque **Restrict creations** e **Restrict deletions**
    - **Create**
-3. **Ruleset 2: "Tags de versão imutáveis"**
+3. **Ruleset 2: "Tags de versão imutáveis"** (ninguém altera)
    - Ruleset name: `Tags de versão imutáveis`
    - Enforcement status: **Active**
    - Bypass list: **vazia** (ninguém)
    - Target tags: **Include by pattern** › `v*`
-   - Rules: marque **Restrict updates** e **Restrict deletions**
+   - Rules: marque só **Restrict updates**
    - **Create**
 4. Confira em Settings › Rules › Rulesets que os dois aparecem como **Active** com o alvo `v*`.
 
 Na próxima versão (v0.7.5 ou seguinte), a criação e o envio da tag continuam como sempre; se o GitHub recusar o push da tag, me avise antes de mudar qualquer ruleset.
+
+## 3. Backups agendados do Firestore
+
+O banco `(default)` (`southamerica-east1`) não tem nenhum agendamento de backup hoje (conferido com `firestore:backups:schedules:list`). A proteção contra exclusão impede apagar o banco, mas não protege contra dados apagados ou estragados por engano.
+
+### Recomendação: diário, com retenção de 14 dias
+
+- Cada banco aceita um agendamento diário e um semanal; a retenção vai até 14 semanas. O horário do backup não é escolhido (o Google define).
+- O banco é pequeno: o custo do armazenamento dos backups fica em centavos por mês (plano Blaze, que o projeto já usa por causa das Functions). Restaurar é cobrado pelo tamanho do backup.
+- Diário com 14 dias perde no máximo um dia de lançamentos e cobre um erro percebido até duas semanas depois. O semanal com 8 semanas cobre mais tempo, mas pode perder até uma semana. Se quiser os dois, dá para ter ambos ao mesmo tempo.
+- O backup é só do Firestore. As fotos ficam no Storage, que guarda arquivos apagados por 7 dias (soft delete, já ativo no bucket).
+
+### Ativar (comando, com sua confirmação)
+
+Eu executo, com o projeto explícito:
+
+```
+firebase firestore:backups:schedules:create --database "(default)" --recurrence DAILY --retention 14d --project acerto-do-casal
+```
+
+Semanal (se preferir, ou além do diário):
+
+```
+firebase firestore:backups:schedules:create --database "(default)" --recurrence WEEKLY --day-of-week SUNDAY --retention 8w --project acerto-do-casal
+```
+
+Conferir: `firebase firestore:backups:schedules:list --database "(default)" --project acerto-do-casal`. O primeiro backup aparece em até 24 horas: `firebase firestore:backups:list --project acerto-do-casal`.
+
+### Ativar pelo console (alternativa)
+
+1. [Console do Google Cloud › Firestore › Recuperação de desastres](https://console.cloud.google.com/firestore/databases/-default-/disaster-recovery?project=acerto-do-casal), conferindo que o projeto é `acerto-do-casal` e o banco é `(default)`.
+2. "Criar agendamento de backup" › Diário › retenção de 14 dias › Criar.
+3. A lista de backups aparece na mesma página depois da primeira execução.
+
+### Restaurar, se precisar
+
+Um backup **nunca sobrescreve** o banco em uso: a restauração cria um banco novo, na mesma região, com os dados daquele dia. O app continua no `(default)` durante todo o processo.
+
+1. Listar os backups e escolher o do dia anterior ao problema:
+   `firebase firestore:backups:list --project acerto-do-casal`
+2. Restaurar num banco novo (o nome indica a data):
+   `firebase firestore:databases:restore --database restauracao-AAAAMMDD --backup "projects/acerto-do-casal/locations/southamerica-east1/backups/ID_DO_BACKUP" --project acerto-do-casal`
+3. Conferir os dados no console (Firestore › escolher o banco `restauracao-AAAAMMDD`).
+4. Trazer de volta só o que se perdeu: eu escrevo um script de cópia do banco restaurado para o `(default)` (simulação primeiro, com contagens, e gravação só com sua confirmação), porque copiar tudo por cima desfaria o que foi lançado depois do backup.
+5. Apagar o banco de restauração depois, para não pagar o armazenamento dele:
+   `firebase firestore:databases:delete restauracao-AAAAMMDD --project acerto-do-casal`
+
+Último recurso, se o `(default)` inteiro se perdesse: apontar o app para o banco restaurado (o id do banco na configuração do Firebase do app e das Functions, e as regras e índices publicados nele). Exige uma versão nova do app; antes disso, o caminho é sempre o passo 4.
+
+Comandos de backup e de restauração, como os de deploy, só com sua confirmação explícita.

@@ -16,7 +16,31 @@
       "PowerShell(git tag*)",
       "PowerShell(git push* v*)",
       "PowerShell(git push*--tags*)",
-      "PowerShell(git push*--follow-tags*)"
+      "PowerShell(git push*--follow-tags*)",
+      "Bash(firebase firestore:backups:schedules:create*)",
+      "Bash(firebase firestore:backups:schedules:update*)",
+      "Bash(firebase firestore:backups:schedules:delete*)",
+      "Bash(firebase firestore:backups:delete*)",
+      "Bash(firebase firestore:databases:restore*)",
+      "Bash(firebase firestore:databases:delete*)",
+      "Bash(npx firebase firestore:backups:schedules:create*)",
+      "Bash(npx firebase firestore:backups:schedules:update*)",
+      "Bash(npx firebase firestore:backups:schedules:delete*)",
+      "Bash(npx firebase firestore:backups:delete*)",
+      "Bash(npx firebase firestore:databases:restore*)",
+      "Bash(npx firebase firestore:databases:delete*)",
+      "PowerShell(firebase firestore:backups:schedules:create*)",
+      "PowerShell(firebase firestore:backups:schedules:update*)",
+      "PowerShell(firebase firestore:backups:schedules:delete*)",
+      "PowerShell(firebase firestore:backups:delete*)",
+      "PowerShell(firebase firestore:databases:restore*)",
+      "PowerShell(firebase firestore:databases:delete*)",
+      "PowerShell(npx firebase firestore:backups:schedules:create*)",
+      "PowerShell(npx firebase firestore:backups:schedules:update*)",
+      "PowerShell(npx firebase firestore:backups:schedules:delete*)",
+      "PowerShell(npx firebase firestore:backups:delete*)",
+      "PowerShell(npx firebase firestore:databases:restore*)",
+      "PowerShell(npx firebase firestore:databases:delete*)"
     ]
   }
 }
