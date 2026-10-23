@@ -41,6 +41,18 @@
             <p v-if="toApprove.length === 0" class="empty">Nada para aprovar agora.</p>
           </section>
 
+          <!-- 1b. Pedidos de exclusão do outro (gastos já confirmados): só aparece quando há -->
+          <section v-if="deletionToAnswer.length > 0" class="section" aria-labelledby="sec-exclusao">
+            <h2 id="sec-exclusao" class="title warn">Exclusão para aprovar · {{ deletionToAnswer.length }}</h2>
+            <router-link v-for="e in deletionToAnswer" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
+              <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :badge="badgeFor(e, myUid)" :types="e.installment ? [seriesLabel(e)] : []">
+                <span class="line">{{ firstNameOf(e.createdBy) }} pediu para excluir{{ e.deletionRequest?.reason ? `: “${e.deletionRequest.reason}”` : '' }}</span>
+                <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
+              </ExpenseRow>
+              <span aria-hidden="true" class="chev">›</span>
+            </router-link>
+          </section>
+
           <!-- 2. Aguardando o outro aprovar -->
           <section class="section" aria-labelledby="sec-aguardando">
             <h2 id="sec-aguardando" class="title">Aguardando {{ partnerFirstName }} aprovar · {{ waiting.length }}</h2>
@@ -57,6 +69,17 @@
               </router-link>
             </div>
             <p v-if="waiting.length === 0" class="empty">Nenhum gasto seu esperando aprovação.</p>
+          </section>
+
+          <!-- 2b. Meus pedidos de exclusão aguardando o outro (cancelar no Detalhe) -->
+          <section v-if="deletionWaiting.length > 0" class="section" aria-labelledby="sec-exclusao-aguardando">
+            <h2 id="sec-exclusao-aguardando" class="title">Aguardando {{ partnerFirstName }} aprovar a exclusão · {{ deletionWaiting.length }}</h2>
+            <router-link v-for="e in deletionWaiting" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
+              <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :badge="badgeFor(e, myUid)" :types="e.installment ? [seriesLabel(e)] : []">
+                <span class="line">Toque para ver ou cancelar o pedido</span>
+              </ExpenseRow>
+              <span aria-hidden="true" class="chev">›</span>
+            </router-link>
           </section>
 
           <!-- 3. Devolvidos para você corrigir -->
@@ -170,15 +193,20 @@ watch(
 onBeforeUnmount(() => stop?.());
 
 // Compra parcelada: uma linha por série (as ações valem para a série inteira).
+// Com pedido de exclusão aberto, o gasto aparece só nas seções do pedido.
+const hasOpenRequest = (e: Expense) => e.deletionRequest?.status === 'pending';
+const open = computed(() => items.value.filter((e) => !hasOpenRequest(e)));
 const toApprove = computed(() =>
-  collapseSeries(items.value.filter((e) => e.status === 'pending_approval' && e.createdBy !== myUid.value)),
+  collapseSeries(open.value.filter((e) => e.status === 'pending_approval' && e.createdBy !== myUid.value)),
 );
 const waiting = computed(() =>
-  collapseSeries(items.value.filter((e) => e.status === 'pending_approval' && e.createdBy === myUid.value)),
+  collapseSeries(open.value.filter((e) => e.status === 'pending_approval' && e.createdBy === myUid.value)),
 );
 const returned = computed(() =>
-  collapseSeries(items.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value)),
+  collapseSeries(open.value.filter((e) => e.status === 'returned' && e.createdBy === myUid.value)),
 );
+const deletionToAnswer = computed(() => collapseSeries(items.value.filter((e) => hasOpenRequest(e) && e.createdBy !== myUid.value)));
+const deletionWaiting = computed(() => collapseSeries(items.value.filter((e) => hasOpenRequest(e) && e.createdBy === myUid.value)));
 
 /** "10x de R$ 214,00 · out/2026 a jul/2027". */
 function seriesLine(e: Expense): string {
@@ -194,7 +222,7 @@ function seriesLabel(e: Expense & { seriesSize?: number }): string {
   return (e.seriesSize ?? 1) > 1 ? `${e.seriesSize} parcelas` : `Parcela ${e.installment.index}/${e.installment.count}`;
 }
 const toConfirm = computed(() =>
-  items.value.filter((e) => e.status === 'awaiting_confirmation' && e.createdBy === myUid.value),
+  open.value.filter((e) => e.status === 'awaiting_confirmation' && e.createdBy === myUid.value),
 );
 
 // Cadastros de contas recorrentes (fixos) aguardando aprovação.

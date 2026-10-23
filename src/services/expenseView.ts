@@ -106,14 +106,17 @@ export function debtView(
 }
 
 /** Tipos de selo de status (cor + ícone + texto). */
-export type BadgeKind = 'pending' | 'auto' | 'photo' | 'recurring' | 'validated' | 'returned' | 'awaiting' | 'forecast';
+export type BadgeKind = 'pending' | 'auto' | 'photo' | 'recurring' | 'validated' | 'returned' | 'awaiting' | 'forecast' | 'deletion';
 
 export interface Badge {
   kind: BadgeKind;
   label: string;
 }
 
-type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt'> & { recurringId?: string };
+type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt'> & {
+  recurringId?: string;
+  deletionRequest?: { status: string };
+};
 
 /**
  * Selo do confirmado automático, pela origem: QR (qualquer estado) = Automático;
@@ -133,6 +136,8 @@ function autoBadge(expense: Pick<BadgeSource, 'approval' | 'receipt' | 'recurrin
  * devolvido diz se foi contestado ou recusado.
  */
 export function badgeFor(expense: BadgeSource, viewerUid: string, detailed = false): Badge {
+  // Pedido de exclusão aberto: o selo diz isso, qualquer que seja o status.
+  if (expense.deletionRequest?.status === 'pending') return { kind: 'deletion', label: 'Exclusão pedida' };
   switch (expense.status) {
     case 'pending_approval':
       return { kind: 'pending', label: expense.createdBy === viewerUid ? 'Pendente' : 'Aprovar' };

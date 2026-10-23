@@ -215,3 +215,57 @@ describe('actionCount e countLabel', () => {
     expect(countLabel(10)).toBe('9+');
   });
 });
+
+describe('pedido de exclusão: avisos e contador', () => {
+  const confirmed = expense({ status: 'confirmed', approval: { byUid: B } });
+  const pending = { byUid: A, status: 'pending' };
+
+  it('pedido aberto: avisa o outro, com o motivo', () => {
+    const [n] = expenseNotices(confirmed, { ...confirmed, deletionRequest: { ...pending, reason: 'lancei em dobro' } }, 'g1', ctx);
+    expect(n).toMatchObject({ toUid: B, category: 'expenses', title: 'Exclusão para aprovar', route: '/gasto/g1' });
+    expect(brl(n.body)).toBe('Ana pediu para excluir Mercado · R$ 214,00 — “lancei em dobro”');
+  });
+
+  it('pedir de novo depois de uma recusa também avisa; cancelar não avisa', () => {
+    const denied = { ...pending, status: 'denied', answeredBy: B };
+    expect(expenseNotices({ ...confirmed, deletionRequest: denied }, { ...confirmed, deletionRequest: pending }, 'g1', ctx)).toHaveLength(1);
+    expect(expenseNotices({ ...confirmed, deletionRequest: pending }, { ...confirmed, deletionRequest: null }, 'g1', ctx)).toEqual([]);
+  });
+
+  it('recusa: avisa quem pediu', () => {
+    const [n] = expenseNotices(
+      { ...confirmed, deletionRequest: pending },
+      { ...confirmed, deletionRequest: { ...pending, status: 'denied', answeredBy: B } },
+      'g1',
+      ctx,
+    );
+    expect(n).toMatchObject({ toUid: A, title: 'Exclusão recusada' });
+    expect(n.body).toBe('Bia recusou excluir Mercado: o gasto continua no saldo');
+  });
+
+  it('aprovação (o gasto some com pedido aberto): avisa quem pediu; exclusão direta não avisa', () => {
+    const [n] = expenseNotices({ ...confirmed, deletionRequest: pending }, null, 'g1', ctx);
+    expect(n).toMatchObject({ toUid: A, title: 'Exclusão aprovada', route: '/painel' });
+    expect(brl(n.body)).toBe('Bia aprovou a exclusão de Mercado · R$ 214,00');
+    expect(expenseNotices(expense(), null, 'g1', ctx)).toEqual([]);
+  });
+
+  it('série: um aviso por lote (chave da série)', () => {
+    const parcel = { ...confirmed, installment: { seriesId: 's1', index: 2, count: 3, firstMonth: '2026-10', purchaseCents: 64200 } };
+    expect(expenseNotices(parcel, { ...parcel, deletionRequest: pending }, 'p2', ctx)[0].dedupeKey).toBe('s1:deletion-request');
+    expect(expenseNotices({ ...parcel, deletionRequest: pending }, null, 'p2', ctx)[0].dedupeKey).toBe('s1:deleted');
+  });
+
+  it('contador: o pedido aberto conta para o outro membro (série conta 1), não para quem pediu', () => {
+    const base = { recurrings: [], months: [] };
+    const items = [
+      { id: 'e1', status: 'confirmed' as const, createdBy: A, deletionRequest: pending },
+      { id: 's1', status: 'confirmed' as const, createdBy: A, installment: { seriesId: 's1' }, deletionRequest: pending },
+      { id: 's1-2', status: 'confirmed' as const, createdBy: A, installment: { seriesId: 's1' }, deletionRequest: pending },
+      // Pendente já confirmado antes, com pedido aberto: conta só como exclusão.
+      { id: 'e2', status: 'pending_approval' as const, createdBy: A, deletionRequest: pending },
+    ];
+    expect(actionCount({ viewerUid: B, expenses: items, ...base })).toBe(3);
+    expect(actionCount({ viewerUid: A, expenses: items, ...base })).toBe(0);
+  });
+});

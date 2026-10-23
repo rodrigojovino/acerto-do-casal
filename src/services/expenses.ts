@@ -12,6 +12,7 @@ import {
   where,
   writeBatch,
   type DocumentSnapshot,
+  type Query,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { resolveCompetence, type IsoDate } from '@/domain/calendar';
@@ -23,6 +24,9 @@ import { receiptHasPhoto, receiptPhotoPath } from '@/domain/image';
 import {
   approvalData,
   contestData,
+  deletionCancelData,
+  deletionDenialData,
+  deletionRequestData,
   expenseUpdateData,
   installmentUpdateData,
   newExpenseData,
@@ -75,8 +79,21 @@ export interface Expense extends SettlementExpense {
   installment?: InstallmentInfo;
   /** Observação opcional de quem lançou (numa série, a mesma em todas as parcelas). */
   note?: string;
+  /** Já foi confirmado uma vez (marca permanente): só sai pelo pedido de exclusão. */
+  everConfirmed?: boolean;
+  /** Pedido de exclusão de quem lançou: aberto (o outro aprova ou recusa) ou recusado. */
+  deletionRequest?: DeletionRequest;
   /** Gravado no aparelho e ainda não confirmado pelo servidor. */
   pendingWrite: boolean;
+}
+
+export interface DeletionRequest {
+  byUid: string;
+  reason?: string;
+  at: Date | null;
+  status: 'pending' | 'denied';
+  answeredBy?: string;
+  answeredAt?: Date | null;
 }
 
 export interface WriteResult {
@@ -129,6 +146,17 @@ function toExpense(snap: DocumentSnapshot): Expense {
     recurringId: data.recurringId,
     installment: data.installment,
     note: data.note,
+    everConfirmed: data.everConfirmed === true,
+    deletionRequest: data.deletionRequest
+      ? {
+          byUid: data.deletionRequest.byUid,
+          reason: data.deletionRequest.reason,
+          at: toDate(data.deletionRequest.at),
+          status: data.deletionRequest.status,
+          answeredBy: data.deletionRequest.answeredBy,
+          answeredAt: toDate(data.deletionRequest.answeredAt),
+        }
+      : undefined,
     pendingWrite: snap.metadata.hasPendingWrites,
   };
 }
@@ -214,7 +242,7 @@ export function createExpense(
 /** Edita um gasto de quem lançou. Status pelo comprovante; descarta aprovação ou recusa anteriores. */
 export function updateExpense(
   groupId: string,
-  current: Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy'>,
+  current: Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy' | 'everConfirmed'>,
   input: ExpenseInput,
   closedMonths: ReadonlySet<Competence>,
   today: IsoDate,
@@ -282,13 +310,59 @@ export function watchOpenItems(
   onChange: (expenses: Expense[]) => void,
   onError: (err: Error) => void,
 ): Unsubscribe {
-  const q = query(expensesCol(groupId), where('status', 'in', ['pending_approval', 'returned', 'awaiting_confirmation']));
-  return onSnapshot(
-    q,
-    { includeMetadataChanges: true },
-    (snap) => onChange(snap.docs.map(toExpense).sort(byDateDesc)),
-    onError,
-  );
+  // Duas consultas juntas: as situações abertas e os pedidos de exclusão abertos (confirmados).
+  const byId = [new Map<string, Expense>(), new Map<string, Expense>()];
+  const emit = () => onChange([...new Map([...byId[0], ...byId[1]]).values()].sort(byDateDesc));
+  const listen = (q: Query, slot: number) =>
+    onSnapshot(
+      q,
+      { includeMetadataChanges: true },
+      (snap) => {
+        byId[slot] = new Map(snap.docs.map((d) => [d.id, toExpense(d)]));
+        emit();
+      },
+      onError,
+    );
+  const stops = [
+    listen(query(expensesCol(groupId), where('status', 'in', ['pending_approval', 'returned', 'awaiting_confirmation'])), 0),
+    listen(query(expensesCol(groupId), where('deletionRequest.status', '==', 'pending')), 1),
+  ];
+  return () => stops.forEach((s) => s());
+}
+
+// ---- Pedido de exclusão (gasto já confirmado) ----
+
+/** Quem lançou pede a exclusão (numa série, as parcelas de meses abertos), motivo opcional. */
+export function requestDeletion(groupId: string, ids: readonly string[], uid: string, reason?: string): void {
+  updateMany(groupId, ids, deletionRequestData(uid, reason, serverTimestamp()), 'Não foi possível pedir a exclusão.');
+}
+
+/** Quem pediu cancela o pedido. */
+export function cancelDeletion(groupId: string, ids: readonly string[]): void {
+  updateMany(groupId, ids, deletionCancelData(serverTimestamp(), deleteField()), 'Não foi possível cancelar o pedido de exclusão.');
+}
+
+/** O outro membro recusa: o gasto continua. */
+export function denyDeletion(groupId: string, ids: readonly string[], uid: string): void {
+  updateMany(groupId, ids, deletionDenialData(uid, serverTimestamp()), 'Não foi possível recusar a exclusão.');
+}
+
+/**
+ * O outro membro aprova: exclui o gasto (numa série, as parcelas de meses
+ * abertos com pedido), num lote, soltando a chave da nota se o dono dela
+ * (o gasto ou a parcela 1) sai. A foto fica para a limpeza semanal de órfãs
+ * (só quem lançou pode apagá-la no Storage).
+ */
+export function approveDeletion(
+  groupId: string,
+  parcels: ReadonlyArray<Pick<Expense, 'id' | 'receipt' | 'installment'>>,
+): void {
+  if (parcels.length === 0) return;
+  const owner = receiptOwnerId(parcels[0]);
+  const batch = writeBatch(db);
+  for (const p of parcels) batch.delete(doc(expensesCol(groupId), p.id));
+  applyFiscalKeyChange(batch, groupId, owner, '', parcels[0].receipt, undefined, parcels.some((p) => p.id === owner));
+  trackWrite(batch.commit(), 'Não foi possível aprovar a exclusão.');
 }
 
 /** Pede à Function para consultar a nota de novo (depois de uma falha). */
@@ -384,7 +458,7 @@ export function watchSeries(
 export function updateSeries(
   groupId: string,
   seriesId: string,
-  parcels: ReadonlyArray<Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy'>>,
+  parcels: ReadonlyArray<Pick<Expense, 'id' | 'receipt' | 'status' | 'createdBy' | 'everConfirmed'>>,
   input: SeriesEditInput,
   photo?: Blob,
 ): void {

@@ -173,6 +173,7 @@ const BLOCKERS: Record<Blocker['kind'], [string, string]> = {
   pending: ['gasto pendente de aprovação', 'gastos pendentes de aprovação'],
   returned: ['gasto devolvido para correção', 'gastos devolvidos para correção'],
   awaiting: ['recorrente aguardando a confirmação do valor', 'recorrentes aguardando a confirmação do valor'],
+  deletion: ['pedido de exclusão aguardando resposta', 'pedidos de exclusão aguardando resposta'],
   photo: ['foto de comprovante ainda não enviada', 'fotos de comprovante ainda não enviadas'],
 };
 const blockerText = (b: Blocker) => `${b.count} ${BLOCKERS[b.kind][b.count === 1 ? 0 : 1]}`;

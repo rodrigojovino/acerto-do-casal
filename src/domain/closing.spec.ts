@@ -88,6 +88,16 @@ describe('closeBlockers', () => {
     ]);
     expect(closeBlockers([{ status: 'confirmed', receipt: none }])).toEqual([]);
   });
+
+  it('pedido de exclusão aberto bloqueia; recusado não', () => {
+    const none = { type: 'none' };
+    expect(
+      closeBlockers([
+        { status: 'confirmed', receipt: none, deletionRequest: { status: 'pending' } },
+        { status: 'confirmed', receipt: none, deletionRequest: { status: 'denied' } },
+      ]),
+    ).toEqual([{ kind: 'deletion', count: 1 }]);
+  });
 });
 
 describe('remainingTransfer: pagamentos como lista', () => {

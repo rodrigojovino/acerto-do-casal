@@ -78,7 +78,7 @@ export function monthBreakdown(expenses: readonly SettlementExpense[], members: 
 
 // ---- O que impede fechar ----
 
-export type BlockerKind = 'pending' | 'returned' | 'awaiting' | 'photo';
+export type BlockerKind = 'pending' | 'returned' | 'awaiting' | 'deletion' | 'photo';
 
 export interface Blocker {
   kind: BlockerKind;
@@ -87,20 +87,26 @@ export interface Blocker {
 
 /**
  * Gastos que impedem o fechamento: pendentes de aprovação, devolvidos,
- * recorrentes aguardando o valor e fotos de comprovante ainda não enviadas.
+ * recorrentes aguardando o valor, pedidos de exclusão aguardando resposta e
+ * fotos de comprovante ainda não enviadas.
  * Uma série de parcelas conta cada parcela do mês (só a do mês está aqui).
  */
 export function closeBlockers(
-  expenses: ReadonlyArray<{ status: ExpenseStatus; receipt: { type: string; photoPath?: string; photoUploaded?: boolean } }>,
+  expenses: ReadonlyArray<{
+    status: ExpenseStatus;
+    receipt: { type: string; photoPath?: string; photoUploaded?: boolean };
+    deletionRequest?: { status: string } | null;
+  }>,
 ): Blocker[] {
-  const counts: Record<BlockerKind, number> = { pending: 0, returned: 0, awaiting: 0, photo: 0 };
+  const counts: Record<BlockerKind, number> = { pending: 0, returned: 0, awaiting: 0, deletion: 0, photo: 0 };
   for (const e of expenses) {
     if (e.status === 'pending_approval') counts.pending++;
     else if (e.status === 'returned') counts.returned++;
     else if (e.status === 'awaiting_confirmation') counts.awaiting++;
+    if (e.deletionRequest?.status === 'pending') counts.deletion++;
     if (receiptHasPhoto(e.receipt) && !e.receipt.photoUploaded) counts.photo++;
   }
-  return (['pending', 'returned', 'awaiting', 'photo'] as const)
+  return (['pending', 'returned', 'awaiting', 'deletion', 'photo'] as const)
     .filter((kind) => counts[kind] > 0)
     .map((kind) => ({ kind, count: counts[kind] }));
 }

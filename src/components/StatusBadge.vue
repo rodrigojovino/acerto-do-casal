@@ -6,6 +6,7 @@
     <svg v-else-if="kind === 'recurring'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /><path d="m9 15 2 2 4-4" /></svg>
     <svg v-else-if="kind === 'validated'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17 19 7" /></svg>
     <svg v-else-if="kind === 'returned'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
+    <svg v-else-if="kind === 'deletion'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /><path d="M10 11v6M14 11v6" /></svg>
     <svg v-else-if="kind === 'forecast'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3" /><path d="M12 8v4l2.5 1.5" /></svg>
     <svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></svg>
     <span>{{ label }}</span>
@@ -84,6 +85,13 @@ defineProps<{ kind: BadgeKind; label: string }>();
 .awaiting {
   background: #d9d8d3;
   color: #2e2e2b;
+}
+
+/* Exclusão pedida: grafite escuro com contorno tracejado vermelho (aguarda o outro membro). */
+.deletion {
+  background: #33332f;
+  border: 1px dashed #f28b82;
+  color: #ffffff;
 }
 
 /* Previsto: cinza com contorno tracejado (ainda não é um gasto). */

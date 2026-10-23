@@ -7,9 +7,10 @@ import { isAutoConfirmed } from './expenseView';
  * de meses abertos (as de mês fechado são imutáveis):
  * - aprovar ou recusar: as pendentes;
  * - validar ou contestar: as confirmadas automaticamente;
- * - editar ou excluir (quem lançou): todas.
+ * - editar, excluir ou pedir a exclusão (quem lançou): todas;
+ * - aprovar ou recusar a exclusão (o outro): as com pedido aberto.
  */
-export type SeriesAction = 'approve' | 'reject' | 'validate' | 'contest' | 'edit' | 'delete';
+export type SeriesAction = 'approve' | 'reject' | 'validate' | 'contest' | 'edit' | 'delete' | 'answerDeletion';
 
 export interface SeriesParcel {
   id: string;
@@ -18,6 +19,7 @@ export interface SeriesParcel {
   approval?: { byUid: string };
   createdBy: string;
   installment?: InstallmentInfo;
+  deletionRequest?: { status: string };
 }
 
 export function seriesTargets<P extends SeriesParcel>(
@@ -37,6 +39,8 @@ export function seriesTargets<P extends SeriesParcel>(
         case 'validate':
         case 'contest':
           return !mine && isAutoConfirmed(p);
+        case 'answerDeletion':
+          return !mine && p.deletionRequest?.status === 'pending';
         default:
           return mine;
       }

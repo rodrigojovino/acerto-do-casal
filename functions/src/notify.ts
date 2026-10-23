@@ -54,14 +54,20 @@ async function groupContext(groupId: string): Promise<NoticeContext | null> {
 /** Contador de quem recebe (vai no aviso como o número do ícone do app). */
 async function pendingCount(groupId: string, uid: string): Promise<number> {
   const base = db.doc(`groups/${groupId}`);
-  const [expenses, recurrings, months] = await Promise.all([
+  const [open, deletions, recurrings, months] = await Promise.all([
     base.collection('expenses').where('status', 'in', ['pending_approval', 'returned', 'awaiting_confirmation']).get(),
+    // Pedidos de exclusão abertos (gastos confirmados, fora da consulta acima).
+    base.collection('expenses').where('deletionRequest.status', '==', 'pending').get(),
     base.collection('recurring').get(),
     base.collection('months').get(),
   ]);
+  const expenses = new Map([...open.docs, ...deletions.docs].map((d) => [d.id, d]));
   return actionCount({
     viewerUid: uid,
-    expenses: expenses.docs.map((d) => ({ id: d.id, ...(d.data() as { status: never; createdBy: string; installment?: { seriesId: string } }) })),
+    expenses: [...expenses.values()].map((d) => ({
+      id: d.id,
+      ...(d.data() as { status: never; createdBy: string; installment?: { seriesId: string }; deletionRequest?: { status: string } }),
+    })),
     recurrings: recurrings.docs.map((d) => d.data() as { active: boolean; status: string; proposal?: unknown; createdBy: string }),
     months: months.docs.map((d) => d.data() as { status: string; reopenRequest?: { status: string; byUid: string } }),
   });
@@ -144,10 +150,13 @@ export const notifyExpense = onDocumentWritten('groups/{groupId}/expenses/{expen
   const { groupId, expenseId } = event.params;
   const before = dataOf<ExpenseSnapshot>(event.data?.before);
   const after = dataOf<ExpenseSnapshot>(event.data?.after);
-  if (!after) return;
+  // Excluído: só interessa se havia pedido de exclusão aberto (aprovação).
+  if (!after && before?.deletionRequest?.status !== 'pending') return;
   const ctx = await groupContext(groupId);
   if (!ctx) return;
-  await sendNotices(groupId, expenseNotices(before, after, expenseId, ctx), batchTimeOf(event.data?.after));
+  // Numa série excluída em lote, todas as parcelas têm o mesmo instante do evento.
+  const batchTime = after ? batchTimeOf(event.data?.after) : String(Date.parse(event.time));
+  await sendNotices(groupId, expenseNotices(before, after, expenseId, ctx), batchTime);
 });
 
 /** Meses: pagamento do acerto, fechamento e reabertura. */

@@ -102,6 +102,24 @@
           <div class="actions">
             <p v-if="isClosed" class="hint">Mês fechado: este gasto não pode mais ser alterado.</p>
 
+            <!-- Outro membro: pedido de exclusão aberto (só aprova ou recusa o pedido) -->
+            <template v-else-if="openRequest && !isCreator">
+              <p class="strong">{{ firstNameOf(expense.createdBy) }} pediu para excluir {{ expense.installment ? 'esta compra' : 'este gasto' }}.</p>
+              <p v-if="expense.deletionRequest?.reason" class="hint">Motivo: “{{ expense.deletionRequest.reason }}”</p>
+              <div class="grid-2">
+                <button class="btn outline" :class="{ stacked: expense.installment }" type="button" @click="denyDel">
+                  <span>{{ actionVerb('Recusar') }}</span>
+                  <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+                </button>
+                <button class="btn danger" :class="{ stacked: expense.installment }" type="button" @click="approveDel">
+                  <span>{{ expense.installment ? 'Excluir compra' : 'Aprovar exclusão' }}</span>
+                  <span v-if="expense.installment" class="num">{{ formatBRL(purchaseCents) }}</span>
+                </button>
+              </div>
+              <p class="hint">Aprovado, o gasto sai do saldo; recusado, continua como está.</p>
+              <p v-if="seriesNote('answerDeletion')" class="hint">{{ seriesNote('answerDeletion') }}</p>
+            </template>
+
             <!-- Outro membro: aprovar ou recusar um pendente -->
             <template v-else-if="canReview">
               <label for="motivo" class="label">Motivo, se for recusar (opcional)</label>
@@ -159,12 +177,24 @@
               >
                 Anexar comprovante e dispensar aprovação
               </router-link>
+              <!-- Pedido de exclusão aberto: aguarda o outro; quem pediu pode cancelar -->
+              <template v-if="openRequest">
+                <p class="strong">Exclusão pedida: aguarda {{ partnerFirstName }}.</p>
+                <p v-if="expense.deletionRequest?.reason" class="hint">Motivo: “{{ expense.deletionRequest.reason }}”</p>
+              </template>
+              <p v-else-if="deniedText" class="hint">{{ deniedText }}</p>
               <div class="grid-2">
-                <button class="btn danger" type="button" @click="confirmDelete">Excluir</button>
+                <button v-if="openRequest" class="btn outline" type="button" @click="cancelDel">Cancelar pedido</button>
+                <button v-else-if="canDirectDelete" class="btn danger" type="button" @click="confirmDelete">Excluir</button>
+                <button v-else class="btn danger" type="button" @click="askDeletion">Pedir exclusão</button>
                 <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">
                   {{ expense.status === 'returned' ? 'Corrigir' : expense.installment ? 'Editar série' : 'Editar' }}
                 </router-link>
               </div>
+              <p v-if="openRequest" class="hint">Editar cancela o pedido; o gasto volta para a aprovação de {{ partnerFirstName }}.</p>
+              <p v-else-if="!canDirectDelete" class="hint">
+                Este gasto já foi confirmado: para excluir, {{ partnerFirstName }} precisa aprovar. Até lá, continua no saldo.
+              </p>
               <p v-if="expense.installment" class="hint">Editar e excluir valem para todas as parcelas de meses abertos.</p>
               <p v-if="expense.status === 'confirmed'" class="hint">
                 Editar este gasto faz ele voltar para a aprovação de {{ partnerFirstName }}.
@@ -200,8 +230,12 @@ import { formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import { splitForViewer } from '@/domain/split';
 import {
+  approveDeletion,
   approveExpense,
+  cancelDeletion,
   contestExpense,
+  denyDeletion,
+  requestDeletion,
   deleteExpense,
   receiptPhotoUrl,
   rejectExpense,
@@ -214,6 +248,7 @@ import {
 } from '@/services/expenses';
 import { seriesTargets, type SeriesAction } from '@/services/series';
 import { installmentSummary } from '@/domain/installments';
+import { MAX_DELETION_REASON, directlyDeletable } from '@/services/expenseData';
 import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originLabel, tagFor, typeBadges } from '@/services/expenseView';
 import TypeBadge from '@/components/TypeBadge.vue';
 import PhotoViewer from '@/components/PhotoViewer.vue';
@@ -341,8 +376,22 @@ watch(
 // ---- Textos e cálculo: funções de src/domain via expenseView ----
 const isCreator = computed(() => expense.value?.createdBy === myUid.value);
 const isClosed = computed(() => !!expense.value && closedMonths.value.has(expense.value.competence));
-const canReview = computed(() => !!expense.value && !isCreator.value && expense.value.status === 'pending_approval');
-const contestable = computed(() => !!expense.value && canContest(expense.value, myUid.value));
+/** Pedido de exclusão aberto: o outro só aprova ou recusa o pedido (nada de aprovar, validar ou contestar). */
+const openRequest = computed(() => expense.value?.deletionRequest?.status === 'pending');
+const canReview = computed(
+  () => !!expense.value && !openRequest.value && !isCreator.value && expense.value.status === 'pending_approval',
+);
+const contestable = computed(() => !!expense.value && !openRequest.value && canContest(expense.value, myUid.value));
+/** Pendente ou "a confirmar" nunca confirmado, ou devolvido: sai direto; os demais, pelo pedido. */
+const canDirectDelete = computed(() => !!expense.value && directlyDeletable(expense.value));
+
+/** "Bia recusou excluir em 22/10 às 14:30." */
+const deniedText = computed(() => {
+  const r = expense.value?.deletionRequest;
+  if (r?.status !== 'denied' || !r.answeredBy) return null;
+  const when = r.answeredAt ? ` em ${dateTime.format(r.answeredAt).replace(', ', ' às ')}` : '';
+  return `${firstNameOf(r.answeredBy)} recusou excluir${when}. Você pode pedir de novo.`;
+});
 
 const nameLower = (uid: string) => firstNameOf(uid).replace('Você', 'você');
 const payerLabel = computed(() => (expense.value ? nameLower(expense.value.payerUid) : ''));
@@ -360,6 +409,9 @@ const dateTime = new Intl.DateTimeFormat('pt-BR', {
 const statusText = computed(() => {
   const e = expense.value;
   if (!e) return '';
+  if (openRequest.value) {
+    return isCreator.value ? `Exclusão pedida: aguarda ${partnerFirstName.value}.` : 'Exclusão pedida: aguarda sua resposta.';
+  }
   if (e.status === 'awaiting_confirmation') {
     return isCreator.value ? 'Confirme o valor deste mês.' : `Aguarda ${partnerFirstName.value} confirmar o valor.`;
   }
@@ -532,6 +584,59 @@ function reject(): void {
   if (!group.value || !expense.value) return;
   rejectExpense(group.value.id, idsFor('reject'), myUid.value, reason.value);
   reason.value = '';
+}
+
+// ---- Pedido de exclusão ----
+
+/** Quem lançou: pede a exclusão (numa série, as parcelas de meses abertos), motivo opcional. */
+async function askDeletion(): Promise<void> {
+  const e = expense.value;
+  if (!e || !group.value) return;
+  const alert = await alertController.create({
+    header: e.installment ? 'Pedir exclusão da compra?' : 'Pedir exclusão?',
+    message: `${partnerFirstName.value} precisa aprovar a exclusão de "${e.description}". Até lá, o gasto continua no saldo.`,
+    inputs: [{ name: 'reason', type: 'textarea', placeholder: 'Motivo (opcional)', attributes: { maxlength: MAX_DELETION_REASON } }],
+    buttons: [
+      { text: 'Cancelar', role: 'cancel' },
+      { text: 'Pedir exclusão', role: 'confirm' },
+    ],
+  });
+  await alert.present();
+  const { role, data } = await alert.onDidDismiss<{ values: { reason?: string } }>();
+  if (role !== 'confirm' || !group.value) return;
+  requestDeletion(group.value.id, idsFor('edit'), myUid.value, data?.values?.reason);
+}
+
+function cancelDel(): void {
+  if (!group.value) return;
+  const ids = targetsFor('edit').filter((p) => p.deletionRequest?.status === 'pending').map((p) => p.id);
+  cancelDeletion(group.value.id, ids);
+}
+
+function denyDel(): void {
+  if (group.value) denyDeletion(group.value.id, idsFor('answerDeletion'), myUid.value);
+}
+
+/** O outro membro: aprovar exclui o gasto (numa série, as parcelas abertas com pedido). */
+async function approveDel(): Promise<void> {
+  const e = expense.value;
+  if (!e || !group.value) return;
+  const targets = targetsFor('answerDeletion');
+  const alert = await alertController.create({
+    header: e.installment ? 'Excluir a compra parcelada?' : 'Excluir gasto?',
+    message: e.installment
+      ? `"${e.description}": ${targets.length} ${targets.length === 1 ? 'parcela sai' : 'parcelas saem'} do saldo.`
+      : `"${e.description}" de ${formatBRL(e.totalCents)} sai do saldo de ${monthName(e.competence)}.`,
+    buttons: [
+      { text: 'Cancelar', role: 'cancel' },
+      { text: 'Excluir', role: 'destructive' },
+    ],
+  });
+  await alert.present();
+  const { role } = await alert.onDidDismiss();
+  if (role !== 'destructive' || !group.value) return;
+  approveDeletion(group.value.id, targets);
+  router.replace({ name: 'painel', query: { mes: e.competence } });
 }
 
 function retryNfce(): void {

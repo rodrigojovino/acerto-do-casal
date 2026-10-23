@@ -74,6 +74,7 @@ const BLOCKER_TEXT: Record<Blocker['kind'], [string, string]> = {
   pending: ['gasto pendente de aprovação', 'gastos pendentes de aprovação'],
   returned: ['gasto devolvido', 'gastos devolvidos'],
   awaiting: ['recorrente a confirmar', 'recorrentes a confirmar'],
+  deletion: ['pedido de exclusão aguardando resposta', 'pedidos de exclusão aguardando resposta'],
   photo: ['foto de comprovante não enviada', 'fotos de comprovante não enviadas'],
 };
 

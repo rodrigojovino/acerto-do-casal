@@ -60,6 +60,7 @@ export interface ExpenseSnapshot {
   recurringId?: string;
   installment?: InstallmentInfo;
   note?: string;
+  deletionRequest?: { byUid: string; reason?: string; status: string; answeredBy?: string } | null;
 }
 
 /** De onde veio a confirmação automática, para convidar à conferência. */
@@ -102,11 +103,56 @@ export function expenseNotices(
   expenseId: string,
   ctx: NoticeContext,
 ): Notice[] {
-  if (!after) return []; // excluído
+  // Excluído: só avisa quando foi a aprovação de um pedido de exclusão (para
+  // quem pediu). Exclusão direta por quem lançou não avisa.
+  if (!after) {
+    const req = before?.deletionRequest;
+    if (!before || req?.status !== 'pending') return [];
+    const series = before.installment?.seriesId;
+    return [
+      {
+        toUid: req.byUid,
+        category: 'expenses',
+        title: 'Exclusão aprovada',
+        body: `${ctx.nameOf(other(ctx, req.byUid))} aprovou a exclusão de ${subject(before)} · ${amountText(before)}`,
+        route: '/painel',
+        ...(series ? { dedupeKey: `${series}:deleted` } : {}),
+      },
+    ];
+  }
   const route = `/gasto/${expenseId}`;
   const series = after.installment?.seriesId;
   const author = after.createdBy;
   const authorName = ctx.nameOf(author);
+
+  // Pedido de exclusão (gasto já confirmado): para o outro aprovar; recusa: para quem pediu.
+  const reqBefore = before?.deletionRequest?.status ?? null;
+  const reqAfter = after.deletionRequest?.status ?? null;
+  if (before && reqAfter === 'pending' && reqBefore !== 'pending') {
+    const reason = after.deletionRequest?.reason ? ` — “${after.deletionRequest.reason}”` : '';
+    return [
+      {
+        toUid: other(ctx, author),
+        category: 'expenses',
+        title: 'Exclusão para aprovar',
+        body: `${authorName} pediu para excluir ${subject(after)} · ${amountText(after)}${reason}`,
+        route,
+        ...(series ? { dedupeKey: `${series}:deletion-request` } : {}),
+      },
+    ];
+  }
+  if (before && reqBefore === 'pending' && reqAfter === 'denied' && after.deletionRequest?.answeredBy) {
+    return [
+      {
+        toUid: author,
+        category: 'expenses',
+        title: 'Exclusão recusada',
+        body: `${ctx.nameOf(after.deletionRequest.answeredBy)} recusou excluir ${subject(after)}: o gasto continua no saldo`,
+        route,
+        ...(series ? { dedupeKey: `${series}:deletion-denied` } : {}),
+      },
+    ];
+  }
 
   // Lançamento. Recorrente gerado pela Function não avisa (o variável entra no
   // resumo do dia 1); numa série, só a parcela 1 avisa, com o valor da série.
@@ -320,7 +366,13 @@ export function variableRecurringSummary(generated: ReadonlyArray<{ payerUid: st
 export interface CountInput {
   viewerUid: string;
   /** Gastos pendentes, devolvidos ou aguardando confirmação (todos os meses). */
-  expenses: ReadonlyArray<{ id: string; status: ExpenseStatus; createdBy: string; installment?: { seriesId: string } }>;
+  expenses: ReadonlyArray<{
+    id: string;
+    status: ExpenseStatus;
+    createdBy: string;
+    installment?: { seriesId: string };
+    deletionRequest?: { status: string } | null;
+  }>;
   recurrings: ReadonlyArray<{ active: boolean; status: string; proposal?: unknown; createdBy: string }>;
   months: ReadonlyArray<{ status: string; reopenRequest?: { status: string; byUid: string } }>;
 }
@@ -336,6 +388,11 @@ export function actionCount(input: CountInput): number {
   const keys = new Set<string>();
   for (const e of input.expenses) {
     const mine = e.createdBy === viewerUid;
+    // Pedido de exclusão aberto: conta para o outro membro (aprovar ou recusar), e só isso.
+    if (e.deletionRequest?.status === 'pending') {
+      if (!mine) keys.add(`deletion:${e.installment?.seriesId ?? e.id}`);
+      continue;
+    }
     const needsMe =
       (e.status === 'pending_approval' && !mine) ||
       (e.status === 'returned' && mine) ||

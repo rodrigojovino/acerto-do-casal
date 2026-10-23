@@ -130,6 +130,22 @@ describe('quem recebe', () => {
     expect((await waitOutbox(3, 4000)).length).toBe(3); // só o lançamento de g2, nenhum de aprovação
   });
 
+  it('pedido de exclusão: avisa o outro; aprovado (o gasto some), avisa quem pediu', async () => {
+    const confirmed = expense({ status: 'confirmed', everConfirmed: true, approval: { byUid: B, at: new Date() } });
+    await write(`groups/${GROUP}/expenses/x1`, confirmed);
+    await waitOutbox(1);
+    await write(`groups/${GROUP}/expenses/x1`, { ...confirmed, deletionRequest: { byUid: A, at: new Date(), status: 'pending', reason: 'em dobro' } });
+    const asked = await waitOutbox(2);
+    expect(asked.filter((i) => i.toUid === B && i.title === 'Exclusão para aprovar')).toEqual([
+      expect.objectContaining({ category: 'expenses', body: 'Ana pediu para excluir Mercado · R$ 214,00 — “em dobro”' }),
+    ]);
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc(`groups/${GROUP}/expenses/x1`).delete());
+    const done = await waitOutbox(3);
+    expect(done.filter((i) => i.toUid === A)).toEqual([
+      expect.objectContaining({ category: 'expenses', title: 'Exclusão aprovada', body: 'Bia aprovou a exclusão de Mercado · R$ 214,00' }),
+    ]);
+  });
+
   it('categoria desligada por quem recebe: não envia', async () => {
     await write(`users/${B}`, { notificationPrefs: { expenses: false } });
     await write(`groups/${GROUP}/expenses/g1`, expense());
