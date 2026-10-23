@@ -257,8 +257,10 @@ service cloud.firestore {
       // - editar um pendente: continua pendente, exceto ao anexar comprovante
       //   (o gasto nunca foi aprovado), que o confirma.
       // Nunca grava aprovação nem recusa.
+      // Divisão diferente de 50/50 vai sempre para aprovação do outro membro,
+      // mesmo com comprovante (criação, anexar comprovante, valor do variável).
       function authorStatus(data, isNew) {
-        return !isNew && resource.data.status in ['confirmed', 'returned'] || data.receipt.type == 'none'
+        return !isNew && resource.data.status in ['confirmed', 'returned'] || data.receipt.type == 'none' || data.payerSharePct != 50
           ? 'pending_approval'
           : 'confirmed';
       }

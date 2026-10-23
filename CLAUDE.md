@@ -44,7 +44,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Textos com o primeiro nome da outra pessoa ("Bia te deve", "Você deve para Bia"); nada de "Ela/Ele" nem crase que suponha gênero.
 - Gravações no Firestore não são aguardadas na tela (offline, a promessa só termina ao sincronizar): usar `trackWrite` (`src/services/sync.ts`) e seguir. Nada de transação no app.
 - Ionic mantém vivas as telas visitadas: cada tela fixa sua rota (`useRoute().name`, `params`) na criação. Ler a rota de forma reativa faz a tela reagir às rotas das outras e já quebrou a navegação.
-- Listas de gastos (Painel, Pendências, Detalhe do mês): componente `ExpenseRow`. Primeira linha: descrição (uma linha, com reticências) e o valor à direita. Segunda linha: a linha de dados à esquerda e os selos à direita (status na ponta, tipo à esquerda); se não couberem juntos, os selos descem para a linha de baixo, alinhados à direita. A linha de dados e os selos (status e tipo) usam a mesma fonte, `--app-meta-font` (`src/theme/variables.css`, 11px), e os selos têm medidas em `em` (mesma altura para todos).
+- Listas de gastos (Painel, Pendências, Detalhe do mês): componente `ExpenseRow`. Primeira linha: descrição (uma linha, com reticências) e o valor à direita. Segunda linha: a linha de dados (só "quem pagou · data", `expenseSubtitle`; divisão e parte pessoal ficam no Detalhe e no formulário) à esquerda e os selos à direita (status na ponta, tipo à esquerda); se não couberem juntos, os selos descem para a linha de baixo, alinhados à direita. A linha de dados e os selos (status e tipo) usam a mesma fonte, `--app-meta-font` (`src/theme/variables.css`, 11px), e os selos têm medidas em `em` (mesma altura para todos).
 - Áreas seguras: usar `--app-safe-top/-bottom/-left/-right` (`src/theme/variables.css`), nunca `env(safe-area-inset-*)` direto. Uma faixa fixa da cor da página cobre a barra de status (`.status-scrim` em `App.vue`), e as telas sem barra inferior reservam no mínimo 48px para a navegação do Android. No Android 15+ (edge-to-edge, obrigatório no Android 16) o `env()` pode vir zerado e a barra inferior já ficou atrás da navegação por 3 botões; o Capacitor injeta os valores reais (`SystemBars.insetsHandling: 'css'`).
 
 ## Repositório público: segurança
@@ -71,7 +71,7 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 
 | status | conta no saldo | quando |
 | --- | --- | --- |
-| `confirmed` | sim | criado com comprovante (foto ou chave de NF-e/NFC-e), recorrente fixo gerado, ou aprovado pelo outro membro |
+| `confirmed` | sim | criado com comprovante (foto ou chave de NF-e/NFC-e) e divisão 50/50, recorrente fixo gerado, ou aprovado pelo outro membro |
 | `pending_approval` | sim, destacado | criado sem comprovante, ou qualquer gasto confirmado/devolvido que foi editado |
 | `returned` | sim, destacado | recusado (pendente) ou contestado (confirmado automático) pelo outro; volta para quem lançou corrigir ou excluir |
 | `awaiting_confirmation` | não | recorrente variável gerado, aguardando quem paga confirmar o valor |
@@ -81,19 +81,21 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 | situação | status |
 | --- | --- |
 | criar sem comprovante | `pending_approval` |
-| criar com foto ou chave de NF-e/NFC-e (QR, código de barras ou digitada; qualquer estado) | `confirmed` (confirmado automático) |
+| criar com foto ou chave de NF-e/NFC-e (QR, código de barras ou digitada; qualquer estado), divisão 50/50 | `confirmed` (confirmado automático) |
+| criar ou editar com divisão diferente de 50/50, mesmo com comprovante | `pending_approval` |
 | editar um confirmado (automático ou aprovado) | `pending_approval` |
 | editar um devolvido (recusado ou contestado) | `pending_approval` |
 | editar um pendente sem comprovante | `pending_approval` |
-| pendente + "Anexar comprovante e dispensar aprovação" | `confirmed` (único caso de edição que confirma: o gasto nunca foi aprovado) |
+| pendente 50/50 + "Anexar comprovante e dispensar aprovação" | `confirmed` (único caso de edição que confirma: o gasto nunca foi aprovado; com divisão diferente de 50/50 o atalho não aparece) |
 
-- **Só a criação com comprovante confirma automaticamente.** Quem lança nunca grava aprovação nem recusa; editar descarta a aprovação/recusa anterior.
+- **Divisão diferente de 50/50 (fixo, não a divisão padrão do grupo) sempre vai para aprovação** (`authorStatus` em `src/services/expenseData.ts` e nas regras), mesmo com comprovante: na criação, no anexar comprovante e na confirmação do valor do recorrente variável. Aprovado pelo outro, fica Validado. Série: aprovada uma vez. Recorrente fixo: a divisão é aprovada no cadastro e os gastos gerados seguem como Recorrente aprovado. O formulário avisa ("Divisão diferente de 50/50: vai para a aprovação de Bia, mesmo com comprovante"). Gastos anteriores à regra (v0.7.7) ficam como estão.
+- **Só a criação com comprovante (e divisão 50/50) confirma automaticamente.** Quem lança nunca grava aprovação nem recusa; editar descarta a aprovação/recusa anterior.
 - **O outro membro:** num pendente, aprova ou recusa (`rejection.kind: 'reject'`, motivo opcional); num confirmado automático, **valida** (grava `approval { byUid: ele, at }` sem mudar o status) ou **contesta** (`kind: 'contest'`, motivo obrigatório), até o fechamento do mês. Confirmado automático = `confirmed` sem `approval` (ou com `approval.byUid: 'nfce'`, dos gastos da versão anterior). Validado conta como aprovado manualmente: não é contestável e, se editado, volta para aprovação.
 - **Selos de status** (`badgeFor` em `src/services/expenseView.ts`, componente `StatusBadge`), diferentes em cor, claridade e ícone:
 
   | selo | quando | visual |
   | --- | --- | --- |
-  | Pendente / Aprovar (para o outro) | `pending_approval` | âmbar claro, relógio |
+  | Pendente / Aprovar (para o outro) | `pending_approval`; com divisão diferente de 50/50, com a divisão e a parte de quem vê à esquerda ("Pendente 70/30" para quem lançou, "Aprovar 30/70" para o outro, via `splitForViewer`) | âmbar claro, relógio |
   | Automático | confirmado automático por chave de NF-e ou NFC-e (QR, código de barras ou digitada; qualquer estado) | branco com contorno azul tracejado, raio |
   | Foto do recibo | confirmado automático por foto | lilás claro com contorno roxo tracejado, câmera |
   | Recorrente aprovado | recorrente fixo gerado no mês (confirmado automático) | verde-azulado médio, contorno contínuo, calendário com check |
@@ -323,6 +325,7 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
      - [x] Restringir as chaves de API do Firebase (Android e web) no Google Cloud Console. Configuração do Rodrigo, passo a passo e lista exata em `docs/bloco-e-consoles.md`: a Browser key é usada também pelo app Android (Firebase JS no WebView, origem `https://localhost`), e a Android key pelos SDKs nativos (avisos e o Firebase Auth nativo do plugin de login: Installations, FCM Registration, Identity Toolkit e Token Service). Concluído em 2026-10-23 e conferido pela API de chaves: Android key só para o pacote + SHA-1 da assinatura, com Installations, FCM Registration, Identity Toolkit e Token Service; Browser key só para web.app, firebaseapp.com, `https://localhost` e `http://localhost:5173`, com Identity Toolkit, Token Service, Firestore e Storage.
      - [x] Proteger as tags `v*` no GitHub com Rulesets: só o dono (admin) cria e apaga; ninguém altera uma tag existente (dois rulesets, ativos desde 2026-10-23). Configuração do Rodrigo, passo a passo em `docs/bloco-e-consoles.md`.
      - [ ] Backups agendados do Firestore (recomendado: diário com retenção de 14 dias), pelo comando ou pelo console, e como restaurar (sempre num banco novo, nunca por cima do `(default)`): `docs/bloco-e-consoles.md`. Comandos de backup e de restauração só com confirmação explícita do Rodrigo.
+   - [ ] v0.7.7: linha de dados só com quem pagou e a data; divisão diferente de 50/50 sempre vai para aprovação (selo com a divisão; testes em `tests/emulators/split.rules.spec.ts`).
    - [ ] v0.7.6 (implementada; falta o teste no celular): pedido de exclusão de gasto aprovado, linha de dados e selos, campo de valor e visualizador de fotos.
      - [ ] Pedido de exclusão (regras, tela, avisos, contador, fechamento; marca `everConfirmed` e script `marcar-confirmados.ts`). Gastos aprovados (Automático, Foto do recibo, Recorrente aprovado, Validado) não são excluídos direto: quem lançou faz "Pedir exclusão", com motivo opcional, e o outro membro aprova (o gasto é excluído) ou recusa (o gasto continua). Quem pediu pode cancelar.
      - Pendentes e devolvidos continuam com exclusão direta por quem lançou.

@@ -64,7 +64,7 @@
                 </ExpenseRow>
                 <span aria-hidden="true" class="chev">›</span>
               </router-link>
-              <router-link v-if="e.receipt.type === 'none'" class="attach" :to="{ name: 'gasto-editar', params: { id: e.id } }">
+              <router-link v-if="e.receipt.type === 'none' && e.payerSharePct === 50" class="attach" :to="{ name: 'gasto-editar', params: { id: e.id } }">
                 Anexar comprovante e dispensar aprovação
               </router-link>
             </div>

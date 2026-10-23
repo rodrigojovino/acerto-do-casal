@@ -47,13 +47,13 @@ describe('splitLabel usa a conversão de split.ts', () => {
 });
 
 describe('expenseSubtitle', () => {
-  it('monta a linha da lista', () => {
-    expect(expenseSubtitle(expense({}), A, 'Você')).toBe('Você · 05/10 · R$ 50,00 pessoal · 50/50');
+  it('só quem pagou e a data (divisão e parte pessoal ficam no Detalhe)', () => {
+    expect(expenseSubtitle(expense({ payerSharePct: 70 }), 'Você')).toBe('Você · 05/10');
   });
 
-  it('omite a parte pessoal zerada e mostra o ano quando a competência é outra', () => {
-    const e = expense({ personalCents: 0, date: '2026-09-28', competence: '2026-10' });
-    expect(expenseSubtitle(e, A, 'Você')).toBe('Você · 28/09/2026 · 50/50');
+  it('mostra o ano quando a competência é outra', () => {
+    const e = expense({ date: '2026-09-28', competence: '2026-10' });
+    expect(expenseSubtitle(e, 'Você')).toBe('Você · 28/09/2026');
   });
 });
 
@@ -142,6 +142,10 @@ describe('authorStatus (status que quem lança grava)', () => {
     expect(authorStatus(photo, 'confirmed')).toBe('pending_approval');
     expect(authorStatus(none, 'confirmed')).toBe('pending_approval');
     expect(authorStatus(photo, 'returned')).toBe('pending_approval');
+    // Divisão diferente de 50/50: pendente mesmo com comprovante.
+    expect(authorStatus(photo, undefined, 70)).toBe('pending_approval');
+    expect(authorStatus(photo, 'pending_approval', 0)).toBe('pending_approval');
+    expect(authorStatus(photo, undefined, 50)).toBe('confirmed');
   });
 
   it('pendente continua pendente; com comprovante anexado, confirma', () => {
@@ -154,6 +158,17 @@ describe('badgeFor', () => {
   it('pendente: "Pendente" para quem lançou, "Aprovar" para o outro', () => {
     expect(badgeFor(expense({ status: 'pending_approval' }), A)).toEqual({ kind: 'pending', label: 'Pendente' });
     expect(badgeFor(expense({ status: 'pending_approval' }), B)).toEqual({ kind: 'pending', label: 'Aprovar' });
+  });
+
+  it('divisão diferente de 50/50: o selo mostra a divisão, com a parte de quem vê à esquerda', () => {
+    // A pagou e fica com 70%.
+    const e = expense({ status: 'pending_approval', payerUid: A, payerSharePct: 70 });
+    expect(badgeFor(e, A)).toEqual({ kind: 'pending', label: 'Pendente 70/30' });
+    expect(badgeFor(e, B)).toEqual({ kind: 'pending', label: 'Aprovar 30/70' });
+    // B pagou e fica com 30%: para A (quem lançou), A fica com 70%.
+    const f = expense({ status: 'pending_approval', payerUid: B, payerSharePct: 30 });
+    expect(badgeFor(f, A).label).toBe('Pendente 70/30');
+    expect(badgeFor(f, B).label).toBe('Aprovar 30/70');
   });
 
   it('automático (sem aprovação ou "nfce") e validado (aprovação de pessoa)', () => {

@@ -72,12 +72,12 @@ export function splitLabel(expense: Pick<Expense, 'payerSharePct' | 'payerUid'>,
   return `${mine}/${partner}`;
 }
 
-/** Linha de apoio da lista: "Você · 05/10 · R$ 50,00 pessoal · 50/50". */
-export function expenseSubtitle(expense: Expense, viewerUid: string, payerName: string): string {
-  const parts = [payerName, formatDateBR(expense.date, monthOf(expense.date) !== expense.competence)];
-  if (expense.personalCents > 0) parts.push(`${formatBRL(expense.personalCents)} pessoal`);
-  parts.push(splitLabel(expense, viewerUid));
-  return parts.join(' · ');
+/**
+ * Linha de apoio da lista: só "quem pagou · data" ("Você · 05/10"; com o ano
+ * quando a competência é outra). Divisão e parte pessoal ficam no Detalhe.
+ */
+export function expenseSubtitle(expense: Pick<Expense, 'date' | 'competence'>, payerName: string): string {
+  return `${payerName} · ${formatDateBR(expense.date, monthOf(expense.date) !== expense.competence)}`;
 }
 
 export interface DebtView {
@@ -113,7 +113,7 @@ export interface Badge {
   label: string;
 }
 
-type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt'> & {
+type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt' | 'payerSharePct' | 'payerUid'> & {
   recurringId?: string;
   deletionRequest?: { status: string };
 };
@@ -139,8 +139,12 @@ export function badgeFor(expense: BadgeSource, viewerUid: string, detailed = fal
   // Pedido de exclusão aberto: o selo diz isso, qualquer que seja o status.
   if (expense.deletionRequest?.status === 'pending') return { kind: 'deletion', label: 'Exclusão pedida' };
   switch (expense.status) {
-    case 'pending_approval':
-      return { kind: 'pending', label: expense.createdBy === viewerUid ? 'Pendente' : 'Aprovar' };
+    case 'pending_approval': {
+      // Divisão diferente de 50/50 (vai sempre para aprovação): o selo mostra a
+      // divisão, com a parte de quem vê à esquerda ("Pendente 70/30" / "Aprovar 30/70").
+      const verb = expense.createdBy === viewerUid ? 'Pendente' : 'Aprovar';
+      return { kind: 'pending', label: expense.payerSharePct === 50 ? verb : `${verb} ${splitLabel(expense, viewerUid)}` };
+    }
     case 'returned':
       if (!detailed) return { kind: 'returned', label: 'Devolvido' };
       return { kind: 'returned', label: expense.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' };

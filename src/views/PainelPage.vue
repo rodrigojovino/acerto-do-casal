@@ -106,7 +106,7 @@
             <router-link class="item" :to="{ name: 'gasto', params: { id: item.id } }">
               <ExpenseRow
                 :name="item.description"
-                :sub="expenseSubtitle(item, myUid, firstNameOf(item.payerUid))"
+                :sub="expenseSubtitle(item, firstNameOf(item.payerUid))"
                 :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents)"
                 :badge="badgeFor(item, myUid)"
                 :types="typeBadges(item)"

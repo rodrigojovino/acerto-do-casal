@@ -165,13 +165,16 @@
             <!-- Recorrente variável: quem paga confirma o valor -->
             <template v-else-if="isCreator && expense.status === 'awaiting_confirmation'">
               <router-link class="btn primary" :to="{ name: 'gasto-editar', params: { id: expense.id } }">Confirmar valor</router-link>
-              <p class="hint">Sem comprovante, vai para a aprovação de {{ partnerFirstName }}; com foto ou QR, já entra confirmado.</p>
+              <p class="hint">
+                Sem comprovante ou com divisão diferente de 50/50, vai para a aprovação de {{ partnerFirstName }}; com foto ou nota e
+                50/50, já entra confirmado.
+              </p>
             </template>
 
             <!-- Quem lançou -->
             <template v-else-if="isCreator">
               <router-link
-                v-if="expense.status === 'pending_approval' && expense.receipt.type === 'none'"
+                v-if="expense.status === 'pending_approval' && expense.receipt.type === 'none' && expense.payerSharePct === 50"
                 class="btn outline attach"
                 :to="{ name: 'gasto-editar', params: { id: expense.id } }"
               >

@@ -142,10 +142,19 @@ function fields(input: ExpenseInput, competence: Competence) {
  * Status que quem lança grava (as regras exigem exatamente este).
  * `currentStatus` ausente = criação.
  */
-export function authorStatus(receipt: ReceiptChoice, currentStatus?: ExpenseStatus): 'pending_approval' | 'confirmed' {
+export function authorStatus(
+  receipt: ReceiptChoice,
+  currentStatus?: ExpenseStatus,
+  payerSharePct = EVEN_SPLIT_PCT,
+): 'pending_approval' | 'confirmed' {
   if (currentStatus === 'confirmed' || currentStatus === 'returned') return 'pending_approval';
+  // Divisão diferente de 50/50 vai para aprovação, mesmo com comprovante.
+  if (payerSharePct !== EVEN_SPLIT_PCT) return 'pending_approval';
   return receipt.type === 'none' ? 'pending_approval' : 'confirmed';
 }
+
+/** Única divisão que confirma automaticamente com comprovante: 50/50 (fixa, não a padrão do grupo). */
+export const EVEN_SPLIT_PCT = 50;
 
 /**
  * Marca permanente de "já confirmado uma vez" (as regras nunca deixam tirar):
@@ -157,7 +166,7 @@ function everConfirmedField(status: ExpenseStatus, already = false) {
 
 /** Gasto novo: pendente sem comprovante; confirmado com foto ou QR. */
 export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: Competence, ids: ExpenseIds, now: T) {
-  const status = authorStatus(input.receipt);
+  const status = authorStatus(input.receipt, undefined, input.payerSharePct);
   return {
     ...fields(input, competence),
     ...noteField(input.note),
@@ -184,7 +193,7 @@ export function expenseUpdateData<T, D>(
   now: T,
   removeField: D,
 ) {
-  const status = authorStatus(input.receipt, current.status);
+  const status = authorStatus(input.receipt, current.status, input.payerSharePct);
   return {
     ...fields(input, competence),
     ...noteField(input.note, removeField),
@@ -311,7 +320,7 @@ export function newInstallmentSeriesData<T>(
   now: T,
 ) {
   const receipt = receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId });
-  const status = authorStatus(input.receipt);
+  const status = authorStatus(input.receipt, undefined, input.payerSharePct);
   return planInstallments({
     totalCents: input.totalCents,
     personalCents: input.personalCents,
@@ -366,7 +375,7 @@ export function installmentUpdateData<T, D>(
   now: T,
   removeField: D,
 ) {
-  const status = authorStatus(input.receipt, current.status);
+  const status = authorStatus(input.receipt, current.status, input.payerSharePct);
   return {
     description: input.description.trim(),
     ...noteField(input.note, removeField),

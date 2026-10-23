@@ -114,6 +114,9 @@
             @scanned="onScanned"
           />
           <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
+          <p v-if="payerSharePct !== 50" class="hint split-note" role="status">
+            Divisão diferente de 50/50: vai para a aprovação de {{ partnerFirstName }}, mesmo com comprovante.
+          </p>
           <div v-if="duplicate" class="alert-error duplicate" role="alert">
             <p>{{ duplicateText }}</p>
             <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>

@@ -44,7 +44,7 @@
                 <router-link class="expense" :to="{ name: 'gasto', params: { id: e.id } }">
                   <ExpenseRow
                     :name="e.description"
-                    :sub="expenseSubtitle(e, myUid, firstNameOf(e.payerUid))"
+                    :sub="expenseSubtitle(e, firstNameOf(e.payerUid))"
                     :amount="formatBRL(e.totalCents)"
                     :badge="badgeFor(e, myUid)"
                     :types="typeBadges(e)"
