@@ -147,13 +147,23 @@ export function authorStatus(receipt: ReceiptChoice, currentStatus?: ExpenseStat
   return receipt.type === 'none' ? 'pending_approval' : 'confirmed';
 }
 
+/**
+ * Marca permanente de "já confirmado uma vez" (as regras nunca deixam tirar):
+ * gasto que já foi confirmado só sai pelo pedido de exclusão.
+ */
+function everConfirmedField(status: ExpenseStatus, already = false) {
+  return already || status === 'confirmed' ? { everConfirmed: true as const } : {};
+}
+
 /** Gasto novo: pendente sem comprovante; confirmado com foto ou QR. */
 export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: Competence, ids: ExpenseIds, now: T) {
+  const status = authorStatus(input.receipt);
   return {
     ...fields(input, competence),
     ...noteField(input.note),
     receipt: receiptData(input.receipt, ids),
-    status: authorStatus(input.receipt),
+    status,
+    ...everConfirmedField(status),
     createdBy: uid,
     createdAt: now,
     updatedAt: now,
@@ -163,23 +173,27 @@ export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: 
 /**
  * Edição de quem lançou: confirmado ou devolvido vai para aprovação; pendente
  * continua pendente, ou é confirmado ao receber comprovante. Descarta aprovação
- * ou recusa anteriores.
+ * ou recusa anteriores. Apaga o pedido de exclusão, se houver (o gasto volta
+ * para aprovação, mas, se já foi confirmado, continua exigindo pedido para sair).
  */
 export function expenseUpdateData<T, D>(
   input: ExpenseInput,
   competence: Competence,
   ids: ExpenseIds,
-  current: { receipt: StoredReceipt; status: ExpenseStatus },
+  current: { receipt: StoredReceipt; status: ExpenseStatus; everConfirmed?: boolean },
   now: T,
   removeField: D,
 ) {
+  const status = authorStatus(input.receipt, current.status);
   return {
     ...fields(input, competence),
     ...noteField(input.note, removeField),
     receipt: receiptData(input.receipt, ids, current.receipt),
-    status: authorStatus(input.receipt, current.status),
+    status,
+    ...everConfirmedField(status, current.everConfirmed),
     approval: removeField,
     rejection: removeField,
+    deletionRequest: removeField,
     updatedAt: now,
   };
 }
@@ -195,6 +209,7 @@ export const MAX_REJECTION_REASON = 200;
 export function validationData<T>(uid: string, now: T) {
   return {
     status: 'confirmed' as const,
+    everConfirmed: true as const,
     approval: { byUid: uid, at: now },
     updatedAt: now,
   };
@@ -204,7 +219,45 @@ export function validationData<T>(uid: string, now: T) {
 export function approvalData<T>(uid: string, now: T) {
   return {
     status: 'confirmed' as const,
+    everConfirmed: true as const,
     approval: { byUid: uid, at: now },
+    updatedAt: now,
+  };
+}
+
+// ---- Pedido de exclusão (gasto já confirmado) ----
+
+/** Limite do motivo do pedido de exclusão (o mesmo das regras). */
+export const MAX_DELETION_REASON = 200;
+
+/**
+ * Pode sair direto por quem lançou: pendente ou "a confirmar" que nunca foi
+ * confirmado, e devolvido. Os demais só saem pelo pedido de exclusão.
+ */
+export function directlyDeletable(e: { status: ExpenseStatus; everConfirmed?: boolean }): boolean {
+  return e.status === 'returned' || (e.status !== 'confirmed' && !e.everConfirmed);
+}
+
+/** Quem lançou pede a exclusão (ou pede de novo depois de uma recusa), motivo opcional. */
+export function deletionRequestData<T>(uid: string, reason: string | undefined, now: T) {
+  const trimmed = reason?.trim().slice(0, MAX_DELETION_REASON);
+  return {
+    deletionRequest: { byUid: uid, at: now, status: 'pending' as const, ...(trimmed ? { reason: trimmed } : {}) },
+    updatedAt: now,
+  };
+}
+
+/** Quem pediu cancela o pedido. */
+export function deletionCancelData<T, D>(now: T, removeField: D) {
+  return { deletionRequest: removeField, updatedAt: now };
+}
+
+/** O outro membro recusa: o pedido fica registrado como recusado e o gasto continua. */
+export function deletionDenialData<T>(uid: string, now: T) {
+  return {
+    'deletionRequest.status': 'denied' as const,
+    'deletionRequest.answeredBy': uid,
+    'deletionRequest.answeredAt': now,
     updatedAt: now,
   };
 }
@@ -278,6 +331,7 @@ export function newInstallmentSeriesData<T>(
       competence: p.competence,
       receipt,
       status,
+      ...everConfirmedField(status),
       installment: {
         seriesId: ids.seriesId,
         index: p.index,
@@ -307,20 +361,23 @@ export interface SeriesEditInput {
  */
 export function installmentUpdateData<T, D>(
   input: SeriesEditInput,
-  current: { receipt: StoredReceipt; status: ExpenseStatus },
+  current: { receipt: StoredReceipt; status: ExpenseStatus; everConfirmed?: boolean },
   ids: { groupId: string; seriesId: string },
   now: T,
   removeField: D,
 ) {
+  const status = authorStatus(input.receipt, current.status);
   return {
     description: input.description.trim(),
     ...noteField(input.note, removeField),
     payerUid: input.payerUid,
     payerSharePct: input.payerSharePct,
     receipt: receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId }, current.receipt),
-    status: authorStatus(input.receipt, current.status),
+    status,
+    ...everConfirmedField(status, current.everConfirmed),
     approval: removeField,
     rejection: removeField,
+    deletionRequest: removeField,
     updatedAt: now,
   };
 }

@@ -267,8 +267,93 @@ service cloud.firestore {
       // app não cria gasto recorrente e, ao editar um gerado, não muda o campo.
       // installment: só na criação; na edição de uma parcela, a série, o valor,
       // a parte pessoal e a data ficam (para mudá-los, exclui e lança de novo).
+      // ---- Já confirmado uma vez (everConfirmed) ----
+      // Marca permanente: gravada quando o gasto é confirmado pela primeira vez
+      // (comprovante, aprovação, validação, recorrente fixo gerado). Nunca volta
+      // a false nem sai. Gasto que já foi confirmado, mesmo editado e pendente,
+      // só sai pelo pedido de exclusão.
+      function everConfirmed(d) {
+        return d.get('everConfirmed', false) == true;
+      }
+
+      // Depois da gravação: a marca, se existir, é true; quem tinha continua com
+      // ela; quem fica confirmado passa a ter.
+      function keepsEverConfirmed() {
+        let d = request.resource.data;
+        return (!d.keys().hasAny(['everConfirmed']) || d.everConfirmed == true)
+          && (!everConfirmed(resource.data) || everConfirmed(d))
+          && (d.status != 'confirmed' || everConfirmed(d));
+      }
+
+      // Criação: a marca existe só (e sempre) quando o gasto nasce confirmado.
+      function newEverConfirmed() {
+        let d = request.resource.data;
+        return d.status == 'confirmed' ? d.get('everConfirmed', null) == true : !d.keys().hasAny(['everConfirmed']);
+      }
+
+      // ---- Pedido de exclusão (gasto já confirmado) ----
+      // Exclusão direta por quem lançou: pendente ou "a confirmar" que nunca foi
+      // confirmado, e devolvido (recusado ou contestado). Os demais (aprovados,
+      // ou já confirmados e depois editados) só saem pelo pedido: quem lançou
+      // pede (motivo opcional), o outro aprova (exclui) ou recusa; quem pediu
+      // cancela. Editar o gasto apaga o pedido.
+      function directDeletable(d) {
+        return d.status == 'returned'
+          || d.status in ['pending_approval', 'awaiting_confirmation'] && !everConfirmed(d);
+      }
+
+      function hasOpenRequest(d) {
+        return d.get('deletionRequest', null) != null && d.deletionRequest.status == 'pending';
+      }
+
+      function onlyDeletionRequestChanges() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletionRequest', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time;
+      }
+
+      // Quem lançou pede a exclusão (ou pede de novo depois de uma recusa).
+      function isDeletionRequest() {
+        let r = request.resource.data.get('deletionRequest', null);
+        return resource.data.createdBy == request.auth.uid
+          && !directDeletable(resource.data)
+          && !hasOpenRequest(resource.data)
+          && onlyDeletionRequestChanges()
+          && r != null
+          && r.keys().hasAll(['byUid', 'at', 'status'])
+          && r.keys().hasOnly(['byUid', 'at', 'status', 'reason'])
+          && r.byUid == request.auth.uid
+          && r.at == request.time
+          && r.status == 'pending'
+          && (!r.keys().hasAny(['reason']) || r.reason is string && r.reason.trim().size() >= 1 && r.reason.size() <= 200);
+      }
+
+      // Quem pediu cancela: o pedido some.
+      function isDeletionCancel() {
+        return resource.data.createdBy == request.auth.uid
+          && hasOpenRequest(resource.data)
+          && onlyDeletionRequestChanges()
+          && !request.resource.data.keys().hasAny(['deletionRequest']);
+      }
+
+      // O outro membro recusa: o pedido fica registrado como recusado e o gasto continua.
+      function isDeletionDenial() {
+        let before = resource.data.deletionRequest;
+        let after = request.resource.data.get('deletionRequest', null);
+        return resource.data.createdBy != request.auth.uid
+          && hasOpenRequest(resource.data)
+          && onlyDeletionRequestChanges()
+          && after != null
+          && after.diff(before).affectedKeys().hasOnly(['status', 'answeredBy', 'answeredAt'])
+          && after.status == 'denied'
+          && after.answeredBy == request.auth.uid
+          && after.answeredAt == request.time;
+      }
+
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note']))
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note', 'everConfirmed']))
+          // Editar apaga o pedido de exclusão (aberto ou recusado); criar não tem pedido.
+          && !request.resource.data.keys().hasAny(['deletionRequest'])
+          && (isNew ? newEverConfirmed() : keepsEverConfirmed())
           && request.resource.data.keys().hasAll(expenseKeys())
           && (isNew
                 ? !request.resource.data.keys().hasAny(['recurringId'])
@@ -314,10 +399,13 @@ service cloud.firestore {
       //   do QR ou recorrente fixo): valida (grava a própria aprovação, sem mudar
       //   o status) ou contesta, com motivo obrigatório.
       // Gasto aprovado ou validado pelo outro membro não é contestável.
+      // Com pedido de exclusão aberto, o outro membro só aprova (exclui) ou recusa o pedido.
       function isReviewWrite() {
         return resource.data.createdBy != request.auth.uid
+          && !hasOpenRequest(resource.data)
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['status', 'approval', 'rejection', 'updatedAt'])
+               .hasOnly(['status', 'approval', 'rejection', 'everConfirmed', 'updatedAt'])
+          && keepsEverConfirmed()
           && request.resource.data.updatedAt == request.time
           && (
             resource.data.status == 'pending_approval' && (isApproval() || isRejection('reject'))
@@ -429,10 +517,18 @@ service cloud.firestore {
             || resource.data.createdBy == request.auth.uid && isPhotoUploadedMark()
             || resource.data.createdBy == request.auth.uid && isNfceRetry()
             || isReviewWrite()
+            || isDeletionRequest()
+            || isDeletionCancel()
+            || isDeletionDenial()
           );
 
+        // Quem lançou: só o que pode sair direto. O outro membro: só com pedido
+        // aberto (aprovar a exclusão). A chave da nota sai no mesmo lote.
         allow delete: if isMember(groupId)
-          && resource.data.createdBy == request.auth.uid
+          && (
+            resource.data.createdBy == request.auth.uid && directDeletable(resource.data)
+            || resource.data.createdBy != request.auth.uid && hasOpenRequest(resource.data)
+          )
           && !isClosed(resource.data.competence)
           && releasedKey(fiscalKey(resource.data), receiptOwner(resource.data, expenseId));
       }

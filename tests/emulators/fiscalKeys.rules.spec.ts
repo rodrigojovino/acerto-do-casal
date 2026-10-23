@@ -7,6 +7,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  deletionRequestData,
   fiscalKeyData,
   installmentUpdateData,
   newExpenseData,
@@ -128,6 +129,15 @@ function editReceipt(
 }
 
 /** Exclusão como o app faz: com chave, o registro sai no mesmo lote. */
+/** Pedido de exclusão de quem lançou (gasto já confirmado só sai assim), num lote. */
+function requestDeletion(uid: string, expenseIds: string[]) {
+  const fs = db(uid);
+  const batch = fs.batch();
+  for (const id of expenseIds) batch.update(fs.doc(expPath(id)), deletionRequestData(uid, undefined, serverTime()));
+  return batch.commit();
+}
+
+/** Exclusão: quem lançou (o que pode sair direto) ou o outro membro (aprovando o pedido). */
 function remove(uid: string, id: string, release?: string) {
   const fs = db(uid);
   const batch = fs.batch().delete(fs.doc(expPath(id)));
@@ -285,8 +295,10 @@ describe('o registro em si', () => {
 describe('exclusão', () => {
   it('excluir o gasto solta a chave no mesmo lote; relançar a mesma nota funciona', async () => {
     await seedWithKey('e1', K1);
-    await assertFails(remove(A, 'e1')); // o registro ficaria preso
-    await assertSucceeds(remove(A, 'e1', K1));
+    // Confirmado: só sai pelo pedido, aprovado pelo outro membro.
+    await assertSucceeds(requestDeletion(A, ['e1']));
+    await assertFails(remove(B, 'e1')); // o registro ficaria preso
+    await assertSucceeds(remove(B, 'e1', K1));
     expect(await registryOf(K1)).toBeNull();
     await assertSucceeds(create(B, 'e2', nfce(K1, 'typed')));
   });
@@ -300,15 +312,17 @@ describe('exclusão', () => {
 
   it('gasto anterior ao registro sai sem registro; duplicata antiga não leva o registro da outra', async () => {
     await seedWithKey('antigo', K2, { registered: false });
-    await assertSucceeds(remove(A, 'antigo'));
+    await assertSucceeds(requestDeletion(A, ['antigo']));
+    await assertSucceeds(remove(B, 'antigo'));
     // Duas notas iguais de antes do registro: o registro aponta para a primeira.
     await seedWithKey('dup1', K1);
     await seed('dup2', newExpenseData(input(A, nfce(K1)), A, CURRENT, ids('dup2'), null));
-    await assertFails(remove(A, 'dup2', K1)); // o registro é da dup1
-    await assertSucceeds(remove(A, 'dup2'));
+    await assertSucceeds(requestDeletion(A, ['dup1', 'dup2']));
+    await assertFails(remove(B, 'dup2', K1)); // o registro é da dup1
+    await assertSucceeds(remove(B, 'dup2'));
     expect(await registryOf(K1)).toBe('dup1');
-    await assertFails(remove(A, 'dup1'));
-    await assertSucceeds(remove(A, 'dup1', K1));
+    await assertFails(remove(B, 'dup1'));
+    await assertSucceeds(remove(B, 'dup1', K1));
   });
 });
 
@@ -351,7 +365,9 @@ describe('compra parcelada: um registro por série', () => {
   it('excluir a série inteira solta a chave', async () => {
     const parcels = series(K1, 3);
     await assertSucceeds(createSeries(A, parcels));
-    const fs = db(A);
+    // Série confirmada: o pedido vale para a série; o outro membro aprova excluindo.
+    await assertSucceeds(requestDeletion(A, parcels.map((p) => p.id)));
+    const fs = db(B);
     const without = fs.batch();
     for (const p of parcels) without.delete(fs.doc(expPath(p.id)));
     await assertFails(without.commit());
@@ -395,9 +411,11 @@ describe('compra parcelada: um registro por série', () => {
     await assertSucceeds(edit({ type: 'photo', replaced: true }));
     expect(await registryOf(K1)).toBe('serie1');
     await assertFails(db(A).doc(keyPath(K1)).delete());
-    // Excluir as parcelas abertas também não solta a chave.
-    const del = fs.batch();
-    for (const p of open) del.delete(fs.doc(expPath(p.id)));
+    // Excluir as parcelas abertas (já confirmadas: pelo pedido) também não solta a chave.
+    await assertSucceeds(requestDeletion(A, open.map((p) => p.id)));
+    const other = db(B);
+    const del = other.batch();
+    for (const p of open) del.delete(other.doc(expPath(p.id)));
     await assertSucceeds(del.commit());
     await assertFails(create(B, 'e1', nfce(K1)));
   });

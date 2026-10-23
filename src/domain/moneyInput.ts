@@ -1,5 +1,5 @@
-import { MAX_DIGITS, formatBRL } from './money';
-import type { Cents } from './settlement';
+import { MAX_DIGITS, formatBRL } from './money.js';
+import type { Cents } from './settlement.js';
 
 /**
  * Campo de valor no estilo do app do banco. O valor é a sequência de dígitos

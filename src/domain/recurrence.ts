@@ -109,6 +109,8 @@ export function recurringExpenseData<T>(
     competence: resolveCompetence(date, closedMonths, today),
     receipt: { type: 'none' as const },
     status: fixed ? ('confirmed' as const) : ('awaiting_confirmation' as const),
+    // Fixo nasce confirmado: já conta como confirmado uma vez (só sai pelo pedido de exclusão).
+    ...(fixed ? { everConfirmed: true as const } : {}),
     createdBy: rec.payerUid,
     createdAt: now,
     updatedAt: now,

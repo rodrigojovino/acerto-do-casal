@@ -81,6 +81,8 @@ function expense(overrides: Record<string, unknown> = {}): Record<string, unknow
   if (!('status' in overrides)) {
     data.status = (data.receipt as { type: string }).type === 'none' ? 'pending_approval' : 'confirmed';
   }
+  // Como o app grava: confirmado leva a marca permanente de "já confirmado".
+  if (data.status === 'confirmed' && !('everConfirmed' in overrides)) data.everConfirmed = true;
   return data;
 }
 
@@ -162,7 +164,9 @@ function create(uid: string, id: string, data: Record<string, unknown>) {
  */
 function edit(uid: string, id: string, changes: Record<string, unknown>) {
   const fs = db(uid);
-  const batch = fs.batch().update(fs.doc(path(id)), { ...changes, updatedAt: serverTime() });
+  // Como o app grava: virar confirmado leva a marca de "já confirmado".
+  const marked = changes.status === 'confirmed' && !('everConfirmed' in changes) ? { ...changes, everConfirmed: true } : changes;
+  const batch = fs.batch().update(fs.doc(path(id)), { ...marked, updatedAt: serverTime() });
   const key = keyIn(changes);
   if (key) batch.set(fs.doc(`groups/${GROUP}/fiscalKeys/${key}`), fiscalKeyData(id, uid, serverTime()));
   return batch.commit();
