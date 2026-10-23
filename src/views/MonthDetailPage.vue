@@ -42,11 +42,13 @@
             <ul class="expenses">
               <li v-for="e in expenses" :key="e.id">
                 <router-link class="expense" :to="{ name: 'gasto', params: { id: e.id } }">
-                  <span class="expense-main">
-                    <span class="expense-name">{{ e.description }}</span>
-                    <span class="expense-sub">{{ firstNameOf(e.payerUid) }} · {{ formatDateBR(e.date, false) }}{{ e.installment ? ` · parcela ${e.installment.index}/${e.installment.count}` : '' }}</span>
-                  </span>
-                  <span class="num strong">{{ formatBRL(e.totalCents) }}</span>
+                  <ExpenseRow
+                    :name="e.description"
+                    :sub="expenseSubtitle(e, myUid, firstNameOf(e.payerUid))"
+                    :amount="formatBRL(e.totalCents)"
+                    :badge="badgeFor(e, myUid)"
+                    :types="typeBadges(e)"
+                  />
                 </router-link>
               </li>
             </ul>
@@ -63,12 +65,14 @@ import { IonContent, IonPage } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import BreakdownCard from '@/components/BreakdownCard.vue';
+import ExpenseRow from '@/components/ExpenseRow.vue';
 import PaymentList from '@/components/PaymentList.vue';
 import ReopenPanel from '@/components/ReopenPanel.vue';
 import { formatDateBR, monthLabel, monthName, todayInSaoPaulo } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
 import { watchMonth, type MonthDoc } from '@/services/closing';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
+import { badgeFor, expenseSubtitle, typeBadges } from '@/services/expenseView';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const route = useRoute();
@@ -199,23 +203,6 @@ function goBack(): void {
 
 li:last-child .expense {
   border-bottom: 0;
-}
-
-.expense-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.expense-name {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.expense-sub {
-  font-size: 12px;
-  color: var(--app-muted);
 }
 
 .strong {

@@ -634,6 +634,7 @@ function goBack(): void {
 }
 
 .note-text {
+  color: var(--app-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

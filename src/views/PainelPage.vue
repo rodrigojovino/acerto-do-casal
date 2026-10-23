@@ -104,37 +104,29 @@
         <ul v-else class="list card">
           <li v-for="item in expenses" :key="item.id">
             <router-link class="item" :to="{ name: 'gasto', params: { id: item.id } }">
-            <span class="avatar" aria-hidden="true">{{ initials(item.payerUid) }}</span>
-            <span class="item-main">
-              <span class="item-name">{{ item.description }}</span>
-              <span class="item-sub">{{ expenseSubtitle(item, myUid, firstNameOf(item.payerUid)) }}</span>
-            </span>
-            <span class="item-side">
-              <span class="num strong">{{ item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents) }}</span>
-              <span class="tags">
-                <TypeBadge v-for="t in typeBadges(item)" :key="t" :label="t" />
-                <svg v-if="item.pendingWrite" class="sync-icon" role="img" aria-label="Sincronizando" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
-                <span v-for="flag in flagsFor(item)" :key="flag" class="tag flag">{{ flagLabel[flag] }}</span>
-                <StatusBadge v-bind="badgeFor(item, myUid)" />
-              </span>
-            </span>
+              <ExpenseRow
+                :name="item.description"
+                :sub="expenseSubtitle(item, myUid, firstNameOf(item.payerUid))"
+                :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents)"
+                :badge="badgeFor(item, myUid)"
+                :types="typeBadges(item)"
+                :syncing="item.pendingWrite"
+              >
+                <span v-for="flag in flagsFor(item)" :key="flag" class="line warn">{{ flagLabel[flag] }}</span>
+              </ExpenseRow>
             </router-link>
           </li>
           <!-- Previsão de recorrentes (calculada, não gravada; fora do saldo) -->
           <li v-for="f in forecast" :key="`previsto-${f.recurringId}`">
             <button type="button" class="item forecast" @click="openForecast(f)">
-              <span class="avatar" aria-hidden="true">{{ initials(f.payerUid) }}</span>
-              <span class="item-main">
-                <span class="item-name">{{ f.description }}</span>
-                <span class="item-sub">{{ firstNameOf(f.payerUid) }} · {{ formatDateBR(f.date, false) }} · previsto{{ f.adjustmentPending ? ' · reajuste aguardando aprovação' : '' }}</span>
-              </span>
-              <span class="item-side">
-                <span class="num strong">{{ f.amountCents === null ? 'a definir' : formatBRL(f.amountCents) }}</span>
-                <span class="tags">
-                  <TypeBadge label="Recorrente" />
-                  <StatusBadge v-bind="FORECAST_BADGE" />
-                </span>
-              </span>
+              <ExpenseRow
+                :name="f.description"
+                :sub="`${firstNameOf(f.payerUid)} · ${formatDateBR(f.date, false)} · previsto${f.adjustmentPending ? ' · reajuste aguardando aprovação' : ''}`"
+                :amount="f.amountCents === null ? 'a definir' : formatBRL(f.amountCents)"
+                :badge="FORECAST_BADGE"
+                :types="['Recorrente']"
+                muted
+              />
             </button>
           </li>
         </ul>
@@ -151,7 +143,7 @@ import { IonContent, IonFooter, IonPage, alertController, onIonViewWillEnter } f
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
-import StatusBadge from '@/components/StatusBadge.vue';
+import ExpenseRow from '@/components/ExpenseRow.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { clampMonth, formatDateBR, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { formatBRL } from '@/domain/money';
@@ -164,7 +156,6 @@ import { askReopenReason } from '@/components/reopenDialog';
 import { isOnline } from '@/services/sync';
 import { dismissPushInvite, enablePush, pushAskedBefore, pushPermission } from '@/services/push';
 import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
-import TypeBadge from '@/components/TypeBadge.vue';
 import { forecastRecurring, forecastTotal, type Forecast } from '@/domain/recurrence';
 import { forecastNotice } from '@/services/recurringView';
 import { watchRecurring, type RecurringDoc } from '@/services/recurring';
@@ -393,11 +384,6 @@ const countText = computed(() => {
   const n = expenses.value.length;
   return n === 1 ? '1 lançamento' : `${n} lançamentos`;
 });
-
-function initials(uid: string): string {
-  if (uid === myUid.value) return 'EU';
-  return firstNameOf(uid).slice(0, 3).toUpperCase();
-}
 </script>
 
 <style scoped>
@@ -565,41 +551,6 @@ li:last-child .item {
   outline-offset: -2px;
 }
 
-.avatar {
-  width: 34px;
-  height: 34px;
-  flex: none;
-  border-radius: 10px;
-  background: var(--app-subtle);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--app-muted);
-}
-
-.item-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.item-name {
-  font-size: 14px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-sub {
-  font-size: 12px;
-  color: var(--app-muted);
-}
-
 .push-invite {
   padding: 14px 16px;
   display: flex;
@@ -637,11 +588,6 @@ li:last-child .item {
   background: repeating-linear-gradient(135deg, transparent 0 8px, rgba(0, 0, 0, 0.025) 8px 16px);
 }
 
-.item.forecast .item-name,
-.item.forecast .num {
-  color: var(--app-muted);
-}
-
 .forecast-line {
   margin: 0;
   padding-top: 10px;
@@ -650,46 +596,4 @@ li:last-child .item {
   justify-content: space-between;
 }
 
-.item-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  font-size: 14px;
-}
-
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 6px;
-}
-
-.tag.flag {
-  background: var(--app-subtle);
-  color: #3f3f3b;
-}
-
-.sync-icon {
-  color: var(--app-accent);
-}
-
-.tag {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-
-.tag.pending,
-.tag.approve {
-  background: #fcebd9;
-  color: #8a3f00;
-}
-
-.tag.returned {
-  background: var(--app-danger-bg);
-  color: var(--app-danger);
-}
 </style>

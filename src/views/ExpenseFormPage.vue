@@ -104,7 +104,7 @@
             <textarea
               id="obs"
               v-model="note"
-              class="input note"
+              class="input note-input"
               rows="2"
               :maxlength="MAX_NOTE"
               placeholder="Ex.: churrasco do sábado, dividido com a família"
@@ -674,7 +674,7 @@ function goBack(): void {
   margin: 0;
 }
 
-textarea.note {
+textarea.note-input {
   height: auto;
   min-height: 64px;
   padding-top: 10px;
@@ -788,7 +788,8 @@ textarea.note {
   font-weight: 800;
 }
 
-.note {
+/* Linhas de aviso do cartão escuro de resumo (não é a observação). */
+.row.note {
   margin-top: 4px;
   color: #ffd9b3;
   font-weight: 600;

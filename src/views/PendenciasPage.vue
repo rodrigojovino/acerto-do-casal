@@ -32,17 +32,10 @@
           <section class="section" aria-labelledby="sec-aprovar">
             <h2 id="sec-aprovar" class="title warn">Para você aprovar · {{ toApprove.length }}</h2>
             <router-link v-for="e in toApprove" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
-              <span class="item-main">
-                <span class="item-name">{{ e.description }}</span>
-                <span class="item-sub">{{ subtitle(e) }}</span>
-                <span v-if="noteSummary(e.note)" class="item-sub note">“{{ noteSummary(e.note) }}”</span>
-                <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
-              </span>
-              <span class="side">
-                <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
-                <StatusBadge v-bind="badgeFor(e, myUid)" />
-                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
-              </span>
+              <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :badge="badgeFor(e, myUid)" :types="e.installment ? [seriesLabel(e)] : []">
+                <span v-if="noteSummary(e.note)" class="line note">“{{ noteSummary(e.note) }}”</span>
+                <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
+              </ExpenseRow>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="toApprove.length === 0" class="empty">Nada para aprovar agora.</p>
@@ -53,17 +46,10 @@
             <h2 id="sec-aguardando" class="title">Aguardando {{ partnerFirstName }} aprovar · {{ waiting.length }}</h2>
             <div v-for="e in waiting" :key="e.id" class="waiting">
               <router-link class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
-                <span class="item-main">
-                  <span class="item-name">{{ e.description }}</span>
-                  <span class="item-sub">{{ subtitle(e) }}</span>
-                <span v-if="noteSummary(e.note)" class="item-sub note">“{{ noteSummary(e.note) }}”</span>
-                <span v-if="e.installment" class="item-sub">{{ seriesLine(e) }}</span>
-                </span>
-                <span class="side">
-                  <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
-                  <StatusBadge v-bind="badgeFor(e, myUid)" />
-                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
-                </span>
+                <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :badge="badgeFor(e, myUid)" :types="e.installment ? [seriesLabel(e)] : []">
+                  <span v-if="noteSummary(e.note)" class="line note">“{{ noteSummary(e.note) }}”</span>
+                  <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
+                </ExpenseRow>
                 <span aria-hidden="true" class="chev">›</span>
               </router-link>
               <router-link v-if="e.receipt.type === 'none'" class="attach" :to="{ name: 'gasto-editar', params: { id: e.id } }">
@@ -77,17 +63,11 @@
           <section class="section" aria-labelledby="sec-devolvidos">
             <h2 id="sec-devolvidos" class="title">Devolvidos para você corrigir · {{ returned.length }}</h2>
             <router-link v-for="e in returned" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
-              <span class="item-main">
-                <span class="item-name">{{ e.description }}</span>
-                <span class="item-sub danger">
+              <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :badge="badgeFor(e, myUid)" :types="e.installment ? [seriesLabel(e)] : []">
+                <span class="line danger">
                   {{ e.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' }}{{ e.rejection?.reason ? `: "${e.rejection.reason}"` : ' sem motivo informado' }}
                 </span>
-              </span>
-              <span class="side">
-                <span class="num strong">{{ formatBRL(e.installment?.purchaseCents ?? e.totalCents) }}</span>
-                <StatusBadge v-bind="badgeFor(e, myUid)" />
-                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
-              </span>
+              </ExpenseRow>
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="returned.length === 0" class="empty">
@@ -99,15 +79,13 @@
           <section class="section" aria-labelledby="sec-recorrentes">
             <h2 id="sec-recorrentes" class="title">Recorrentes para confirmar · {{ toConfirm.length + recurringToApprove.length }}</h2>
             <router-link v-for="e in toConfirm" :key="e.id" class="item card" :to="{ name: 'gasto-editar', params: { id: e.id } }">
-              <span class="item-main">
-                <span class="item-name">{{ e.description }}</span>
-                <span class="item-sub">Vence {{ formatDateBR(e.date, false) }} · confirme o valor deste mês</span>
-              </span>
-              <span class="side">
-                <TypeBadge label="Recorrente" />
-                <StatusBadge v-bind="badgeFor(e, myUid)" />
-                <TypeBadge v-if="e.installment" :label="seriesLabel(e)" />
-              </span>
+              <ExpenseRow
+                :name="e.description"
+                :sub="`Vence ${formatDateBR(e.date, false)} · confirme o valor deste mês`"
+                amount="a confirmar"
+                :badge="badgeFor(e, myUid)"
+                :types="['Recorrente']"
+              />
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <router-link
@@ -116,14 +94,12 @@
               class="item card"
               :to="{ name: 'recorrente', params: { id: r.id } }"
             >
-              <span class="item-main">
-                <span class="item-name">{{ r.description }}</span>
-                <span class="item-sub">{{ r.proposal ? 'Reajuste proposto' : 'Conta recorrente nova' }} · dia {{ r.dayOfMonth }}</span>
-              </span>
-              <span class="side">
-                <span class="num strong">{{ termsAmountLabel(r.proposal ?? r) }}</span>
-                <StatusBadge v-bind="recurringBadge(r, myUid)" />
-              </span>
+              <ExpenseRow
+                :name="r.description"
+                :sub="`${r.proposal ? 'Reajuste proposto' : 'Conta recorrente nova'} · dia ${r.dayOfMonth}`"
+                :amount="termsAmountLabel(r.proposal ?? r)"
+                :badge="recurringBadge(r, myUid)"
+              />
               <span aria-hidden="true" class="chev">›</span>
             </router-link>
             <p v-if="toConfirm.length + recurringToApprove.length === 0" class="empty">
@@ -151,7 +127,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { formatDateBR, monthLabel, monthName } from '@/domain/calendar';
-import TypeBadge from '@/components/TypeBadge.vue';
 import { collapseSeries } from '@/services/series';
 import { noteSummary } from '@/domain/notifications';
 import { watchMonths, type MonthDoc } from '@/services/closing';
@@ -161,7 +136,7 @@ import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
 import { badgeFor, flagLabel, flagsFor } from '@/services/expenseView';
-import StatusBadge from '@/components/StatusBadge.vue';
+import ExpenseRow from '@/components/ExpenseRow.vue';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const myUid = computed(() => user.value?.uid ?? '');
@@ -327,23 +302,10 @@ function subtitle(e: Expense): string {
   color: var(--app-muted);
 }
 
-.item-sub.note {
-  font-style: italic;
-}
 
-.item-sub.danger {
-  color: var(--app-danger);
-}
 
 .strong {
   font-weight: 800;
-}
-
-.side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
 }
 
 .chev {

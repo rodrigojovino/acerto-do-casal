@@ -8,17 +8,20 @@ defineProps<{ label: string }>();
 </script>
 
 <style scoped>
-/* Neutro e sem ícone, para não competir com o selo de status. */
+/* Neutro e sem ícone, para não competir com o selo de status; mesmo tamanho dele. */
 .type {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: 6px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
   background: var(--app-subtle);
   color: #3f3f3b;
-  font-size: 11px;
+  font-size: 8.5px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1;
   white-space: nowrap;
 }
 </style>

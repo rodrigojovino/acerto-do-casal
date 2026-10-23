@@ -11,8 +11,12 @@
 }
 
 /* Telas sem a barra inferior: o fim do conteúdo precisa sair de trás da navegação do Android. */
+/* Telas sem a barra inferior (formulário, Detalhe): o último botão fica acima
+   da navegação do Android. No mínimo a altura da navegação por 3 botões (48px),
+   mesmo se a área segura vier zerada (já aconteceu com o env() e pode acontecer
+   logo depois de fechar o teclado). */
 .screen.no-tabbar {
-  padding-bottom: calc(24px + var(--app-safe-bottom));
+  padding-bottom: calc(24px + max(var(--app-safe-bottom), 48px));
 }
 
 .page-head {

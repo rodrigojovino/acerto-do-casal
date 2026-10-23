@@ -24,22 +24,26 @@ defineProps<{ kind: BadgeKind; label: string }>();
    foto do recibo (lilás claro, tracejado roxo) → recorrente aprovado (verde-azulado
    médio, contorno contínuo) → validado (verde escuro preenchido).
    Demais: pendente = âmbar claro; devolvido e a confirmar = médio. */
+/* Tamanho padronizado (~30% menor que antes), a mesma altura para todos,
+   inclusive os sem contorno (borda transparente), e a mesma do selo de tipo. */
 .badge {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px 2px 6px;
+  gap: 3px;
+  height: 16px;
+  padding: 0 6px 0 4px;
   border-radius: 999px;
-  border: 1.5px solid transparent;
-  font-size: 11px;
+  border: 1px solid transparent;
+  font-size: 8.5px;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1;
   white-space: nowrap;
 }
 
 .badge svg {
-  width: 12px;
-  height: 12px;
+  width: 9px;
+  height: 9px;
   flex: none;
 }
 
@@ -50,19 +54,19 @@ defineProps<{ kind: BadgeKind; label: string }>();
 
 .auto {
   background: #ffffff;
-  border: 1.5px dashed #2457c5;
+  border: 1px dashed #2457c5;
   color: #1a3f94;
 }
 
 .photo {
   background: #ece4fa;
-  border: 1.5px dashed #6a3fb5;
+  border: 1px dashed #6a3fb5;
   color: #45207f;
 }
 
 .recurring {
   background: #7cc4ba;
-  border: 1.5px solid #17695f;
+  border: 1px solid #17695f;
   color: #062b27;
 }
 
@@ -84,7 +88,7 @@ defineProps<{ kind: BadgeKind; label: string }>();
 /* Previsto: cinza com contorno tracejado (ainda não é um gasto). */
 .forecast {
   background: #ffffff;
-  border: 1.5px dashed #6b6a65;
+  border: 1px dashed #6b6a65;
   color: #3f3f3b;
 }
 </style>
