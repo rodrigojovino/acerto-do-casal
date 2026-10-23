@@ -23,6 +23,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - `npm run emulators` sobe Auth, Firestore, Functions e Storage locais; o app usa os emuladores em dev com `VITE_USE_EMULATORS=true`.
 - `node --experimental-transform-types scripts/admin/reconsultar-itens.ts [--gravar]`: reconsulta única dos itens das NFC-e de SP conferidas sem itens (as anteriores ao bloco C da Fase 7). Usa o login da CLI (dono), projeto fixo; por padrão só simula e mostra contagens; `--gravar` cria `nfceItems` com `source: 'backfill'` sem sobrescrever. Rodar com a VPN desligada e só com confirmação explícita do Rodrigo.
 - `node --experimental-transform-types scripts/admin/registrar-notas.ts [--gravar]`: registro único (`fiscalKeys`) das notas lançadas antes do bloqueio de nota repetida e lista das notas lançadas mais de uma vez (id, data, competência, quem lançou, valor, mês aberto/fechado; chave só pelos 4 últimos dígitos). Mesmo login e projeto fixo; por padrão só simula; `--gravar` cria só os registros que não existem, apontando para o gasto lançado primeiro (os repetidos ficam para decisão do Rodrigo). Só com confirmação explícita.
+- `node --experimental-transform-types scripts/admin/fotos-orfas.ts [--apagar]`: fotos órfãs no Storage, com a mesma regra da varredura semanal (`cleanOrphanPhotos`). Mesmo login e projeto fixo; por padrão só simula e mostra contagens; `--apagar` só com confirmação explícita do Rodrigo.
 - `npm run recorrentes:gerar -- [YYYY-MM | YYYY-MM-DD]` dispara a geração de recorrentes no emulador simulando o dia 1 do mês (padrão: mês atual) ou um dia qualquer. O agendamento não roda no emulador.
 - Todo comando da CLI leva `--project acerto-do-casal` explícito. Existe outro projeto Firebase de trabalho na mesma conta: nunca executar comandos nele.
 - Antes de um deploy que inclua Firestore ou Storage, confirmar que o banco e o bucket existem e em qual região: o `firebase deploy` cria o banco sozinho na região padrão (`nam5`) quando ele não existe, e a região não muda depois.
@@ -260,6 +261,7 @@ groups/{groupId}/recurring/{recurringId}
 
 Fotos no Storage em `groups/{groupId}/receipts/{expenseId}.jpg`, comprimidas no aparelho antes do upload. As regras aceitam só membros do grupo, `image/jpeg` e menos de 5 MB.
 Comprovantes PIX do acerto em `groups/{groupId}/settlements/{YYYY-MM}/{paymentId}.jpg`: membros enviam (arquivo novo, JPEG até 1 MB) enquanto o mês não está fechado e leem; sem troca nem exclusão.
+Fotos órfãs: a Function agendada `cleanOrphanPhotos` (domingo às 4h de São Paulo, `functions/src/photoCleanup.ts`, regra pura `orphanPhotos` em `functions/src/photos.ts`) apaga os comprovantes de `receipts/` e `settlements/` que nenhum gasto (`receipt.photoPath`, inclusive de qualquer parcela da série) nem pagamento registrado (`payments[].receiptPath`) usa, com mais de 7 dias desde a última gravação. Comprovante PIX de pagamento registrado nunca sai. O bucket guarda os apagados por 7 dias (soft delete). Testes em `tests/emulators/photos.cleanup.spec.ts`.
 
 Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators/`):
 - `expenses`: só membros leem. Centavos inteiros, total > 0, pessoal ≤ total, pct inteiro 0..100, pagador membro, descrição 1..80, observação opcional 1..300 (só quem lançou grava; mudá-la num confirmado volta para aprovação, como qualquer edição), data até o fim do mês seguinte, competência coerente com a data e nunca em mês fechado.
@@ -308,11 +310,21 @@ Prova de conceito (Fase 1): viável com limitações, sem captcha; depende do HT
    - [x] Bloco C: itens da NFC-e de SP (lidos pela `checkNfce`, "Ver itens da nota" no Detalhe, offline; reconsulta das notas antigas por `scripts/admin/reconsultar-itens.ts`), v0.7.1.
    - [ ] Bloco D: exportação Excel/PDF (do mês e do histórico). **Adiado** para uma versão futura: não implementar agora.
    - [ ] Bloco E: manutenção (o próximo, depois da v0.7.4).
-     - [ ] Limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline). Herdada da Fase 4.
+     - [ ] Limpar fotos órfãs no Storage (foto já enviada de um gasto que trocou para "Sem comprovante" ou para QR, ou excluído offline; comprovante PIX sem pagamento): varredura semanal `cleanOrphanPhotos` e script `fotos-orfas.ts`. Herdada da Fase 4.
      - [ ] Reduzir o tamanho do APK (de ~6 MB para ~32 MB com a leitura de QR): avaliar o modelo de QR via Google Play Services em vez do embutido no APK. Herdada da Fase 4.
      - [ ] Restringir as chaves de API do Firebase (Android e web) no Google Cloud Console. Configuração do Rodrigo, passo a passo e lista exata em `docs/bloco-e-consoles.md`: a Browser key é usada também pelo app Android (Firebase JS no WebView, origem `https://localhost`), e a Android key só pelos SDKs nativos (avisos).
      - [ ] Proteger as tags `v*` no GitHub com Rulesets: só o dono (admin) cria e apaga; ninguém altera uma tag existente (dois rulesets). Configuração do Rodrigo, passo a passo em `docs/bloco-e-consoles.md`.
      - [ ] Backups agendados do Firestore (recomendado: diário com retenção de 14 dias), pelo comando ou pelo console, e como restaurar (sempre num banco novo, nunca por cima do `(default)`): `docs/bloco-e-consoles.md`. Comandos de backup e de restauração só com confirmação explícita do Rodrigo.
+   - [ ] Próximo, depois do bloco E (não implementar antes): pedido de exclusão de gasto aprovado, linha de dados maior e visualizador de fotos.
+     - Gastos aprovados (Automático, Foto do recibo, Recorrente aprovado, Validado) não são excluídos direto: quem lançou faz "Pedir exclusão", com motivo opcional, e o outro membro aprova (o gasto é excluído) ou recusa (o gasto continua). Quem pediu pode cancelar.
+     - Pendentes e devolvidos continuam com exclusão direta por quem lançou.
+     - Até a decisão, o gasto continua no saldo, com o selo "Exclusão pedida", e o pedido bloqueia o fechamento do mês.
+     - Aparece em Pendências e no contador para o outro membro e gera aviso na categoria Gastos.
+     - Série de parcelas: o pedido vale para a série inteira (meses abertos). A chave da nota (`fiscalKeys`) só é liberada quando a exclusão é aprovada.
+     - Mês fechado continua sem exclusão (precisa reabrir antes).
+     - As regras do Firestore impedem a exclusão direta de gasto aprovado.
+     - Linha de dados da lista de gastos (quem pagou · data · divisão, `ExpenseRow`): fonte cerca de 20% maior que a atual (de 9px para ~11px).
+     - Visualizador de fotos (comprovantes de gasto, foto da nota e PIX), como a galeria do celular: abre com a foto inteira ajustada à tela; pinça com dois dedos aproxima e afasta centrada nos dedos (até ~5x); toque duplo alterna entre a foto inteira e ~2,5x no ponto tocado; arrastar alcança todas as bordas da foto, sem passar delas; fecha com ✕ e com o botão voltar do Android. Pode usar uma biblioteca de gestos consolidada. Testar com uma foto na vertical e uma na horizontal. Hoje o zoom não mostra a foto inteira e o arraste não alcança as bordas.
 8. [ ] Uso real em paralelo com a planilha por um mês
 
 Fora do MVP: categorias com gráficos, importação da planilha.
