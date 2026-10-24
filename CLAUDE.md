@@ -153,6 +153,13 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 - **Previsão**: só nos meses futuros navegáveis (o mês atual já foi gerado), o Painel mostra os recorrentes ativos ainda não gerados, calculados na hora (`forecastRecurring` em `src/domain/recurrence.ts`, nada gravado), com selo "Previsto" e "Recorrente"; variável com valor "a definir". Fora do saldo; o cartão mostra "Previsto em recorrentes" (só fixos). A previsão **não** estende o limite de navegação. O toque numa previsão não abre a edição do cadastro: abre um painel curto (`forecastNotice`, `src/services/recurringView.ts`) com "[descrição] · previsto para [data]. Este gasto será gerado em 1º de [mês]" e, no variável, quem informa o valor ("Você poderá informar o valor quando ele aparecer em Pendências"), com "Ver cadastro".
 - Pendências: "Recorrentes para confirmar" (variáveis aguardando o seu valor e cadastros fixos do outro para aprovar).
 
+### Painel: botões e filtros
+
+- Abaixo do saldo: "Fechar [mês]" à esquerda (40%, preto, largura mínima do pior mês, "Fechar novembro", + 5%, sem quebrar linha) e "Filtros" à direita (30%, branco com contorno, funil à esquerda; com filtro ativo, contorno, texto e funil em azul de destaque, "Filtros · N"). Mês fechado: a linha do acerto pago continua e só o Filtros aparece.
+- Janela de filtros (`FiltersSheet`): busca na descrição (sem maiúsculas nem acentos), quem pagou, categoria (na ordem do casal, desativadas e "Sem categoria"), situação (os 8 selos de status de gasto), tipo (parcelado, recorrente), período pela data do gasto, legenda dos ícones; "Limpar filtros" e "Ver N gastos" (aplica). Critérios diferentes se somam; opções do mesmo critério valem qualquer uma. Funções puras em `src/services/expenseFilters.ts`.
+- Afetam só a lista: o saldo continua do mês inteiro. Com filtro: "Mostrando X de Y gastos · R$ Z · Limpar" acima da lista (soma dos mostrados), previsões de recorrentes escondidas, aviso quando o período fica fora do mês.
+- Continuam ao trocar de mês, até serem limpos; só na memória (`src/services/filterState.ts`): fechar o app os limpa, nada fica guardado no aparelho.
+
 ### Mês (competência)
 
 - Fecha só sem gastos `pending_approval`, `returned` ou `awaiting_confirmation`, sem pedido de exclusão aberto, e com o pagamento do acerto registrado (comprovante PIX ou "pago em dinheiro").

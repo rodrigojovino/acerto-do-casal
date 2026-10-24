@@ -82,9 +82,23 @@
           </p>
           <p v-if="reopenError" class="alert-error" role="alert">{{ reopenError }}</p>
         </template>
-        <router-link v-else-if="canOfferClose" class="btn outline close-btn" :to="{ name: 'fechar', params: { mes: month } }">
-          Fechar {{ monthName(month) }}
-        </router-link>
+        <!-- Fechar (40%, à esquerda) e Filtros (30%, à direita); mês fechado: só Filtros. -->
+        <div class="actions-row">
+          <router-link v-if="!isClosed && canOfferClose" class="close-month" :to="{ name: 'fechar', params: { mes: month } }">
+            Fechar {{ monthName(month) }}
+          </router-link>
+          <span v-else aria-hidden="true" />
+          <button
+            class="filters-btn"
+            :class="{ active: filterCount > 0 }"
+            type="button"
+            :aria-label="filterCount > 0 ? `Filtros, ${filterCount} em uso` : 'Filtros'"
+            @click="filtersOpen = true"
+          >
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z" /></svg>
+            <span>{{ filterCount > 0 ? `Filtros · ${filterCount}` : 'Filtros' }}</span>
+          </button>
+        </div>
 
         <router-link v-if="pending.open > 0 || pending.awaitingMine > 0" class="pending" :to="{ name: 'pendencias' }">
           <span>{{ pendingText }}</span><span aria-hidden="true">›</span>
@@ -95,14 +109,25 @@
           <span class="hint">{{ countText }}</span>
         </div>
 
+        <!-- Com filtro: quantos de quantos e a soma dos mostrados -->
+        <div v-if="filterCount > 0 && loaded && !loadError" class="filter-summary" role="status">
+          <span>{{ filterText }}</span>
+          <button class="link" type="button" @click="clearPainelFilters">Limpar</button>
+        </div>
+        <p v-if="filterCount > 0 && periodOutside" class="hint">O período dos filtros fica fora de {{ monthName(month) }}.</p>
+
         <p v-if="loadError" class="alert-error" role="alert">{{ loadError }}</p>
         <p v-else-if="!loaded" class="hint center">Carregando…</p>
+        <div v-else-if="filterCount > 0 && shown.length === 0" class="empty card">
+          <p class="strong">Nenhum gasto com esses filtros.</p>
+          <p class="hint">Ajuste os filtros ou toque em Limpar.</p>
+        </div>
         <div v-else-if="expenses.length === 0 && forecast.length === 0" class="empty card">
           <p class="strong">Nenhum gasto em {{ monthName(month) }}.</p>
           <p class="hint">Toque em + para lançar o primeiro.</p>
         </div>
         <ul v-else class="list card">
-          <li v-for="item in expenses" :key="item.id">
+          <li v-for="item in shown" :key="item.id">
             <router-link class="item" :to="{ name: 'gasto', params: { id: item.id } }">
               <ExpenseRow
                 :name="item.description"
@@ -116,7 +141,7 @@
             </router-link>
           </li>
           <!-- Previsão de recorrentes (calculada, não gravada; fora do saldo) -->
-          <li v-for="f in forecast" :key="`previsto-${f.recurringId}`">
+          <li v-for="f in shownForecast" :key="`previsto-${f.recurringId}`">
             <button type="button" class="item forecast" @click="openForecast(f)">
               <ExpenseRow
                 :name="f.description"
@@ -133,11 +158,29 @@
     <ion-footer class="ion-no-border">
       <AppTabBar active="painel" />
     </ion-footer>
+
+    <ion-modal :is-open="filtersOpen" @did-dismiss="filtersOpen = false">
+      <FiltersSheet
+        v-if="filtersOpen"
+        :filters="painelFilters"
+        :expenses="expenses"
+        :categories="categories"
+        :viewer-uid="myUid"
+        :partner-uid="partnerUid ?? ''"
+        :partner-name="partnerFirstName"
+        @apply="applyFilters"
+        @close="filtersOpen = false"
+      />
+    </ion-modal>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonFooter, IonPage, alertController, onIonViewWillEnter } from '@ionic/vue';
+import { IonContent, IonFooter, IonModal, IonPage, alertController, onIonViewWillEnter } from '@ionic/vue';
+import FiltersSheet from '@/components/FiltersSheet.vue';
+import { categories } from '@/services/categories';
+import { activeFilterCount, filterExpenses, filterSummary, periodOutsideMonth, type ExpenseFilters } from '@/services/expenseFilters';
+import { clearPainelFilters, painelFilters } from '@/services/filterState';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppTabBar from '@/components/AppTabBar.vue';
@@ -379,6 +422,20 @@ const pendingText = computed(() => {
   return parts.join(' · ');
 });
 
+// ---- Filtros (só a lista; o saldo continua do mês inteiro) ----
+const filtersOpen = ref(false);
+const filterCount = computed(() => activeFilterCount(painelFilters.value));
+const shown = computed(() => filterExpenses(expenses.value, painelFilters.value, myUid.value));
+// Previsão não é gasto: com filtro ativo, some da lista.
+const shownForecast = computed(() => (filterCount.value > 0 ? [] : forecast.value));
+const filterText = computed(() => filterSummary(shown.value, expenses.value.length));
+const periodOutside = computed(() => periodOutsideMonth(painelFilters.value, month.value));
+
+function applyFilters(f: ExpenseFilters): void {
+  painelFilters.value = f;
+  filtersOpen.value = false;
+}
+
 const countText = computed(() => {
   const n = expenses.value.length;
   return n === 1 ? '1 lançamento' : `${n} lançamentos`;
@@ -572,8 +629,69 @@ li:last-child .item {
   font-weight: 600;
 }
 
-.close-btn {
-  height: 44px;
+.actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Fechar: 40%, preto; largura mínima do pior mês ("Fechar novembro") + 5%. */
+.close-month {
+  width: 40%;
+  min-width: calc(8.95em + 20px);
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: var(--app-text);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+/* Filtros: 30%, branco com contorno; com filtro ativo, na cor do "Limpar". */
+.filters-btn {
+  width: 30%;
+  min-width: max-content;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 13px;
+  border: 1.5px solid var(--app-text);
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.filters-btn.active {
+  border-color: var(--app-accent);
+  color: var(--app-accent);
+}
+
+.filter-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--app-muted);
+}
+
+.filter-summary .link {
+  min-height: 32px;
+  font-weight: 700;
 }
 
 .item.forecast {

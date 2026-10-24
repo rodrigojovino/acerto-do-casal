@@ -114,7 +114,7 @@ export interface Badge {
   label: string;
 }
 
-type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt' | 'payerSharePct' | 'payerUid'> & {
+export type BadgeSource = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'rejection' | 'receipt' | 'payerSharePct' | 'payerUid'> & {
   recurringId?: string;
   deletionRequest?: { status: string };
 };
