@@ -104,6 +104,11 @@ describe('recurringExpenseData', () => {
     expect(d).not.toHaveProperty('approval');
   });
 
+  it('herda a categoria do cadastro; sem ela, o campo não existe', () => {
+    expect(recurringExpenseData(rec({ categoryId: 'cat1' }), '2026-10-12', new Set(), 'agora').categoryId).toBe('cat1');
+    expect(recurringExpenseData(rec(), '2026-10-12', new Set(), 'agora')).not.toHaveProperty('categoryId');
+  });
+
   it('variável nasce aguardando confirmação do valor', () => {
     const d = recurringExpenseData(rec({ kind: 'variable', amountCents: undefined }), '2026-10-12', new Set(), 'agora');
     expect(d.status).toBe('awaiting_confirmation');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closeBlockers } from '@/domain/closing';
-import { fiscalKeyChange, receiptData, type StoredReceipt } from './expenseData';
+import { expenseUpdateData, fiscalKeyChange, installmentUpdateData, newExpenseData, newInstallmentSeriesData, receiptData, type StoredReceipt } from './expenseData';
 import { flagsFor, originLabel } from './expenseView';
 
 // Chaves fictícias (NF-e de MG, modelo 55): sem consulta, comprovante "unchecked".
@@ -61,5 +61,30 @@ describe('registro da nota fiscal (fiscalKeyChange)', () => {
 
   it('excluir solta a chave', () => {
     expect(fiscalKeyChange(nfce(KEY), undefined)).toEqual({ release: KEY, register: null });
+  });
+});
+
+describe('categoria', () => {
+  const input = {
+    description: 'Mercado',
+    totalCents: 10000,
+    personalCents: 0,
+    payerUid: 'a',
+    payerSharePct: 50,
+    date: '2026-10-05',
+    receipt: { type: 'none' as const },
+  };
+  const current = { receipt: { type: 'none' as const }, status: 'pending_approval' as const };
+
+  it('gravada quando escolhida; sem categoria, o campo não existe', () => {
+    expect(newExpenseData({ ...input, categoryId: 'c1' }, 'a', '2026-10', ids, 'agora').categoryId).toBe('c1');
+    expect(newExpenseData(input, 'a', '2026-10', ids, 'agora')).not.toHaveProperty('categoryId');
+  });
+
+  it('edição sem categoria tira o campo; série leva a mesma em todas as parcelas', () => {
+    expect(expenseUpdateData(input, '2026-10', ids, current, 'agora', 'APAGAR').categoryId).toBe('APAGAR');
+    expect(installmentUpdateData({ ...input, categoryId: 'c2' }, current, { groupId: 'g', seriesId: 's' }, 'agora', 'APAGAR').categoryId).toBe('c2');
+    const parcels = newInstallmentSeriesData({ ...input, categoryId: 'c3' }, { count: 3, firstMonth: '2026-10' }, 'a', { groupId: 'g', seriesId: 's' }, 'agora');
+    expect(parcels.map((p) => p.data.categoryId)).toEqual(['c3', 'c3', 'c3']);
   });
 });

@@ -53,11 +53,12 @@ service cloud.firestore {
       allow read: if signedIn() && request.auth.uid in resource.data.members;
       allow create, delete: if false;
 
-      // Membro altera só a divisão padrão e o próprio nome.
+      // Membro altera só a divisão padrão, o próprio nome e a exigência de categoria.
       allow update: if signedIn()
         && request.auth.uid in resource.data.members
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['defaultSplitPct', 'memberNames'])
+             .hasOnly(['defaultSplitPct', 'memberNames', 'requireCategory'])
+        && request.resource.data.get('requireCategory', false) is bool
         && request.resource.data.defaultSplitPct is int
         && request.resource.data.defaultSplitPct >= 0
         && request.resource.data.defaultSplitPct <= 100
@@ -75,7 +76,8 @@ service cloud.firestore {
 
       // 'YYYY-MM' ou 'YYYY-MM-DD' → índice do mês (ano * 12 + mês - 1).
       function monthIndex(s) {
-        return int(s.split('-')[0]) * 12 + int(s.split('-')[1]) - 1;
+        let p = s.split('-');
+        return int(p[0]) * 12 + int(p[1]) - 1;
       }
 
       // Mês sem documento = aberto. Mês futuro (em UTC) nunca está fechado (o
@@ -93,6 +95,66 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // ---- Categorias ----
+      // Compartilhadas pelo casal: qualquer membro cria, renomeia, reordena,
+      // desativa e reativa. Nunca são apagadas (as regras não sabem se uma
+      // categoria está em uso): desativada, some da escolha e continua nos
+      // gastos que a usam. `order`: a posição na lista, a mesma para os dois.
+
+      function categoryPath(id) {
+        return /databases/$(database)/documents/groups/$(groupId)/categories/$(id);
+      }
+
+      function validCategoryName(n) {
+        return n is string && n.trim().size() >= 1 && n.size() <= 40;
+      }
+
+      function validCategoryOrder(o) {
+        return o is int && o >= 0 && o <= 9999;
+      }
+
+      // "Exigir categoria nos gastos" (ausente = desligada).
+      function requiresCategory() {
+        return get(groupPath(groupId)).data.get('requireCategory', false) == true;
+      }
+
+      // Categoria de um gasto ou recorrente: opcional; escolhida agora (nova ou
+      // trocada), existe e está ativa. Manter uma que depois foi desativada vale.
+      // Barata quando a categoria não muda (uma comparação): a edição de uma série
+      // com nota fiscal já fica perto do limite de expressões das regras.
+      // Categoria inexistente: o getAfter falha e a gravação é recusada.
+      function validCategoryChoice(d, before) {
+        let c = d.get('categoryId', null);
+        return c == null || c == before
+          || c is string
+            && c.matches('^[A-Za-z0-9]{1,40}$')
+            && getAfter(categoryPath(c)).data.active == true;
+      }
+
+      match /categories/{categoryId} {
+        allow read: if isMember(groupId);
+
+        allow create: if isMember(groupId)
+          && categoryId.matches('^[A-Za-z0-9]{1,40}$')
+          && request.resource.data.keys().hasOnly(['name', 'active', 'order', 'createdBy', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasAll(['name', 'active', 'order', 'createdBy', 'createdAt', 'updatedAt'])
+          && validCategoryName(request.resource.data.name)
+          && validCategoryOrder(request.resource.data.order)
+          && request.resource.data.active == true
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+
+        allow update: if isMember(groupId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'active', 'order', 'updatedAt'])
+          && validCategoryName(request.resource.data.name)
+          && validCategoryOrder(request.resource.data.order)
+          && request.resource.data.active is bool
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if false;
+      }
+
       // ---- Gastos ----
 
       // Limite: até o fim do mês seguinte ao atual. Em UTC (3h à frente de
@@ -104,9 +166,12 @@ service cloud.firestore {
 
       // Competência: o mês da data; se ele estiver fechado, um mês posterior
       // aberto (o app usa o mês aberto atual). Nunca um mês fechado.
-      function validCompetence(data) {
-        let dateMonth = data.date.split('-')[0] + '-' + data.date.split('-')[1];
-        return !isClosed(data.competence)
+      // Na edição que mantém a competência, o mês já foi conferido como aberto
+      // pela regra de atualização (economiza expressões nas séries).
+      function validCompetence(data, isNew) {
+        let d = data.date.split('-');
+        let dateMonth = d[0] + '-' + d[1];
+        return (!isNew && data.competence == resource.data.competence || !isClosed(data.competence))
           && (isInstallment(data) || withinLimit(data.competence))
           && (data.competence == dateMonth
               || (data.competence > dateMonth && isClosed(dateMonth)));
@@ -205,14 +270,16 @@ service cloud.firestore {
           && withinLimit(i.firstMonth)
           && monthIndex(data.competence) == monthIndex(i.firstMonth) + i.index - 1
           && expenseId == (i.index == 1 ? i.seriesId : i.seriesId + '-' + string(i.index))
-          && (i.index == 1 || !isNew || firstInstallmentMatches(i));
+          && (i.index == 1 || !isNew || firstInstallmentMatches(i, data));
       }
 
-      function firstInstallmentMatches(i) {
+      // A categoria é da série: na criação, a mesma da parcela 1.
+      function firstInstallmentMatches(i, data) {
         let first = getAfter(/databases/$(database)/documents/groups/$(groupId)/expenses/$(i.seriesId)).data;
         return first.get('installment', null)
             == { 'seriesId': i.seriesId, 'index': 1, 'count': i.count, 'firstMonth': i.firstMonth, 'purchaseCents': i.purchaseCents }
-          && first.createdBy == request.auth.uid;
+          && first.createdBy == request.auth.uid
+          && first.get('categoryId', null) == data.get('categoryId', null);
       }
 
       // Observação opcional, até 300 caracteres (vazia: o campo não existe).
@@ -223,6 +290,7 @@ service cloud.firestore {
 
       function validExpense(data, expenseId, isNew) {
         return validNote(data)
+          && validCategoryChoice(data, isNew ? null : resource.data.get('categoryId', null))
           && data.description is string
           && data.description.trim().size() >= 1
           && data.description.size() <= 80
@@ -239,10 +307,13 @@ service cloud.firestore {
           && data.date.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
           && data.competence is string
           && data.competence.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
-          && (isInstallment(data) ? validInstallment(data, expenseId, isNew) : withinLimit(data.date))
+          // Parcela: validada na criação. Na edição, isAuthorWrite já impede mudar a
+          // série, o valor, a parte pessoal, a data e a competência (economiza
+          // expressões, perto do limite numa série com nota fiscal).
+          && (isInstallment(data) ? !isNew || validInstallment(data, expenseId, isNew) : withinLimit(data.date))
           && data.receipt is map
           && validReceipt(data.receipt, receiptOwner(data, expenseId), isNew)
-          && validCompetence(data);
+          && validCompetence(data, isNew);
       }
 
       function expenseKeys() {
@@ -353,7 +424,7 @@ service cloud.firestore {
       }
 
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note', 'everConfirmed']))
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note', 'everConfirmed', 'categoryId']))
           // Editar apaga o pedido de exclusão (aberto ou recusado); criar não tem pedido.
           && !request.resource.data.keys().hasAny(['deletionRequest'])
           && (isNew ? newEverConfirmed() : keepsEverConfirmed())
@@ -503,6 +574,8 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt == request.time
           && validExpense(request.resource.data, expenseId, true)
+          // Com a exigência ligada, gasto novo precisa de categoria.
+          && (!requiresCategory() || request.resource.data.keys().hasAny(['categoryId']))
           && holdsRegisteredKey(request.resource.data, expenseId);
 
         // Autor: edita (status pelo comprovante; devolvido vai para aprovação;
@@ -582,9 +655,11 @@ service cloud.firestore {
                 'active', 'status', 'createdBy', 'createdAt', 'updatedAt'];
       }
 
-      function validRecurring(d) {
+      // Categoria do cadastro (os gastos gerados herdam): muda direto, sem aprovação.
+      function validRecurring(d, before) {
         return d.keys().hasAll(recurringKeys())
-          && d.keys().hasOnly(recurringKeys().concat(['amountCents', 'endMonth', 'approval', 'rejection', 'proposal', 'lastGeneratedMonth']))
+          && d.keys().hasOnly(recurringKeys().concat(['amountCents', 'endMonth', 'approval', 'rejection', 'proposal', 'lastGeneratedMonth', 'categoryId']))
+          && validCategoryChoice(d, before)
           && d.description is string
           && d.description.trim().size() >= 1
           && d.description.size() <= 80
@@ -672,7 +747,7 @@ service cloud.firestore {
         allow read: if isMember(groupId);
 
         allow create: if isMember(groupId)
-          && validRecurring(request.resource.data)
+          && validRecurring(request.resource.data, null)
           && request.resource.data.createdBy == request.auth.uid
           && request.resource.data.createdAt == request.time
           && request.resource.data.updatedAt == request.time
@@ -683,7 +758,7 @@ service cloud.firestore {
         allow update: if isMember(groupId) && (
           // Quem cadastrou edita. A recusa anterior é sempre descartada.
           resource.data.createdBy == request.auth.uid
-            && validRecurring(request.resource.data)
+            && validRecurring(request.resource.data, resource.data.get('categoryId', null))
             && request.resource.data.createdBy == resource.data.createdBy
             && request.resource.data.createdAt == resource.data.createdAt
             && request.resource.data.updatedAt == request.time

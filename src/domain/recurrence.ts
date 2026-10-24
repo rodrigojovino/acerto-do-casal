@@ -35,6 +35,8 @@ export interface Recurring {
   startMonth: Competence;
   /** Sem mês final = sem prazo. */
   endMonth?: Competence;
+  /** Categoria dos gastos gerados (ausente = "Sem categoria"). */
+  categoryId?: string;
   active: boolean;
   /** Fixo precisa de aprovação do outro membro; variável já nasce aprovado. */
   status: RecurringStatus;
@@ -105,6 +107,8 @@ export function recurringExpenseData<T>(
     personalCents: 0,
     payerUid: rec.payerUid,
     payerSharePct: rec.payerSharePct,
+    // O gasto gerado herda a categoria do cadastro.
+    ...(rec.categoryId ? { categoryId: rec.categoryId } : {}),
     date,
     competence: resolveCompetence(date, closedMonths, today),
     receipt: { type: 'none' as const },

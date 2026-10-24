@@ -32,6 +32,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Functions: o `ignore` do `firebase.json` é aplicado com `matchBase` a qualquer pasta (um `"src"` excluía `lib/functions/src` e `lib/src/domain` do pacote); por isso ignora `"*.ts"`. Antes de mudar, simular o pacote com `readdirRecursive` da firebase-tools.
 - Artifact Registry com limpeza de imagens após 1 dia (`functions:artifacts:setpolicy`).
 - Regras do Firestore: `match /{document=**}` também casa com zero segmentos; para subcoleções use `match /{collection}/{document=**}`.
+- Regras do gasto perto do limite de 1000 expressões avaliadas por documento (o caso mais pesado: editar uma série com nota fiscal e a parcela 1 em mês fechado, em `fiscalKeys.rules.spec.ts`). Na v0.8.0 a folga medida passou a ser de pelo menos 15 expressões: na edição, a parcela não é revalidada (`isAuthorWrite` já impede mudar série, valor, data e competência) e o mês mantido não é consultado de novo. Ao acrescentar condições em `validExpense`/`isAuthorWrite`, medir a folga: somar `&& 1 == 1` repetido N vezes e rodar `fiscalKeys`, `installments` e `deletion`.
 - Deve existir uma única cópia de `@firebase/app` em `node_modules` (o CI confere); duas cópias quebram o app com "Component auth has not been registered yet". Corrigir com `npm dedupe`.
 
 ## Convenções
@@ -195,6 +196,7 @@ groups/{groupId}                 // criado e alterado em members/convite só pel
   members: [uid] | [uid, uid]    // 1 enquanto espera o outro; no máximo 2
   memberNames: { [uid]: string } // cada membro pode alterar só o próprio nome
   defaultSplitPct: 50            // membros podem alterar (inteiro 0..100)
+  requireCategory?: bool         // "Exigir categoria nos gastos"; membros podem alterar; ausente = desligada
   inviteCode: string | null      // sem hífen; null depois que o segundo entra
   inviteExpiresAt: Timestamp | null
   createdAt
@@ -211,6 +213,9 @@ memberships/{uid}                // só Functions escrevem; cada um lê o própr
 
 invites/{code}                   // só Functions; app sem acesso
   groupId, createdBy, expiresAt
+
+groups/{g}/categories/{id}       // compartilhadas pelo casal; nunca apagadas, só desativadas
+  name (1..40), active, order (0..9999; a mesma ordem para os dois), createdBy, createdAt, updatedAt
 
 groups/{g}/fiscalKeys/{chave44}  // nota lançada: um por chave, no mesmo lote que o gasto; membros leem
   expenseId, createdBy, createdAt  // expenseId: o gasto ou, numa série, a parcela 1
@@ -247,6 +252,7 @@ groups/{groupId}/expenses/{expenseId}
   rejection?: { byUid, reason? (até 200), at }
   recurringId?, installment?: { seriesId, index, count, firstMonth, purchaseCents }
   note?                           // observação de quem lançou, 1..300 caracteres (numa série, a mesma em todas as parcelas)
+  categoryId?                     // categoria (ausente = "Sem categoria"); numa série, a mesma em todas; gerado de recorrente: a do cadastro
   everConfirmed?: true            // já foi confirmado uma vez; nunca sai nem vira false (só pelo pedido de exclusão)
   deletionRequest?: { byUid, reason? (até 200), at, status: 'pending' | 'denied', answeredBy?, answeredAt? }
   createdBy, createdAt, updatedAt
@@ -259,7 +265,7 @@ groups/{groupId}/nfceItems/{nfceKey}  // itens da NFC-e de SP; só Functions gra
 
 groups/{groupId}/recurring/{recurringId}
   description, kind: 'fixed' | 'variable', amountCents?, dayOfMonth, payerUid, payerSharePct
-  startMonth: 'YYYY-MM', endMonth?, active
+  startMonth: 'YYYY-MM', endMonth?, active, categoryId?   // categoria dos gastos gerados; muda direto, sem aprovação
   status: 'pending_approval' | 'approved' | 'returned', approval?, rejection?
   proposal?: { kind, amountCents?, payerUid, payerSharePct, at }   // reajuste aguardando aprovação
   lastGeneratedMonth?            // só a Function grava
@@ -279,6 +285,7 @@ Regras atuais (`firestore.rules` e `storage.rules`, testadas em `tests/emulators
 - **Function `checkNfce`** (gatilho): consulta a SEFAZ quando o QR chega ao servidor; só grava `nfceStatus`/`nfceData`, nunca muda o status. Numa série, só a parcela 1 consulta e grava em todas. Da mesma página, lê os itens (`parseItems`/`checkItems` em `functions/src/nfce.ts`) e grava `nfceItems/{chave}`, um por nota (numa série, vale para todas as parcelas); falha na leitura dos itens não afeta a conferência. No emulador, a página vem de `emulatorFixtures/sefaz_{chave}` (testes, sem rede). `resolveNfce` (callable) só pré-preenche o formulário.
 - **Nova consulta** ("Tentar conferir de novo"): exceção estreita para quem lançou voltar uma NFC-e de SP `failed` para `pending`, sem mexer em mais nada (nem no status).
 - **Parcelas**: exceção ao limite de datas só dentro de série válida: primeiro mês dentro do limite, competência = primeiro mês + índice − 1, id no padrão e, na criação, a parcela 1 da mesma série (mesmo número de parcelas e primeiro mês) existe no mesmo lote ou antes, do mesmo autor. Na edição, `installment`, valor, parte pessoal, data e competência não mudam. Mês futuro nunca é consultado como fechado (sem leitura), o que deixa um lote de 48 parcelas dentro do limite de leituras das regras; a Fase 6 não pode fechar mês futuro.
+- **Categorias** (`categories`, testes em `tests/emulators/categories.rules.spec.ts`): membros leem, criam (ativa, nome 1..40, posição 0..9999, id alfanumérico), renomeiam, reordenam (as posições que mudam, num lote: `reorderCategories`), desativam e reativam; ninguém apaga. Categoria nova vai para o fim (`nextCategoryOrder`); a lista sugerida entra na ordem em que é criada; desativadas ficam numa seção abaixo das ativas e fora da escolha. `requireCategory` no grupo: qualquer membro, só booleano. Gasto e recorrente: `categoryId` opcional; quando escolhido agora (criação ou troca), a categoria existe no grupo e está ativa (vale criada no mesmo lote); manter uma que depois foi desativada vale. Com a exigência ligada, gasto novo precisa de categoria (a edição de um antigo sem categoria continua valendo). Série: na criação, todas as parcelas com a categoria da parcela 1. Trocar a categoria é edição (confirmado volta para aprovação); o outro membro não a muda. No recorrente aprovado, quem cadastrou troca direto, sem reajuste. Funções puras em `src/domain/categories.ts`; documentos em `src/services/categoryData.ts`.
 - `recurring`: só membros leem. Ainda não aprovado (novo, pendente, recusado): quem cadastrou grava variável `approved` e fixo `pending_approval`, sem `approval`/`proposal`; o outro aprova ou recusa. Já aprovado: quem cadastrou mantém status, aprovação e versão aprovada; o dinheiro só muda direto entre variáveis, senão vai em `proposal` (diferente da versão aprovada, valores válidos, `at` do servidor); o outro aprova (versão aprovada = `proposal`, nova `approval`) ou recusa (`proposal` some, versão aprovada intacta). Qualquer um desativa; só quem cadastrou exclui. `lastGeneratedMonth` só pelo Admin SDK.
 - **Exclusão e pedido de exclusão**: quem lançou exclui só o que sai direto (pendente ou a confirmar sem `everConfirmed`, devolvido); o outro membro exclui só com pedido aberto (aprovar). `everConfirmed`: existe só e sempre que o gasto fica confirmado, nunca sai nem vira false. Pedido: só quem lançou, horário do servidor, sem mexer em mais nada; cancelar: quem pediu; recusar: o outro, só `status`/`answeredBy`/`answeredAt`. Com pedido aberto, o outro não aprova, valida nem contesta. A edição de quem lançou não pode manter o pedido. Testes de abuso em `tests/emulators/deletion.rules.spec.ts`. Nunca em mês fechado. `months`: só leitura para o app; fechamento, pagamento e reabertura só pelas Functions callable (`functions/src/closing.ts`), cada uma numa transação com as mesmas funções de `src/domain/closing.ts`:
   - `registerPayment`: só quem deve pagar o que falta (saldo − pagamentos), sempre o valor exato; PIX exige a foto já no Storage.

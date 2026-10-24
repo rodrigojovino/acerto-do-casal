@@ -23,6 +23,8 @@ export interface RecurringInput {
   startMonth: Competence;
   /** Sem mês final = sem prazo. */
   endMonth?: Competence;
+  /** Categoria dos gastos gerados; muda direto, sem aprovação (vale a partir da próxima geração). */
+  categoryId?: string;
 }
 
 export interface RecurringCurrent extends RecurringTerms {
@@ -79,6 +81,7 @@ function baseFields<D>(input: RecurringInput, removeField?: D) {
     dayOfMonth: input.dayOfMonth,
     startMonth: input.startMonth,
     ...(input.endMonth ? { endMonth: input.endMonth } : removeField === undefined ? {} : { endMonth: removeField }),
+    ...(input.categoryId ? { categoryId: input.categoryId } : removeField === undefined ? {} : { categoryId: removeField }),
   };
 }
 

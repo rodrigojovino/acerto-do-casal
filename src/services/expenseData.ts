@@ -29,6 +29,8 @@ export interface ExpenseInput {
   payerSharePct: number;
   date: IsoDate;
   receipt: ReceiptChoice;
+  /** Categoria (`groups/{g}/categories/{id}`); ausente = "Sem categoria". */
+  categoryId?: string;
 }
 
 /** Comprovante escolhido no formulário. */
@@ -129,6 +131,12 @@ function noteField<D>(note: string | undefined, removeField?: D) {
   return removeField === undefined ? {} : { note: removeField };
 }
 
+/** Categoria gravada; sem categoria, o campo não existe (na edição, sai do documento). */
+function categoryField<D>(categoryId: string | undefined, removeField?: D) {
+  if (categoryId) return { categoryId };
+  return removeField === undefined ? {} : { categoryId: removeField };
+}
+
 function fields(input: ExpenseInput, competence: Competence) {
   return {
     description: input.description.trim(),
@@ -173,6 +181,7 @@ export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: 
   return {
     ...fields(input, competence),
     ...noteField(input.note),
+    ...categoryField(input.categoryId),
     receipt: receiptData(input.receipt, ids),
     status,
     ...everConfirmedField(status),
@@ -200,6 +209,7 @@ export function expenseUpdateData<T, D>(
   return {
     ...fields(input, competence),
     ...noteField(input.note, removeField),
+    ...categoryField(input.categoryId, removeField),
     receipt: receiptData(input.receipt, ids, current.receipt),
     status,
     ...everConfirmedField(status, current.everConfirmed),
@@ -335,6 +345,7 @@ export function newInstallmentSeriesData<T>(
     data: {
       description: input.description.trim(),
       ...noteField(input.note),
+      ...categoryField(input.categoryId),
       totalCents: p.totalCents,
       personalCents: p.personalCents,
       payerUid: input.payerUid,
@@ -365,6 +376,8 @@ export interface SeriesEditInput {
   payerUid: string;
   payerSharePct: number;
   receipt: ReceiptChoice;
+  /** A categoria é da série: a mesma em todas as parcelas. */
+  categoryId?: string;
 }
 
 /**
@@ -382,6 +395,7 @@ export function installmentUpdateData<T, D>(
   return {
     description: input.description.trim(),
     ...noteField(input.note, removeField),
+    ...categoryField(input.categoryId, removeField),
     payerUid: input.payerUid,
     payerSharePct: input.payerSharePct,
     receipt: receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId }, current.receipt),
