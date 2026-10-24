@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router';
-import { RouteRecordRaw } from 'vue-router';
-import { watch } from 'vue';
-import { sessionReady, status, type SessionStatus } from '@/services/session';
+import type { RouteRecordRaw } from 'vue-router';
+import { watch, type Component } from 'vue';
+import { sessionReady, status } from '@/services/session';
+import { SCREENS, guardTarget, type RouteName } from './access';
 import EntradaPage from '../views/EntradaPage.vue';
 import VinculoPage from '../views/VinculoPage.vue';
 import PainelPage from '../views/PainelPage.vue';
@@ -17,42 +18,31 @@ import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
 import ExpenseDetailPage from '../views/ExpenseDetailPage.vue';
 
+/** Componente de cada tela (a tabela de telas e acessos fica em `access.ts`). */
+const views: Record<RouteName, Component> = {
+  entrar: EntradaPage,
+  vinculo: VinculoPage,
+  painel: PainelPage,
+  pendencias: PendenciasPage,
+  historico: HistoryPage,
+  mes: MonthDetailPage,
+  fechar: ClosingPage,
+  ajustes: AjustesPage,
+  recorrentes: RecurringListPage,
+  avisos: NotificationsPage,
+  categorias: CategoriesPage,
+  'recorrente-novo': RecurringFormPage,
+  recorrente: RecurringFormPage,
+  'gasto-novo': ExpenseFormPage,
+  gasto: ExpenseDetailPage,
+  'gasto-editar': ExpenseFormPage,
+};
+
 const routes: Array<RouteRecordRaw> = [
   { path: '/', redirect: '/painel' },
-  { path: '/entrar', name: 'entrar', component: EntradaPage },
-  { path: '/vinculo', name: 'vinculo', component: VinculoPage },
-  { path: '/painel', name: 'painel', component: PainelPage },
-  { path: '/pendencias', name: 'pendencias', component: PendenciasPage },
-  { path: '/historico', name: 'historico', component: HistoryPage },
-  { path: '/historico/:mes(\\d{4}-\\d{2})', name: 'mes', component: MonthDetailPage },
-  { path: '/fechar/:mes(\\d{4}-\\d{2})', name: 'fechar', component: ClosingPage },
-  { path: '/ajustes', name: 'ajustes', component: AjustesPage },
-  { path: '/ajustes/recorrentes', name: 'recorrentes', component: RecurringListPage },
-  { path: '/ajustes/avisos', name: 'avisos', component: NotificationsPage },
-  { path: '/ajustes/categorias', name: 'categorias', component: CategoriesPage },
-  { path: '/ajustes/recorrentes/nova', name: 'recorrente-novo', component: RecurringFormPage },
-  { path: '/ajustes/recorrentes/:id', name: 'recorrente', component: RecurringFormPage },
-  { path: '/gasto/novo', name: 'gasto-novo', component: ExpenseFormPage },
-  { path: '/gasto/:id', name: 'gasto', component: ExpenseDetailPage },
-  { path: '/gasto/:id/editar', name: 'gasto-editar', component: ExpenseFormPage },
+  ...SCREENS.map((s) => ({ path: s.path, name: s.name, component: views[s.name] })),
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ];
-
-/** Tela inicial de cada estado da sessão. */
-const homeFor: Record<SessionStatus, string> = {
-  signedOut: 'entrar',
-  noGroup: 'vinculo',
-  waitingPartner: 'vinculo',
-  linked: 'painel',
-};
-
-/** Telas permitidas em cada estado; o app inteiro só para o casal vinculado. */
-const allowed: Record<SessionStatus, ReadonlySet<string>> = {
-  signedOut: new Set(['entrar']),
-  noGroup: new Set(['vinculo']),
-  waitingPartner: new Set(['vinculo']),
-  linked: new Set(['painel', 'pendencias', 'historico', 'ajustes', 'gasto-novo', 'gasto', 'gasto-editar', 'recorrentes', 'recorrente-novo', 'recorrente', 'fechar', 'mes', 'avisos']),
-};
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -60,22 +50,19 @@ const router = createRouter({
 });
 
 // Guarda de rota: espera saber quem está logado e qual o grupo, e só deixa
-// abrir as telas do estado atual.
+// abrir as telas do estado atual (tabela em access.ts).
 router.beforeEach(async (to) => {
   await sessionReady();
-  if (!allowed[status.value].has(String(to.name))) {
-    return { name: homeFor[status.value], replace: true };
-  }
-  return true;
+  const target = guardTarget(status.value, to.name);
+  return target ? { name: target, replace: true } : true;
 });
 
 // Quando o estado muda com a tela aberta (login, o outro entrou no grupo, sair),
 // navega sozinho.
 watch(status, async (next) => {
   await sessionReady();
-  if (!allowed[next].has(String(router.currentRoute.value.name))) {
-    await router.replace({ name: homeFor[next] });
-  }
+  const target = guardTarget(next, router.currentRoute.value.name);
+  if (target) await router.replace({ name: target });
 });
 
 export default router;
