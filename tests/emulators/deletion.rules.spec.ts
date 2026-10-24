@@ -19,7 +19,7 @@ import {
   type ExpenseInput,
   type ReceiptChoice,
 } from '../../src/services/expenseData';
-import { createTestEnv } from './setup';
+import { RULES_PROJECT_ID, createTestEnv } from './setup';
 
 // UIDs fictícios: A e B são o casal, C é um terceiro.
 const A = 'uid-a';
@@ -42,7 +42,7 @@ const photo = (id: string) => ({ type: 'photo', photoPath: `groups/${GROUP}/rece
 let env: RulesTestEnvironment;
 
 beforeAll(async () => {
-  env = await createTestEnv();
+  env = await createTestEnv(RULES_PROJECT_ID);
 });
 
 afterAll(async () => {

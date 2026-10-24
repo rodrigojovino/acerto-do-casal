@@ -6,11 +6,22 @@ import { readFileSync } from 'node:fs';
 
 // Projeto "demo-": os emuladores garantem que nada chega a um projeto real.
 export const PROJECT_ID = 'demo-acerto';
+/**
+ * Projeto dos testes só de regras. As Functions do emulador estão registradas
+ * só em PROJECT_ID: gravações aqui não disparam gatilhos. Cada gasto gravado em
+ * PROJECT_ID dispara checkNfce e notifyExpense, e o emulador entrega os eventos
+ * um de cada vez (~30 por segundo); os milhares de gravações dos testes de
+ * regras formavam uma fila de minutos que atrasava os testes de gatilho
+ * seguintes. Separar também impede que o clearFirestore de um apague o outro.
+ * Exceção: storage.rules.spec.ts fica em PROJECT_ID, porque o emulador do
+ * Storage lê o Firestore do projeto do emulador nas regras (`firestore.get`).
+ */
+export const RULES_PROJECT_ID = 'demo-acerto-rules';
 const HOST = '127.0.0.1';
 
-export function createTestEnv(): Promise<RulesTestEnvironment> {
+export function createTestEnv(projectId: string = PROJECT_ID): Promise<RulesTestEnvironment> {
   return initializeTestEnvironment({
-    projectId: PROJECT_ID,
+    projectId,
     firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: HOST, port: 8080 },
     storage: { rules: readFileSync('storage.rules', 'utf8'), host: HOST, port: 9199 },
   });

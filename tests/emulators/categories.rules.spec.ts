@@ -21,7 +21,7 @@ import {
   type ExpenseInput,
 } from '../../src/services/expenseData';
 import { newRecurringData, recurringUpdateData, type RecurringInput } from '../../src/services/recurringData';
-import { createTestEnv } from './setup';
+import { RULES_PROJECT_ID, createTestEnv } from './setup';
 
 // Categorias: compartilhadas pelo casal, nunca apagadas; exigência no grupo.
 // UIDs fictícios: A e B são o casal, C é um terceiro (com o próprio grupo).
@@ -44,7 +44,7 @@ const removeField = () => firebase.firestore.FieldValue.delete();
 let env: RulesTestEnvironment;
 
 beforeAll(async () => {
-  env = await createTestEnv();
+  env = await createTestEnv(RULES_PROJECT_ID);
 });
 
 afterAll(async () => {

@@ -16,7 +16,7 @@ import {
   type ReceiptChoice,
 } from '../../src/services/expenseData';
 import { checkDigit } from '../../functions/src/nfce';
-import { createTestEnv } from './setup';
+import { RULES_PROJECT_ID, createTestEnv } from './setup';
 
 // Divisão diferente de 50/50 vai sempre para aprovação, mesmo com comprovante.
 const A = 'uid-a';
@@ -40,7 +40,7 @@ const keyFor = (serial: string) => {
 let env: RulesTestEnvironment;
 
 beforeAll(async () => {
-  env = await createTestEnv();
+  env = await createTestEnv(RULES_PROJECT_ID);
 });
 
 afterAll(async () => {
