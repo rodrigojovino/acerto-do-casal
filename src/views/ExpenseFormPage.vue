@@ -218,7 +218,6 @@ import { debtView, duplicateNoteText } from '@/services/expenseView';
 import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
-import { categories } from '@/services/categories';
 import { chooseCategory } from '@/components/categoryDialog';
 
 const route = useRoute();
@@ -582,7 +581,8 @@ async function save(): Promise<void> {
   if (group.value.requireCategory) {
     saving.value = true;
     const header = editing?.installment || (!editing && installmentOn.value) ? 'Categoria da compra' : 'Categoria do gasto';
-    const chosen = await chooseCategory(categories.value, categoryId.value, header);
+    // Gasto novo: nada pré-marcado; edição: a categoria atual vem marcada.
+    const chosen = await chooseCategory(categoryId.value, header);
     saving.value = false;
     if (!chosen || !group.value) return;
     categoryId.value = chosen;

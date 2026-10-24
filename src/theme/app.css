@@ -236,3 +236,9 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Painel de escolha da categoria (bottom sheet): altura do conteúdo, até 80% da tela. */
+ion-modal.category-sheet {
+  --height: auto;
+  --border-radius: 20px;
+}

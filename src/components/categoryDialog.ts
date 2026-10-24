@@ -1,51 +1,28 @@
-import { alertController } from '@ionic/vue';
-import { MAX_CATEGORY_NAME, categoryNameProblem, choosableCategories, type Category } from '@/domain/categories';
+import { alertController, modalController } from '@ionic/vue';
+import { MAX_CATEGORY_NAME, categoryNameProblem, type Category } from '@/domain/categories';
 import { createCategory } from '@/services/categories';
+import CategorySheet from './CategorySheet.vue';
 
 /**
- * Janela de escolha da categoria ao salvar um gasto (com "Exigir categoria
- * nos gastos" ligada): as ativas, na ordem do casal, com a atual marcada, e
- * "Nova categoria" para criar sem sair do lançamento. Devolve o id escolhido,
- * ou `null` se a pessoa desistir (o gasto não é salvo).
+ * Escolha da categoria ao salvar um gasto (com "Exigir categoria nos gastos"
+ * ligada): painel por baixo da tela (`CategorySheet`), perto do polegar.
+ * Devolve o id escolhido, ou `null` se a pessoa fechar (o gasto não é salvo).
  */
 export async function chooseCategory(
-  categories: readonly Category[],
   currentId: string | undefined,
-  header = 'Categoria do gasto',
+  title = 'Categoria do gasto',
+  saveLabel = 'Salvar gasto',
 ): Promise<string | null> {
-  const options = choosableCategories(categories, currentId);
-  const help = options.length === 0 ? 'Nenhuma categoria cadastrada ainda: crie a primeira.' : 'Escolha a categoria para salvar.';
-  const alert = await alertController.create({
-    header,
-    message: help,
-    inputs: options.map((c) => ({
-      type: 'radio' as const,
-      label: c.active ? c.name : `${c.name} (desativada)`,
-      value: c.id,
-      checked: c.id === currentId,
-    })),
-    buttons: [
-      { text: 'Cancelar', role: 'cancel' },
-      { text: 'Nova categoria', role: 'new' },
-      {
-        text: 'Salvar',
-        role: 'confirm',
-        handler: (value: string | undefined) => {
-          if (value) return true;
-          alert.message = options.length === 0 ? help : 'Escolha uma categoria para salvar o gasto.';
-          return false;
-        },
-      },
-    ],
+  const sheet = await modalController.create({
+    component: CategorySheet,
+    componentProps: { currentId, title, saveLabel },
+    breakpoints: [0, 1],
+    initialBreakpoint: 1,
+    cssClass: 'category-sheet',
   });
-  await alert.present();
-  const { role, data } = await alert.onDidDismiss<{ values: string | undefined }>();
-  if (role === 'new') {
-    const created = await askNewCategory(categories);
-    // Criada: já vale para este gasto. Desistiu da nova: volta para a escolha.
-    return created ?? chooseCategory(categories, currentId, header);
-  }
-  return role === 'confirm' && data?.values ? data.values : null;
+  await sheet.present();
+  const { data, role } = await sheet.onDidDismiss<string | null>();
+  return role === 'confirm' && data ? data : null;
 }
 
 /**
