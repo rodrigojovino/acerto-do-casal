@@ -74,6 +74,11 @@ describe('envio da foto', () => {
   it('nada fora da pasta de comprovantes', async () => {
     await assertFails(put(A, `groups/${GROUP}/outros/x.jpg`));
   });
+
+  it('a foto do cartão de saldo não vai para o Storage (fica no Firestore, cover/current)', async () => {
+    await assertFails(put(A, `groups/${GROUP}/cover/current.jpg`));
+    await assertFails(put(B, `groups/${GROUP}/cover/foto.jpg`));
+  });
 });
 
 describe('leitura e exclusão', () => {
@@ -111,6 +116,22 @@ describe('foto da nota junto com a chave', () => {
     await assertFails(put(B, 'chave-foto'));
     await assertFails(put(A, 'chave-sem'));
   });
+
+  it('os dois membros leem a foto da nota; terceiro e visitante não; só quem lançou apaga', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`groups/${GROUP}/expenses/nota-b`).set({
+        createdBy: B,
+        receipt: { type: 'nfce', nfceKey: key, entry: 'qr', nfceStatus: 'unchecked', photoPath: receipt('nota-b'), photoUploaded: true },
+      });
+      await ctx.storage().ref(receipt('nota-b')).put(jpeg(1024), { contentType: 'image/jpeg' });
+    });
+    await assertSucceeds(storageAs(A).ref(receipt('nota-b')).getDownloadURL());
+    await assertSucceeds(storageAs(B).ref(receipt('nota-b')).getDownloadURL());
+    await assertFails(storageAs(C).ref(receipt('nota-b')).getDownloadURL());
+    await assertFails(env.unauthenticatedContext().storage().ref(receipt('nota-b')).getDownloadURL());
+    await assertFails(storageAs(A).ref(receipt('nota-b')).delete());
+    await assertSucceeds(storageAs(B).ref(receipt('nota-b')).delete());
+  });
 });
 
 describe('comprovante PIX do acerto', () => {
@@ -124,6 +145,8 @@ describe('comprovante PIX do acerto', () => {
     await assertSucceeds(env.authenticatedContext(B).storage().ref(pix('pagamento0001')).getMetadata());
     await assertFails(put(C, pix('pagamento0002')));
     await assertFails(env.authenticatedContext(C).storage().ref(pix('pagamento0001')).getMetadata());
+    // Visitante (sem login) também não lê.
+    await assertFails(env.unauthenticatedContext().storage().ref(pix('pagamento0001')).getMetadata());
   });
 
   it('mês fechado não recebe comprovante; nem troca, nem apaga, nem arquivo fora do padrão', async () => {
