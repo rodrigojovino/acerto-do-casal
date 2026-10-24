@@ -1,11 +1,7 @@
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { createTestEnv } from './setup';
-
-// Com a suíte inteira rodando, o gatilho no emulador pode demorar mais que os 30 s padrão
-// (como nos testes de avisos).
-vi.setConfig({ testTimeout: 90_000 });
 
 // Gatilho checkNfce (Functions emulator). Nenhum teste acessa a SEFAZ:
 // as notas "conferidas" são montadas à mão, e a URL pendente é de fora de SP,
@@ -92,8 +88,7 @@ async function read(id: string): Promise<Record<string, unknown> | undefined> {
 
 /** Espera o gatilho agir (ou o tempo acabar) e devolve o documento. */
 // 20 s: a primeira execução do gatilho no emulador pode demorar (partida da Function).
-// Prazo largo: com a suíte inteira rodando, o emulador de Functions demora mais para disparar o gatilho.
-async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean, ms = 45000) {
+async function waitFor(id: string, done: (d: Record<string, unknown>) => boolean, ms = 20000) {
   const until = Date.now() + ms;
   let data = await read(id);
   while (Date.now() < until && !(data && done(data))) {
@@ -112,7 +107,7 @@ async function readAt(fullPath: string): Promise<Record<string, unknown> | undef
 }
 
 /** Espera um documento existir (gravado por um gatilho) ou o tempo acabar. */
-async function waitForDoc(fullPath: string, ms = 45000): Promise<Record<string, unknown> | undefined> {
+async function waitForDoc(fullPath: string, ms = 20000): Promise<Record<string, unknown> | undefined> {
   const until = Date.now() + ms;
   let data = await readAt(fullPath);
   while (Date.now() < until && !data) {

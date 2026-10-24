@@ -1,7 +1,7 @@
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PROJECT_ID, createTestEnv } from './setup';
 
 // Avisos (gatilhos no emulador de Functions). Sem FCM no emulador: cada aviso
@@ -14,10 +14,6 @@ let GROUP = 'grupo';
 let seq = 0;
 
 let env: RulesTestEnvironment;
-
-// Com a suíte inteira rodando, a partida dos gatilhos no emulador pode passar de
-// 20 s: mais folga aqui (as esperas negativas continuam curtas).
-vi.setConfig({ testTimeout: 90_000 });
 
 async function write(path: string, data: Record<string, unknown>): Promise<void> {
   await env.withSecurityRulesDisabled(async (ctx) => {
@@ -53,7 +49,7 @@ async function outbox(): Promise<OutboxItem[]> {
 }
 
 /** Espera os gatilhos (até `count` avisos ou o tempo acabar) e um pouco mais, para pegar duplicados. */
-async function waitOutbox(count: number, ms = 45000, settle = 2500): Promise<OutboxItem[]> {
+async function waitOutbox(count: number, ms = 20000, settle = 2500): Promise<OutboxItem[]> {
   const until = Date.now() + ms;
   let items = await outbox();
   while (Date.now() < until && items.length < count) {
