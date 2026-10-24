@@ -117,6 +117,15 @@ outroDeve     = round(rateio * (100 - payerSharePct) / 100)   // dívida do não
 - **Observação** (opcional, até 300 caracteres): no lançamento, na confirmação do valor do recorrente variável e na edição da série (é da série). Aparece completa no Detalhe; resumida em uma linha (`noteSummary`, ~60 caracteres) em Pendências e nos avisos de gasto para aprovar e de confirmado automático, depois da origem ("… · toque para aprovar — “churrasco do sábado”", "… · foto do recibo — “feira do mês”").
 - A mesma regra de edição vale para recorrentes fixos e séries de parcelas.
 
+### Categorias
+
+- Cadastro em Ajustes › Categorias (`CategoriesPage`), compartilhado pelo casal: nome, "Adicionar" (vai para o fim), renomear (toque no nome), desativar/reativar (reativada volta para o fim). Nunca apagada. Desativadas numa seção abaixo das ativas, fora da escolha.
+- Ordem do casal: arrastar pela alça ≡ (`IonReorderGroup`) ou setas subir/descer em cada linha; grava num lote só as posições que mudam (`moveCategory`). Vale na janela de escolha e nos filtros.
+- Lista sugerida (Mercado, Contas da casa, Restaurantes, Saúde, Transporte, Lazer, Casa) enquanto o grupo não tem nenhuma: marcar, editar o nome, "Criar as selecionadas" (nesta ordem) ou "Descartar sugestões" (só neste aparelho).
+- "Exigir categoria nos gastos" (no grupo, vale para os dois). Ligada: ao salvar um gasto abre a janela (`chooseCategory`, `src/components/categoryDialog.ts`) com as ativas na ordem, a atual marcada e "Nova categoria"; obrigatória (cancelar não salva). Desligada: sem janela; gasto novo fica "Sem categoria" e a edição mantém a que já tinha.
+- Trocar a categoria é edição (confirmado volta para aprovação). Série: a categoria é da compra (lançamento e edição da série). Recorrente: campo opcional no cadastro, herdado pelos gastos gerados; muda direto, sem aprovação, a partir da próxima geração.
+- Exibição: só no Detalhe ("Categoria: …", `categoryLabel`) e nos filtros; a linha da lista não muda. Gastos anteriores à v0.8.0: "Sem categoria". Categorias acompanhadas em segundo plano (`src/services/categories.ts`), do cache offline também.
+
 ### Parcelados
 
 - Informa total, número de parcelas e mês da primeira. Gera uma parcela por mês com a mesma divisão e parte pessoal proporcional.

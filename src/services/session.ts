@@ -8,6 +8,8 @@ export interface Group {
   members: string[];
   memberNames: Record<string, string>;
   defaultSplitPct: number;
+  /** "Exigir categoria nos gastos" (ausente = desligada). */
+  requireCategory?: boolean;
   /** Código sem hífen (`K7Q4M2`) enquanto o grupo espera o segundo membro. */
   inviteCode: string | null;
   inviteExpiresAt: Timestamp | null;

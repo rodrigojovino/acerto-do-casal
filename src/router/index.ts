@@ -11,6 +11,7 @@ import RecurringFormPage from '../views/RecurringFormPage.vue';
 import ClosingPage from '../views/ClosingPage.vue';
 import HistoryPage from '../views/HistoryPage.vue';
 import NotificationsPage from '../views/NotificationsPage.vue';
+import CategoriesPage from '../views/CategoriesPage.vue';
 import MonthDetailPage from '../views/MonthDetailPage.vue';
 import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
@@ -28,6 +29,7 @@ const routes: Array<RouteRecordRaw> = [
   { path: '/ajustes', name: 'ajustes', component: AjustesPage },
   { path: '/ajustes/recorrentes', name: 'recorrentes', component: RecurringListPage },
   { path: '/ajustes/avisos', name: 'avisos', component: NotificationsPage },
+  { path: '/ajustes/categorias', name: 'categorias', component: CategoriesPage },
   { path: '/ajustes/recorrentes/nova', name: 'recorrente-novo', component: RecurringFormPage },
   { path: '/ajustes/recorrentes/:id', name: 'recorrente', component: RecurringFormPage },
   { path: '/gasto/novo', name: 'gasto-novo', component: ExpenseFormPage },

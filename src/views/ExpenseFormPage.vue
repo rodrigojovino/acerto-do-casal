@@ -218,6 +218,8 @@ import { debtView, duplicateNoteText } from '@/services/expenseView';
 import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
+import { categories } from '@/services/categories';
+import { chooseCategory } from '@/components/categoryDialog';
 
 const route = useRoute();
 const router = useRouter();
@@ -235,6 +237,9 @@ const totalCents = ref(0);
 const personalCents = ref(0);
 const description = ref('');
 const note = ref('');
+/** Categoria escolhida na janela ao salvar (na edição, a do gasto). */
+const categoryId = ref<string | undefined>(undefined);
+const saving = ref(false);
 const date = ref(today.value);
 const payerUid = ref(myUid.value);
 /** Guardado como no banco: a parte de quem pagou. A tela converte com split.ts. */
@@ -271,6 +276,8 @@ onIonViewWillEnter(() => {
   personalCents.value = 0;
   description.value = '';
   note.value = '';
+  categoryId.value = undefined;
+  saving.value = false;
   date.value = today.value;
   payerUid.value = myUid.value;
   payerSharePct.value = group.value?.defaultSplitPct ?? 50;
@@ -308,6 +315,7 @@ if (editId && group.value) {
         personalCents.value = expense.personalCents;
         description.value = expense.description;
         note.value = expense.note ?? '';
+        categoryId.value = expense.categoryId;
         date.value = expense.date;
         payerUid.value = expense.payerUid;
         payerSharePct.value = expense.payerSharePct;
@@ -565,9 +573,20 @@ const errors = computed(() => {
 });
 
 // ---- Ações ----
-function save(): void {
+async function save(): Promise<void> {
   showErrors.value = true;
-  if (Object.keys(errors.value).length > 0 || duplicate.value || !group.value || !competence.value) return;
+  if (saving.value || Object.keys(errors.value).length > 0 || duplicate.value || !group.value || !competence.value) return;
+
+  // Com a exigência ligada, a categoria é escolhida agora (obrigatória); desistir não salva.
+  // Desligada, o gasto novo fica "Sem categoria" e a edição mantém a que já tinha.
+  if (group.value.requireCategory) {
+    saving.value = true;
+    const header = editing?.installment || (!editing && installmentOn.value) ? 'Categoria da compra' : 'Categoria do gasto';
+    const chosen = await chooseCategory(categories.value, categoryId.value, header);
+    saving.value = false;
+    if (!chosen || !group.value) return;
+    categoryId.value = chosen;
+  }
 
   const input = {
     description: description.value,
@@ -578,6 +597,7 @@ function save(): void {
     payerSharePct: payerSharePct.value,
     date: date.value,
     receipt: receiptChoice(),
+    categoryId: categoryId.value,
   };
   // Foto nova: de recibo, ou da nota junto com a chave.
   const photo =

@@ -30,6 +30,7 @@
             </p>
             <p v-if="expense.installment" class="parcel-line">{{ parcelLine }}</p>
             <p class="hint big">Pago por {{ payerLabel }} · {{ formatDateBR(expense.date) }}</p>
+            <p class="hint big">Categoria: {{ categoryName }}</p>
           </section>
 
           <div v-if="expense.installment" class="card series">
@@ -226,6 +227,8 @@
 
 <script setup lang="ts">
 import { IonContent, IonModal, IonPage, alertController } from '@ionic/vue';
+import { categoryLabel } from '@/domain/categories';
+import { categories } from '@/services/categories';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { formatDateBR, monthName, monthOf } from '@/domain/calendar';
@@ -502,6 +505,8 @@ const receiptDetail = computed(() => {
 
 // ---- Itens da nota: só NFC-e de SP conferida, com os itens lidos ----
 const itemsOpen = ref(false);
+const categoryName = computed(() => categoryLabel(expense.value?.categoryId, categories.value));
+
 const noteItems = computed(() => {
   const r = expense.value?.receipt;
   if (r?.type !== 'nfce' || !r.nfceUrl || r.nfceStatus !== 'ok') return null;

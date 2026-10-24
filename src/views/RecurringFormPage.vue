@@ -79,6 +79,15 @@
           </div>
 
           <div class="field">
+            <label for="categoria" class="label">Categoria</label>
+            <select id="categoria" v-model="categoryId" class="input">
+              <option value="">Sem categoria</option>
+              <option v-for="c in categoryOptions" :key="c.id" :value="c.id">{{ c.active ? c.name : `${c.name} (desativada)` }}</option>
+            </select>
+            <p class="hint">Os gastos gerados herdam a categoria. Mudá-la vale a partir da próxima geração, sem aprovação.</p>
+          </div>
+
+          <div class="field">
             <span id="tipo" class="label">Tipo</span>
             <div class="segmented" role="group" aria-labelledby="tipo">
               <button type="button" :aria-pressed="kind === 'fixed'" @click="kind = 'fixed'">Fixo</button>
@@ -156,6 +165,8 @@ import type { RecurringKind } from '@/domain/recurrence';
 import { payerSharePctFromViewer, splitForViewer, stepSplit } from '@/domain/split';
 import type { RecurringTerms } from '@/domain/recurrence';
 import { needsAdjustmentApproval, recurringMaterialChanged, type RecurringInput } from '@/services/recurringData';
+import { choosableCategories } from '@/domain/categories';
+import { categories } from '@/services/categories';
 import { recurringBadge, termsAmountLabel } from '@/services/recurringView';
 import {
   approveRecurring,
@@ -189,6 +200,9 @@ const payerSharePct = ref(group.value?.defaultSplitPct ?? 50);
 const startMonth = ref(monthOf(todayInSaoPaulo()));
 const endMonth = ref('');
 const noEnd = ref(true);
+/** '' = sem categoria. */
+const categoryId = ref('');
+const categoryOptions = computed(() => choosableCategories(categories.value, categoryId.value || undefined));
 const showErrors = ref(false);
 const reason = ref('');
 
@@ -225,6 +239,7 @@ watch(
           startMonth.value = found.startMonth;
           endMonth.value = found.endMonth ?? '';
           noEnd.value = !found.endMonth;
+          categoryId.value = found.categoryId ?? '';
         }
       },
       () => (ready.value = true),
@@ -258,6 +273,7 @@ function input(): RecurringInput {
     payerSharePct: payerSharePct.value,
     startMonth: startMonth.value,
     endMonth: noEnd.value || !endMonth.value ? undefined : endMonth.value,
+    categoryId: categoryId.value || undefined,
   };
 }
 

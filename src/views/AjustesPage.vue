@@ -14,6 +14,14 @@
           <span aria-hidden="true" class="chev">›</span>
         </router-link>
 
+        <router-link class="card row" :to="{ name: 'categorias' }">
+          <span class="row-main">
+            <span class="row-title">Categorias</span>
+            <span class="hint">{{ categorySummary }}</span>
+          </span>
+          <span aria-hidden="true" class="chev">›</span>
+        </router-link>
+
         <router-link class="card row" :to="{ name: 'avisos' }">
           <span class="row-main">
             <span class="row-title">Avisos</span>
@@ -49,6 +57,7 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import IconLegend from '@/components/IconLegend.vue';
 import { signOut } from '@/services/auth';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
+import { categories } from '@/services/categories';
 import { pushPermission } from '@/services/push';
 import { notificationPrefs } from '@/services/notificationPrefs';
 import { group, user } from '@/services/session';
@@ -70,6 +79,14 @@ const pushSummary = computed(() => {
   if (pushPermission.value !== 'granted') return 'Desligados neste aparelho';
   const off = Object.values(notificationPrefs.value).filter((v) => v === false).length;
   return off === 0 ? 'Todos ligados' : `${4 - off} de 4 categorias ligadas`;
+});
+
+const categorySummary = computed(() => {
+  const active = categories.value.filter((c) => c.active).length;
+  if (categories.value.length === 0) return 'Nenhuma cadastrada';
+  const parts = [`${active} ${active === 1 ? 'ativa' : 'ativas'}`];
+  parts.push(group.value?.requireCategory ? 'obrigatória nos gastos' : 'opcional');
+  return parts.join(' · ');
 });
 
 const recurringSummary = computed(() => {

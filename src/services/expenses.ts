@@ -79,6 +79,8 @@ export interface Expense extends SettlementExpense {
   installment?: InstallmentInfo;
   /** Observação opcional de quem lançou (numa série, a mesma em todas as parcelas). */
   note?: string;
+  /** Categoria (ausente = "Sem categoria"); numa série, a mesma em todas as parcelas. */
+  categoryId?: string;
   /** Já foi confirmado uma vez (marca permanente): só sai pelo pedido de exclusão. */
   everConfirmed?: boolean;
   /** Pedido de exclusão de quem lançou: aberto (o outro aprova ou recusa) ou recusado. */
@@ -146,6 +148,7 @@ function toExpense(snap: DocumentSnapshot): Expense {
     recurringId: data.recurringId,
     installment: data.installment,
     note: data.note,
+    categoryId: typeof data.categoryId === 'string' ? data.categoryId : undefined,
     everConfirmed: data.everConfirmed === true,
     deletionRequest: data.deletionRequest
       ? {
