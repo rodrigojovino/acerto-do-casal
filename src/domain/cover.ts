@@ -16,6 +16,39 @@ export const COVER_ZOOM_MIN = 1;
 export const COVER_ZOOM_MAX = 3;
 /** Foto comprimida para caber com folga num documento do Firestore (base64 ≈ +33%). */
 export const COVER_MAX_BYTES = 360 * 1024;
+/**
+ * Limite do texto base64 da foto (o mesmo das regras). Com os demais campos,
+ * o documento fica bem abaixo do máximo do Firestore (1 MiB).
+ */
+export const COVER_MAX_BASE64 = 600_000;
+/** Máximo de um documento do Firestore. */
+export const FIRESTORE_DOC_MAX_BYTES = 1024 * 1024;
+
+/** Tamanho em base64 (sem quebras de linha) de `bytes` bytes. */
+export const base64Length = (bytes: number) => 4 * Math.ceil(bytes / 3);
+
+/** A foto não coube no limite nem com a compressão mais forte. */
+export class CoverTooLargeError extends Error {}
+
+export const COVER_TOO_LARGE_MESSAGE = 'A foto ficou grande demais para o cartão, mesmo comprimida. Escolha outra foto.';
+
+/**
+ * Comprime até o base64 caber no limite: tenta o limite normal e, se passar
+ * (ou a compressão falhar), recomprime com limites menores; sem caber, recusa
+ * com mensagem clara em vez de deixar a gravação falhar.
+ */
+export async function fitCoverImage<T extends { base64: string }>(compress: (maxBytes: number) => Promise<T>): Promise<T> {
+  for (const factor of [1, 0.75, 0.5]) {
+    let result: T;
+    try {
+      result = await compress(Math.floor(COVER_MAX_BYTES * factor));
+    } catch {
+      continue;
+    }
+    if (result.base64.length <= COVER_MAX_BASE64) return result;
+  }
+  throw new CoverTooLargeError(COVER_TOO_LARGE_MESSAGE);
+}
 
 export interface CoverFraming {
   /** Posição da parte visível, 0 (esquerda/topo) a 1 (direita/base). */

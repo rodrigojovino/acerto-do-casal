@@ -11,6 +11,20 @@ export type PhotoSource = 'camera' | 'gallery';
  * a foto do cartão de saldo usa um limite menor). Retorna `null` se a pessoa cancelar.
  */
 export async function pickReceiptPhoto(source: PhotoSource, maxBytes = MAX_RECEIPT_BYTES): Promise<CompressedImage | null> {
+  const original = await pickOriginalPhoto(source);
+  if (!original) return null;
+  try {
+    return await compressImage(original, maxBytes);
+  } catch {
+    throw new PhotoError('Não foi possível preparar a foto. Tente outra.');
+  }
+}
+
+/**
+ * Tira ou escolhe a foto, sem comprimir (a foto do cartão comprime e, se
+ * preciso, recomprime a partir do original). Retorna `null` se a pessoa cancelar.
+ */
+export async function pickOriginalPhoto(source: PhotoSource): Promise<Blob | null> {
   let webPath: string | undefined;
   try {
     if (source === 'camera') {
@@ -28,8 +42,7 @@ export async function pickReceiptPhoto(source: PhotoSource, maxBytes = MAX_RECEI
   if (!webPath) return null;
 
   try {
-    const original = await (await fetch(webPath)).blob();
-    return await compressImage(original, maxBytes);
+    return await (await fetch(webPath)).blob();
   } catch {
     throw new PhotoError('Não foi possível preparar a foto. Tente outra.');
   }

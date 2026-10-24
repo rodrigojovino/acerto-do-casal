@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   COVER_DARK_MAX,
   COVER_DARK_MIN,
+  COVER_MAX_BASE64,
+  COVER_MAX_BYTES,
+  COVER_TOO_LARGE_MESSAGE,
+  CoverTooLargeError,
+  FIRESTORE_DOC_MAX_BYTES,
+  base64Length,
   clampFraming,
+  fitCoverImage,
   contrastRatio,
   dragFraming,
   effectiveDark,
@@ -73,5 +80,44 @@ describe('legibilidade', () => {
   it('o aplicado nunca fica abaixo do mínimo do cartão', () => {
     expect(effectiveDark(0.45, 0.58)).toBe(0.58);
     expect(effectiveDark(0.7, 0.58)).toBe(0.7);
+  });
+});
+
+describe('tamanho da foto no documento', () => {
+  it('o limite de compressão cabe no limite do base64, e o documento fica abaixo de 1 MiB', () => {
+    expect(base64Length(COVER_MAX_BYTES)).toBeLessThanOrEqual(COVER_MAX_BASE64);
+    // Demais campos (posição, escurecimento, autor, horário): bem menos de 1 KB.
+    expect(COVER_MAX_BASE64 + 1024).toBeLessThan(FIRESTORE_DOC_MAX_BYTES);
+    expect(base64Length(3)).toBe(4);
+    expect(base64Length(4)).toBe(8);
+  });
+
+  const fake = (lengths: Array<number | 'falha'>) => {
+    const asked: number[] = [];
+    const compress = async (maxBytes: number) => {
+      const next = lengths[asked.length];
+      asked.push(maxBytes);
+      if (next === 'falha') throw new RangeError('não coube');
+      return { base64: 'A'.repeat(next), width: 10, height: 10 };
+    };
+    return { asked, compress };
+  };
+
+  it('cabendo de primeira, usa o limite normal', async () => {
+    const f = fake([400_000]);
+    expect((await fitCoverImage(f.compress)).base64).toHaveLength(400_000);
+    expect(f.asked).toEqual([COVER_MAX_BYTES]);
+  });
+
+  it('passando do limite (ou falhando), recomprime com limites menores', async () => {
+    const f = fake([COVER_MAX_BASE64 + 1, 'falha', 300_000]);
+    expect((await fitCoverImage(f.compress)).base64).toHaveLength(300_000);
+    expect(f.asked).toEqual([COVER_MAX_BYTES, Math.floor(COVER_MAX_BYTES * 0.75), Math.floor(COVER_MAX_BYTES * 0.5)]);
+  });
+
+  it('sem caber nem na compressão mais forte, recusa com mensagem clara', async () => {
+    const f = fake([COVER_MAX_BASE64 + 1, COVER_MAX_BASE64 + 1, 'falha']);
+    await expect(fitCoverImage(f.compress)).rejects.toThrow(CoverTooLargeError);
+    await expect(fitCoverImage(fake(['falha', 'falha', 'falha']).compress)).rejects.toThrow(COVER_TOO_LARGE_MESSAGE);
   });
 });

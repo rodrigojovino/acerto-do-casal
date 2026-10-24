@@ -70,6 +70,12 @@ describe('foto do cartão', () => {
     await assertSucceeds(at(`/9j/${'A'.repeat(500_000)}`));
   });
 
+  it('foto exatamente no limite (600.000 caracteres) cabe no documento (máximo de 1 MiB do Firestore)', async () => {
+    const image = `/9j/${'A'.repeat(600_000 - 4)}`;
+    await assertSucceeds(db(A).doc(PATH).set({ ...valid(), image }));
+    await assertFails(db(A).doc(PATH).set({ ...valid(), image: `${image}A` }));
+  });
+
   it('limites do enquadramento, do escurecimento e do desfoque', async () => {
     const at = (over: Record<string, unknown>) => db(A).doc(PATH).set({ ...valid(), ...over });
     await assertFails(at({ x: -0.1 }));

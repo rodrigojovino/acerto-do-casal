@@ -88,15 +88,16 @@ import {
   COVER_BLUR_MAX,
   COVER_DARK_MAX,
   COVER_DARK_MIN,
-  COVER_MAX_BYTES,
   COVER_ZOOM_MAX,
   COVER_ZOOM_MIN,
+  CoverTooLargeError,
   DEFAULT_FRAMING,
+  fitCoverImage,
   type CoverFraming,
 } from '@/domain/cover';
 import { blobToBase64, cover, removeCover, saveCoverFraming, saveCoverPhoto } from '@/services/cover';
 import type { CoverImage } from '@/services/coverData';
-import { PhotoError, pickReceiptPhoto, type PhotoSource } from '@/services/photo';
+import { PhotoError, compressImage, pickOriginalPhoto, type PhotoSource } from '@/services/photo';
 import { partnerFirstName } from '@/services/session';
 
 const router = useRouter();
@@ -148,14 +149,21 @@ async function choose(): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    const picked = await pickReceiptPhoto(data, COVER_MAX_BYTES);
-    if (!picked) return;
-    const image = await blobToBase64(picked.data);
-    draft.value = { src: `data:image/jpeg;base64,${image}`, photo: { image, width: picked.size.width, height: picked.size.height } };
+    const original = await pickOriginalPhoto(data);
+    if (!original) return;
+    // Comprime (e recomprime, se preciso) até caber no documento; senão, mensagem clara.
+    const fitted = await fitCoverImage(async (maxBytes) => {
+      const c = await compressImage(original, maxBytes);
+      return { base64: await blobToBase64(c.data), width: c.size.width, height: c.size.height };
+    });
+    draft.value = {
+      src: `data:image/jpeg;base64,${fitted.base64}`,
+      photo: { image: fitted.base64, width: fitted.width, height: fitted.height },
+    };
     // Foto nova: começa centralizada, sem aproximação nem desfoque.
     Object.assign(framing, { ...DEFAULT_FRAMING, dark: Math.max(DEFAULT_FRAMING.dark, minDark.value) });
   } catch (err) {
-    error.value = err instanceof PhotoError ? err.message : 'Não foi possível preparar a foto. Tente outra.';
+    error.value = err instanceof PhotoError || err instanceof CoverTooLargeError ? err.message : 'Não foi possível preparar a foto. Tente outra.';
   } finally {
     busy.value = false;
   }
