@@ -155,6 +155,33 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // ---- Foto do casal no cartão de saldo ----
+      // Um documento só (`current`), com a foto em base64 (JPEG comprimido no
+      // aparelho) e o enquadramento. Qualquer membro troca, ajusta ou remove;
+      // o mínimo de escurecimento que garante a leitura é calculado em cada
+      // aparelho (as regras só conferem os limites).
+      function validCover(d) {
+        return d.keys().hasOnly(['image', 'width', 'height', 'x', 'y', 'zoom', 'dark', 'blur', 'updatedBy', 'updatedAt'])
+          && d.keys().hasAll(['image', 'width', 'height', 'x', 'y', 'zoom', 'dark', 'blur', 'updatedBy', 'updatedAt'])
+          && d.image is string && d.image.size() >= 100 && d.image.size() <= 600000
+          && d.image.matches('^/9j/[A-Za-z0-9+/]+=*$')
+          && d.width is int && d.width >= 1 && d.width <= 4000
+          && d.height is int && d.height >= 1 && d.height <= 4000
+          && d.x is number && d.x >= 0 && d.x <= 1
+          && d.y is number && d.y >= 0 && d.y <= 1
+          && d.zoom is number && d.zoom >= 1 && d.zoom <= 3
+          && d.dark is number && d.dark >= 0.4 && d.dark <= 0.9
+          && d.blur in [0, 1, 2]
+          && d.updatedBy == request.auth.uid
+          && d.updatedAt == request.time;
+      }
+
+      match /cover/{docId} {
+        allow read: if isMember(groupId);
+        allow create, update: if isMember(groupId) && docId == 'current' && validCover(request.resource.data);
+        allow delete: if isMember(groupId) && docId == 'current';
+      }
+
       // ---- Gastos ----
 
       // Limite: até o fim do mês seguinte ao atual. Em UTC (3h à frente de
