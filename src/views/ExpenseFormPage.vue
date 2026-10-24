@@ -335,7 +335,9 @@ async function loadReceipt(expense: Expense): Promise<void> {
   } else if (r.type === 'nfce') {
     const doc = fiscalDocName(r.nfceKey.slice(20, 22));
     const label = r.nfceData ? `${doc} de ${r.nfceData.issuerName}` : `${doc} anexada (chave ${r.entry === 'typed' ? 'digitada' : 'lida'})`;
-    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry ?? 'read', spUrl: r.nfceUrl ?? null, label };
+    // Antigos ("lida", sem o formato): tratados como QR, a leitura mais comum.
+    const entry = !r.entry || r.entry === 'read' ? 'qr' : r.entry;
+    receipt.value = { type: 'nfce', nfceKey: r.nfceKey, entry, spUrl: r.nfceUrl ?? null, label };
     if (r.photoPath) {
       // Foto da nota já anexada: mostra a prévia quando carregar.
       receipt.value = { ...receipt.value, photo: { previewUrl: null } };

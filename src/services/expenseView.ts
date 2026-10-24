@@ -3,6 +3,7 @@ import { formatBRL } from '@/domain/money';
 import { expenseDebt, type Cents, type Members, type SettlementExpense } from '@/domain/settlement';
 import { splitForViewer } from '@/domain/split';
 import type { Expense } from './expenses';
+import type { StoredKeyEntry } from './expenseData';
 
 /**
  * Textos de exibição de um gasto, do ponto de vista de quem olha.
@@ -155,10 +156,12 @@ export function badgeFor(expense: BadgeSource, viewerUid: string, detailed = fal
   }
 }
 
-/** "NF-e · chave lida", "NFC-e · chave digitada" (modelo e origem da chave). */
-export function fiscalKeyLabel(receipt: { nfceKey: string; entry?: 'read' | 'typed' }): string {
+/** "NFC-e · QR Code lido", "NF-e · código de barras lido", "NFC-e · chave digitada" ("chave lida" nos antigos, sem o formato). */
+export function fiscalKeyLabel(receipt: { nfceKey: string; entry?: StoredKeyEntry }): string {
   const doc = receipt.nfceKey.slice(20, 22) === '55' ? 'NF-e' : 'NFC-e';
-  return `${doc} · chave ${receipt.entry === 'typed' ? 'digitada' : 'lida'}`;
+  const how =
+    receipt.entry === 'typed' ? 'chave digitada' : receipt.entry === 'qr' ? 'QR Code lido' : receipt.entry === 'barcode' ? 'código de barras lido' : 'chave lida';
+  return `${doc} · ${how}`;
 }
 
 /**

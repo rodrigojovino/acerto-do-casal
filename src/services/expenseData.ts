@@ -49,8 +49,11 @@ export type ReceiptChoice =
       photo?: { replaced: boolean };
     };
 
-/** Como a chave chegou: lida pelo leitor (QR ou código de barras) ou digitada. */
-export type KeyEntry = 'read' | 'typed';
+/** Como a chave chegou: lida pelo leitor (QR Code ou código de barras) ou digitada. */
+export type KeyEntry = 'qr' | 'barcode' | 'typed';
+
+/** Gravado no gasto: os anteriores à v0.8.0 têm só "lida" (`read`), sem o formato. */
+export type StoredKeyEntry = KeyEntry | 'read';
 
 export interface NfceData {
   issuerName: string;
@@ -67,7 +70,7 @@ export type StoredReceipt =
       type: 'nfce';
       nfceKey: string;
       /** Ausente em gastos anteriores ao bloco D: chave lida pelo QR. */
-      entry?: KeyEntry;
+      entry?: StoredKeyEntry;
       /** URL de consulta da SEFAZ-SP montada da chave (`spConsultUrl`); só NFC-e de SP. */
       nfceUrl?: string;
       /**

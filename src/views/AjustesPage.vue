@@ -22,6 +22,11 @@
           <span aria-hidden="true" class="chev">›</span>
         </router-link>
 
+        <details class="card legend-card">
+          <summary class="row-title">Legenda dos ícones</summary>
+          <IconLegend />
+        </details>
+
         <div class="card soon">
           <p class="strong">Em breve</p>
           <p class="hint">Perfis, divisão padrão e notificações chegam nas próximas fases.</p>
@@ -41,6 +46,7 @@
 import { IonContent, IonFooter, IonPage } from '@ionic/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppTabBar from '@/components/AppTabBar.vue';
+import IconLegend from '@/components/IconLegend.vue';
 import { signOut } from '@/services/auth';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { pushPermission } from '@/services/push';
@@ -77,6 +83,15 @@ const recurringSummary = computed(() => {
 </script>
 
 <style scoped>
+.legend-card {
+  padding: 14px 16px;
+}
+
+.legend-card summary {
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
 .row {
   display: flex;
   align-items: center;

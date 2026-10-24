@@ -10,7 +10,7 @@
         v-if="canScanQr && allowKey"
         type="button"
         class="option"
-        :aria-pressed="modelValue.type === 'nfce' && modelValue.entry === 'read'"
+        :aria-pressed="modelValue.type === 'nfce' && modelValue.entry !== 'typed'"
         :disabled="busy"
         aria-label="Ler QR Code ou código de barras"
         @click="scanQr"
@@ -188,13 +188,13 @@ function removeKeyPhoto(): void {
 /** Chave lida ou digitada vira o comprovante do formulário. */
 function useScanned(scanned: ScannedNfce): void {
   const [y, m] = scanned.yearMonth.split('-');
-  const how = scanned.entry === 'typed' ? 'digitada' : 'lida';
+  const how = scanned.entry === 'typed' ? 'chave digitada' : scanned.entry === 'barcode' ? 'código de barras lido' : 'QR Code lido';
   emit('update:modelValue', {
     type: 'nfce',
     nfceKey: scanned.key,
     entry: scanned.entry,
     spUrl: scanned.spUrl,
-    label: `${fiscalDocName(scanned.model)} de ${scanned.uf} (${m}/${y}) · chave ${how}`,
+    label: `${fiscalDocName(scanned.model)} de ${scanned.uf} (${m}/${y}) · ${how}`,
   });
   emit('scanned', scanned);
 }

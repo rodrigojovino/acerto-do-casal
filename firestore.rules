@@ -154,7 +154,8 @@ service cloud.firestore {
                 && validKeyPhoto(r, ownerId, false)
               || r.nfceKey is string
                 && r.nfceKey.matches('^[0-9]{20}(55|65)[0-9]{22}$')
-                && r.get('entry', null) in ['read', 'typed']
+                // Formato da chave: QR Code, código de barras ou digitada ('read': app anterior à v0.8.0).
+                && r.get('entry', null) in ['qr', 'barcode', 'typed', 'read']
                 && (
                   r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceUrl', 'nfceStatus', 'photoPath', 'photoUploaded'])
                     && validKeyPhoto(r, ownerId, isNew)

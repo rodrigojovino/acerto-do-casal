@@ -108,8 +108,7 @@
                 :name="item.description"
                 :sub="expenseSubtitle(item, firstNameOf(item.payerUid))"
                 :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents)"
-                :badge="badgeFor(item, myUid)"
-                :types="typeBadges(item)"
+                :icons="rowIcons(item, myUid, partnerFirstName)"
                 :syncing="item.pendingWrite"
               >
                 <span v-for="flag in flagsFor(item)" :key="flag" class="line warn">{{ flagLabel[flag] }}</span>
@@ -123,8 +122,7 @@
                 :name="f.description"
                 :sub="`${firstNameOf(f.payerUid)} · ${formatDateBR(f.date, false)} · previsto${f.adjustmentPending ? ' · reajuste aguardando aprovação' : ''}`"
                 :amount="f.amountCents === null ? 'a definir' : formatBRL(f.amountCents)"
-                :badge="FORECAST_BADGE"
-                :types="['Recorrente']"
+                :icons="forecastIcons()"
                 muted
               />
             </button>
@@ -155,7 +153,8 @@ import { closingErrorMessage, requestReopen, watchMonth, type MonthDoc, type Mon
 import { askReopenReason } from '@/components/reopenDialog';
 import { isOnline } from '@/services/sync';
 import { dismissPushInvite, enablePush, pushAskedBefore, pushPermission } from '@/services/push';
-import { FORECAST_BADGE, badgeFor, expenseSubtitle, flagLabel, flagsFor, typeBadges } from '@/services/expenseView';
+import { expenseSubtitle, flagLabel, flagsFor } from '@/services/expenseView';
+import { forecastIcons, rowIcons } from '@/services/rowIcons';
 import { forecastRecurring, forecastTotal, type Forecast } from '@/domain/recurrence';
 import { forecastNotice } from '@/services/recurringView';
 import { watchRecurring, type RecurringDoc } from '@/services/recurring';

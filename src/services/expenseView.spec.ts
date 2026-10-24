@@ -225,6 +225,12 @@ describe('originLabel', () => {
     expect(
       originLabel(expense({ status: 'confirmed', receipt: { type: 'nfce', nfceKey: nfce, entry: 'typed', nfceStatus: 'pending' } }), nameOf),
     ).toBe('NFC-e · chave digitada');
+    expect(
+      originLabel(expense({ status: 'confirmed', receipt: { type: 'nfce', nfceKey: nfce, entry: 'qr', nfceStatus: 'pending' } }), nameOf),
+    ).toBe('NFC-e · QR Code lido');
+    expect(
+      originLabel(expense({ status: 'confirmed', receipt: { type: 'nfce', nfceKey: nfe, entry: 'barcode', nfceStatus: 'unchecked' } }), nameOf),
+    ).toBe('NF-e · código de barras lido');
     expect(originLabel(expense({ status: 'confirmed', approval: { byUid: 'nfce', at: null } }), nameOf)).toBe('Automático · nota conferida');
     expect(
       originLabel(expense({ status: 'confirmed', receipt: { type: 'photo', photoPath: 'p', photoUploaded: true } }), nameOf),

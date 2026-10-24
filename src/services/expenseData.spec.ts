@@ -22,11 +22,11 @@ describe('foto da nota junto com a chave', () => {
 
   it('mesma chave: a conferência fica; anexar, manter ou remover só mexe na foto', () => {
     const ok: StoredReceipt = { type: 'nfce', nfceKey: KEY, entry: 'read', nfceStatus: 'ok', nfceData: { issuerName: 'LOJA', totalCents: 100, date: '2026-10-01' } };
-    const attached = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'read', photo: { replaced: true } }, ids, ok);
+    const attached = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'qr', photo: { replaced: true } }, ids, ok);
     expect(attached).toEqual({ ...ok, photoPath, photoUploaded: false });
-    const kept = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'read', photo: { replaced: false } }, ids, { ...ok, photoPath, photoUploaded: true });
+    const kept = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'qr', photo: { replaced: false } }, ids, { ...ok, photoPath, photoUploaded: true });
     expect(kept).toMatchObject({ photoUploaded: true, nfceStatus: 'ok' });
-    const removed = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'read' }, ids, { ...ok, photoPath, photoUploaded: true });
+    const removed = receiptData({ type: 'nfce', nfceKey: KEY, entry: 'qr' }, ids, { ...ok, photoPath, photoUploaded: true });
     expect(removed).toEqual(ok);
   });
 

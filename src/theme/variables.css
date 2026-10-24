@@ -34,7 +34,16 @@
 
   /* Fonte da linha de dados das listas (quem pagou · data · divisão) e dos
      selos de status e de tipo: um valor só, para mudarem juntos. */
-  --app-meta-font: 11px;
+  --app-meta-font: 12px;
+
+  /* Primeira linha da lista de gastos: descrição e valor com a mesma fonte (a do valor). */
+  --app-row-title-font: 14px;
+  --app-row-title-weight: 800;
+
+  /* Ícones da linha de gasto (origem, recorrente, números e o círculo de situação). */
+  --app-row-icon: 19px;
+  --app-row-indicator: 24px;
+  --app-row-number-font: 13px;
 
   --ion-font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
   --ion-background-color: var(--app-bg);

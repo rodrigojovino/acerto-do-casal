@@ -73,9 +73,12 @@ export async function scanNfceQr(): Promise<ScannedNfce | null> {
   }
 
   let raw: string | undefined;
+  let entry: KeyEntry = 'qr';
   try {
     const { barcodes } = await BarcodeScanner.scan({ formats: [BarcodeFormat.QrCode, BarcodeFormat.Code128], autoZoom: true });
     raw = barcodes[0]?.rawValue;
+    // O formato lido vai para o comprovante (ícone de QR ou de código de barras na lista).
+    if (barcodes[0]?.format === BarcodeFormat.Code128) entry = 'barcode';
   } catch (err) {
     const message = err instanceof Error ? err.message.toLowerCase() : '';
     if (message.includes('cancel')) return null;
@@ -84,7 +87,7 @@ export async function scanNfceQr(): Promise<ScannedNfce | null> {
   if (!raw) return null;
 
   try {
-    return toScanned(parseFiscalCode(raw), 'read');
+    return toScanned(parseFiscalCode(raw), entry);
   } catch (err) {
     throw new QrError(err instanceof NfceError ? err.message : 'Este código não é de uma nota fiscal.');
   }

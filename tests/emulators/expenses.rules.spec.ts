@@ -344,6 +344,15 @@ describe('comprovante na criação', () => {
     await assertSucceeds(create(A, 'e3', expense({ receipt: { ...nfcePending, entry: 'typed' } })));
   });
 
+  it('formato lido (v0.8.0): QR Code e código de barras; "lida" dos apps anteriores continua aceito', async () => {
+    const other = (n: string) => NFCE_KEY.slice(0, 34) + n.padStart(10, '0');
+    const at = (n: string, entry: string) => ({ ...nfcePending, nfceKey: other(n), nfceUrl: `${SEFAZ_SP_CANONICAL}${other(n)}|3|1`, entry });
+    await assertSucceeds(create(A, 'q1', expense({ receipt: at('1', 'qr') })));
+    await assertSucceeds(create(A, 'q2', expense({ receipt: at('2', 'barcode') })));
+    await assertSucceeds(create(A, 'q3', expense({ receipt: at('3', 'read') })));
+    await assertFails(create(A, 'q4', expense({ receipt: at('4', 'camera') })));
+  });
+
   it('QR: a URL de SP precisa ser da própria chave', async () => {
     const other = NFCE_KEY.slice(0, 34) + '9999999999';
     await assertFails(

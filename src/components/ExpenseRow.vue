@@ -7,40 +7,37 @@
     </span>
     <span class="meta">
       <span class="sub">{{ sub }}</span>
-      <span v-if="badge || types.length > 0" class="badges">
-        <TypeBadge v-for="t in types" :key="t" :label="t" />
-        <StatusBadge v-if="badge" v-bind="badge" />
-      </span>
+      <RowIcons :icons="icons" />
     </span>
     <span v-if="$slots.default" class="extra"><slot /></span>
   </span>
 </template>
 
 <script setup lang="ts">
-import StatusBadge from './StatusBadge.vue';
-import TypeBadge from './TypeBadge.vue';
-import type { Badge } from '@/services/expenseView';
+import RowIcons from './RowIcons.vue';
+import type { RowIcons as Icons } from '@/services/rowIcons';
 
 /**
- * Linha de gasto das listas (Painel, Pendências, Detalhe do mês). À esquerda,
- * a descrição (uma linha, com reticências) e a linha de dados; à direita, o
- * valor e, embaixo, os selos alinhados à direita: o de status na ponta e os de
- * tipo à esquerda dele. Linhas extras (observação, série, avisos) vão no slot,
- * com as classes `line`, `line note`, `line warn` ou `line danger`.
+ * Linha de gasto das listas (Painel, Pendências, Detalhe do mês). Primeira
+ * linha: a descrição (com reticências) e o valor. Segunda linha, sempre numa
+ * linha só: a linha de dados e, à direita, os ícones (`rowIcons`: origem,
+ * recorrente, números e o indicador de situação na ponta). Faltando espaço,
+ * a linha de dados ganha reticências; os ícones nunca são cortados. Linhas
+ * extras (observação, série, avisos) vão no slot, com as classes `line`,
+ * `line note`, `line warn` ou `line danger`.
  */
 withDefaults(
   defineProps<{
     name: string;
     sub: string;
     amount: string;
-    badge?: Badge | null;
-    types?: readonly string[];
+    icons: Icons;
     /** Previsão (ainda não é gasto): descrição e valor esmaecidos. */
     muted?: boolean;
     /** Gravado no aparelho, ainda não confirmado pelo servidor. */
     syncing?: boolean;
   }>(),
-  { badge: null, types: () => [], muted: false, syncing: false },
+  { muted: false, syncing: false },
 );
 </script>
 
@@ -57,8 +54,8 @@ withDefaults(
 
 .name {
   grid-column: 1;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--app-row-title-font);
+  font-weight: var(--app-row-title-weight);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -70,42 +67,31 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: var(--app-row-title-font);
+  font-weight: var(--app-row-title-weight);
   white-space: nowrap;
 }
 
-/* Segunda linha, na largura toda: dados à esquerda e selos à direita. Se não
-   couberem juntos (tela estreita, dois selos longos), os selos descem para a
-   linha de baixo, alinhados à direita; a descrição nunca é apertada por eles. */
+/* Segunda linha, na largura toda e sem quebrar: dados à esquerda (encolhem,
+   com reticências) e os ícones à direita (tamanho fixo, nunca cortados). */
 .meta {
   grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 3px 12px;
+  gap: 10px;
   min-width: 0;
 }
 
-/* Linha de dados (quem pagou · data · divisão): menor que a descrição; o mesmo tamanho dos selos. */
+/* Linha de dados (quem pagou · data): menor que a descrição. */
 .sub {
-  flex: 1 1 9em;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: var(--app-meta-font);
   color: var(--app-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.badges {
-  margin-left: auto;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 4px;
 }
 
 .extra {

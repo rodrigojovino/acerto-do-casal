@@ -46,8 +46,7 @@
                     :name="e.description"
                     :sub="expenseSubtitle(e, firstNameOf(e.payerUid))"
                     :amount="formatBRL(e.totalCents)"
-                    :badge="badgeFor(e, myUid)"
-                    :types="typeBadges(e)"
+                    :icons="rowIcons(e, myUid, partnerFirstName)"
                   />
                 </router-link>
               </li>
@@ -72,7 +71,8 @@ import { formatDateBR, monthLabel, monthName, todayInSaoPaulo } from '@/domain/c
 import { formatBRL } from '@/domain/money';
 import { watchMonth, type MonthDoc } from '@/services/closing';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
-import { badgeFor, expenseSubtitle, typeBadges } from '@/services/expenseView';
+import { expenseSubtitle } from '@/services/expenseView';
+import { rowIcons } from '@/services/rowIcons';
 import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
 
 const route = useRoute();
