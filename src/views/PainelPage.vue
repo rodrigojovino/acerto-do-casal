@@ -29,36 +29,38 @@
           </div>
         </section>
 
-        <section class="balance" aria-labelledby="saldo-titulo">
-          <p id="saldo-titulo" class="muted small">
+        <section class="balance" :class="{ 'with-photo': !!cover }" aria-labelledby="saldo-titulo">
+          <!-- Foto do casal ao fundo (Ajustes › Foto do cartão); o escurecimento garante a leitura. -->
+          <CoverPhoto v-if="cover" :src="cover.src" :framing="cover" />
+          <p id="saldo-titulo" class="muted small" data-need="small">
             {{ isClosed ? `Acerto de ${monthName(month)}${closedPayments.length > 0 ? ' · pago' : ''}` : 'Saldo do acerto até agora' }}
           </p>
           <!-- Mês fechado: quem pagou quanto a quem, a forma e a data (não "X te deve") -->
           <template v-if="isClosed">
-            <p v-if="closedPayments.length === 0" class="who">Ninguém deve nada</p>
+            <p v-if="closedPayments.length === 0" class="who" data-need="small">Ninguém deve nada</p>
             <div v-for="p in closedPayments" :key="p.id">
-              <p class="who">{{ paymentWho(p) }}</p>
-              <p class="amount num">{{ formatBRL(p.amountCents) }}</p>
-              <p class="muted small">{{ p.method === 'pix' ? 'PIX' : 'Dinheiro' }}{{ p.at ? ` · ${formatDateBR(todayInSaoPaulo(p.at))}` : '' }}</p>
+              <p class="who" data-need="small">{{ paymentWho(p) }}</p>
+              <p class="amount num" data-need="large">{{ formatBRL(p.amountCents) }}</p>
+              <p class="muted small" data-need="small">{{ p.method === 'pix' ? 'PIX' : 'Dinheiro' }}{{ p.at ? ` · ${formatDateBR(todayInSaoPaulo(p.at))}` : '' }}</p>
             </div>
           </template>
           <div v-else>
-            <p class="who">{{ balanceText.who }}</p>
-            <p class="amount num">{{ formatBRL(balance?.amountCents ?? 0) }}</p>
+            <p class="who" data-need="small">{{ balanceText.who }}</p>
+            <p class="amount num" data-need="large">{{ formatBRL(balance?.amountCents ?? 0) }}</p>
           </div>
           <div class="paid">
             <div>
-              <span class="muted">Você pagou</span>
-              <span class="num strong">{{ formatBRL(paid[myUid] ?? 0) }}</span>
+              <span class="muted" data-need="small">Você pagou</span>
+              <span class="num strong" data-need="small">{{ formatBRL(paid[myUid] ?? 0) }}</span>
             </div>
             <div>
-              <span class="muted">{{ partnerFirstName }} pagou</span>
-              <span class="num strong">{{ formatBRL(paid[partnerUid ?? ''] ?? 0) }}</span>
+              <span class="muted" data-need="small">{{ partnerFirstName }} pagou</span>
+              <span class="num strong" data-need="small">{{ formatBRL(paid[partnerUid ?? ''] ?? 0) }}</span>
             </div>
           </div>
           <p v-if="forecast.length > 0" class="forecast-line small">
-            <span class="muted">Previsto em recorrentes</span>
-            <span class="num strong">{{ formatBRL(forecastFixedCents) }}</span>
+            <span class="muted" data-need="small">Previsto em recorrentes</span>
+            <span class="num strong" data-need="small">{{ formatBRL(forecastFixedCents) }}</span>
           </p>
         </section>
 
@@ -178,6 +180,8 @@
 <script setup lang="ts">
 import { IonContent, IonFooter, IonModal, IonPage, alertController, onIonViewWillEnter } from '@ionic/vue';
 import FiltersSheet from '@/components/FiltersSheet.vue';
+import CoverPhoto from '@/components/CoverPhoto.vue';
+import { cover } from '@/services/cover';
 import { categories } from '@/services/categories';
 import { activeFilterCount, filterExpenses, filterSummary, periodOutsideMonth, type ExpenseFilters } from '@/services/expenseFilters';
 import { clearPainelFilters, painelFilters } from '@/services/filterState';
@@ -489,6 +493,8 @@ const countText = computed(() => {
 }
 
 .balance {
+  position: relative;
+  overflow: hidden;
   background: var(--app-text);
   color: #fff;
   border-radius: 20px;
@@ -496,6 +502,23 @@ const countText = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Com foto: o conteúdo fica acima da foto e do véu, com sombra leve no texto. */
+.balance.with-photo > * {
+  position: relative;
+}
+
+.balance.with-photo {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.balance.with-photo .muted {
+  color: #e6e5e0;
+}
+
+.balance.with-photo .forecast-line {
+  border-top-color: rgba(255, 255, 255, 0.28);
 }
 
 .balance p {
@@ -516,10 +539,11 @@ const countText = computed(() => {
   font-weight: 600;
 }
 
+/* Valor do saldo: 30% menor que antes (40 → 28 px), com ou sem foto. */
 .amount {
-  font-size: 40px;
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
 }
 
 .paid {

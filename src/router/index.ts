@@ -13,6 +13,7 @@ import ClosingPage from '../views/ClosingPage.vue';
 import HistoryPage from '../views/HistoryPage.vue';
 import NotificationsPage from '../views/NotificationsPage.vue';
 import CategoriesPage from '../views/CategoriesPage.vue';
+import CoverPage from '../views/CoverPage.vue';
 import MonthDetailPage from '../views/MonthDetailPage.vue';
 import PendenciasPage from '../views/PendenciasPage.vue';
 import ExpenseFormPage from '../views/ExpenseFormPage.vue';
@@ -31,6 +32,7 @@ const views: Record<RouteName, Component> = {
   recorrentes: RecurringListPage,
   avisos: NotificationsPage,
   categorias: CategoriesPage,
+  'foto-cartao': CoverPage,
   'recorrente-novo': RecurringFormPage,
   recorrente: RecurringFormPage,
   'gasto-novo': ExpenseFormPage,

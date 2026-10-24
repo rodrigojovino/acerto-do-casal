@@ -1,5 +1,5 @@
 import { Camera } from '@capacitor/camera';
-import { compressToLimit, type CompressedImage, type JpegEncoder } from '@/domain/image';
+import { MAX_RECEIPT_BYTES, compressToLimit, type CompressedImage, type JpegEncoder } from '@/domain/image';
 
 /** Erro de foto com mensagem pronta para exibir. */
 export class PhotoError extends Error {}
@@ -7,10 +7,10 @@ export class PhotoError extends Error {}
 export type PhotoSource = 'camera' | 'gallery';
 
 /**
- * Tira ou escolhe a foto do comprovante e comprime no aparelho (JPEG < 500 KB).
- * Retorna `null` se a pessoa cancelar.
+ * Tira ou escolhe a foto do comprovante e comprime no aparelho (JPEG < 500 KB;
+ * a foto do cartão de saldo usa um limite menor). Retorna `null` se a pessoa cancelar.
  */
-export async function pickReceiptPhoto(source: PhotoSource): Promise<CompressedImage | null> {
+export async function pickReceiptPhoto(source: PhotoSource, maxBytes = MAX_RECEIPT_BYTES): Promise<CompressedImage | null> {
   let webPath: string | undefined;
   try {
     if (source === 'camera') {
@@ -29,14 +29,14 @@ export async function pickReceiptPhoto(source: PhotoSource): Promise<CompressedI
 
   try {
     const original = await (await fetch(webPath)).blob();
-    return await compressImage(original);
+    return await compressImage(original, maxBytes);
   } catch {
     throw new PhotoError('Não foi possível preparar a foto. Tente outra.');
   }
 }
 
 /** Comprime uma imagem com canvas, respeitando a orientação EXIF. */
-export async function compressImage(original: Blob): Promise<CompressedImage> {
+export async function compressImage(original: Blob, maxBytes = MAX_RECEIPT_BYTES): Promise<CompressedImage> {
   const bitmap = await createImageBitmap(original, { imageOrientation: 'from-image' });
   try {
     const canvas = document.createElement('canvas');
@@ -51,7 +51,7 @@ export async function compressImage(original: Blob): Promise<CompressedImage> {
       );
       return { bytes: data.size, data };
     };
-    return await compressToLimit({ width: bitmap.width, height: bitmap.height }, encode);
+    return await compressToLimit({ width: bitmap.width, height: bitmap.height }, encode, maxBytes);
   } finally {
     bitmap.close();
   }

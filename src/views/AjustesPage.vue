@@ -22,6 +22,14 @@
           <span aria-hidden="true" class="chev">›</span>
         </router-link>
 
+        <router-link class="card row" :to="{ name: 'foto-cartao' }">
+          <span class="row-main">
+            <span class="row-title">Foto do cartão</span>
+            <span class="hint">{{ cover ? 'Foto do casal no cartão de saldo' : 'Sem foto' }}</span>
+          </span>
+          <span aria-hidden="true" class="chev">›</span>
+        </router-link>
+
         <router-link class="card row" :to="{ name: 'avisos' }">
           <span class="row-main">
             <span class="row-title">Avisos</span>
@@ -58,6 +66,7 @@ import IconLegend from '@/components/IconLegend.vue';
 import { signOut } from '@/services/auth';
 import { awaitsApproval, watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { categories } from '@/services/categories';
+import { cover } from '@/services/cover';
 import { pushPermission } from '@/services/push';
 import { notificationPrefs } from '@/services/notificationPrefs';
 import { group, user } from '@/services/session';

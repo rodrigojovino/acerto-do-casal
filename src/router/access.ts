@@ -18,6 +18,7 @@ export const SCREENS = [
   { name: 'recorrentes', path: '/ajustes/recorrentes', access: ['linked'] },
   { name: 'avisos', path: '/ajustes/avisos', access: ['linked'] },
   { name: 'categorias', path: '/ajustes/categorias', access: ['linked'] },
+  { name: 'foto-cartao', path: '/ajustes/foto', access: ['linked'] },
   { name: 'recorrente-novo', path: '/ajustes/recorrentes/nova', access: ['linked'] },
   { name: 'recorrente', path: '/ajustes/recorrentes/:id', access: ['linked'] },
   { name: 'gasto-novo', path: '/gasto/novo', access: ['linked'] },

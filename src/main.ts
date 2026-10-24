@@ -2,10 +2,11 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router';
 import { initPush } from './services/push';
-// Itens das notas, notas já lançadas e categorias no cache local desde a abertura (abrem offline).
+// Itens das notas, notas já lançadas, categorias e a foto do cartão no cache local desde a abertura (abrem offline).
 import './services/nfceItems';
 import './services/fiscalKeys';
 import './services/categories';
+import './services/cover';
 
 import { IonicVue } from '@ionic/vue';
 
