@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { clampMonth } from './calendar';
 import {
+  firstMonthOptions,
   firstMonthRange,
   installmentExpenseId,
   installmentPreview,
   installmentSummary,
+  keepFirstMonth,
   lastInstallmentMonth,
   navigationLastMonth,
   planInstallments,
@@ -84,5 +86,51 @@ describe('limite de navegação', () => {
     expect(clampMonth('2027-12', '2026-01', '2026-10-18', last)).toBe('2027-09');
     expect(clampMonth('2027-03', '2026-01', '2026-10-18', last)).toBe('2027-03');
     expect(clampMonth('2027-03', '2026-01', '2026-10-18')).toBe('2026-11');
+  });
+});
+
+describe('mês da primeira parcela (formulário)', () => {
+  it('compra em outubro: oferece outubro e novembro (fatura do mês seguinte)', () => {
+    expect(firstMonthOptions('2026-10-20', '2026-10-27', '2026-10')).toEqual(['2026-10', '2026-11']);
+  });
+
+  it('compra antiga: do mês da compra (no máximo 6 meses atrás) até o mês seguinte, nunca antes da criação do grupo', () => {
+    expect(firstMonthOptions('2026-08-20', '2026-10-27', '2026-06')).toEqual(['2026-08', '2026-09', '2026-10', '2026-11']);
+    expect(firstMonthOptions('2026-08-20', '2026-10-27', '2026-10')).toEqual(['2026-10', '2026-11']);
+    expect(firstMonthOptions('2025-12-20', '2026-10-27', '2025-01')).toHaveLength(8); // abr/2026 a nov/2026
+  });
+
+  it('a escolha de novembro fica quando as opções são recalculadas (outra data no mesmo mês, virada do dia)', () => {
+    const options = firstMonthOptions('2026-10-05', '2026-10-27', '2026-10');
+    expect(keepFirstMonth('2026-11', true, options)).toBe('2026-11');
+    expect(keepFirstMonth('2026-11', true, firstMonthOptions('2026-10-05', '2026-10-28', '2026-10'))).toBe('2026-11');
+  });
+
+  it('sem escolha, acompanha o mês da compra; fora dos limites, vai para o mais próximo', () => {
+    expect(keepFirstMonth('2026-11', false, ['2026-09', '2026-10', '2026-11'])).toBe('2026-09');
+    expect(keepFirstMonth('2026-08', true, ['2026-10', '2026-11'])).toBe('2026-10');
+    expect(keepFirstMonth('2026-12', true, ['2026-10', '2026-11'])).toBe('2026-11');
+    expect(keepFirstMonth('2026-11', true, [])).toBe('2026-11');
+  });
+});
+
+describe('primeira parcela no mês seguinte', () => {
+  // Compra no cartão em 18/10/2026, 10x, primeira na fatura de novembro.
+  const parcels = planInstallments({ totalCents: 100005, personalCents: 0, count: 10, firstMonth: '2026-11', purchaseDate: '2026-10-18' });
+
+  it('a parcela 1 é de novembro e a última, de agosto de 2027 (um mês depois do que seria com outubro)', () => {
+    expect(parcels[0]).toMatchObject({ index: 1, competence: '2026-11', date: '2026-11-18' });
+    expect(parcels[9]).toMatchObject({ index: 10, competence: '2027-08', date: '2027-08-18' });
+    expect(lastInstallmentMonth({ count: 10, firstMonth: '2026-11' })).toBe('2027-08');
+    expect(lastInstallmentMonth({ count: 10, firstMonth: '2026-10' })).toBe('2027-07');
+  });
+
+  it('compra no dia 31: dia 30 em novembro e o último dia nos meses curtos', () => {
+    const p = planInstallments({ totalCents: 30000, personalCents: 0, count: 4, firstMonth: '2026-11', purchaseDate: '2026-10-31' });
+    expect(p.map((x) => x.date)).toEqual(['2026-11-30', '2026-12-31', '2027-01-31', '2027-02-28']);
+  });
+
+  it('o Painel navega até o mês da última parcela', () => {
+    expect(navigationLastMonth('2026-10-27', '2027-08')).toBe('2027-08');
   });
 });

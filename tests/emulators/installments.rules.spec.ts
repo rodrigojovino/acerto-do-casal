@@ -124,6 +124,13 @@ describe('lançar a série', () => {
     await assertSucceeds(createBatch(A, series({}, 48, NEXT)));
   });
 
+  it('compra no mês atual com a primeira parcela na fatura do mês seguinte (10x)', async () => {
+    const parcels = series({}, 10, NEXT);
+    if (parcels[0].data.competence !== NEXT || parcels[9].data.competence !== month(10)) throw new Error('meses das parcelas');
+    if (!parcels[0].data.date.startsWith(NEXT)) throw new Error('data da parcela 1 no mês seguinte');
+    await assertSucceeds(createBatch(A, parcels));
+  });
+
   it('primeira parcela em mês passado (meses passados abertos)', async () => {
     await assertSucceeds(createBatch(A, series({ date: `${month(-3)}-20` }, 12, month(-3))));
   });

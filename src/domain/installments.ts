@@ -113,3 +113,29 @@ export function firstMonthRange(purchaseDate: IsoDate, today: IsoDate): { min: C
   const purchase = monthOf(purchaseDate);
   return { min: purchase > oldest ? purchase : oldest, max: lastAllowedMonth(today) };
 }
+
+/**
+ * Meses que o formulário oferece para a primeira parcela, em ordem: os de
+ * `firstMonthRange`, nunca antes do mês de criação do grupo. O caso comum
+ * (compra no cartão em outubro, primeira parcela na fatura de novembro) é o
+ * último da lista: o mês seguinte ao atual.
+ */
+export function firstMonthOptions(purchaseDate: IsoDate, today: IsoDate, groupFirstMonth: Competence): Competence[] {
+  const range = firstMonthRange(purchaseDate, today);
+  const options: Competence[] = [];
+  for (let m = range.min > groupFirstMonth ? range.min : groupFirstMonth; m <= range.max; m = addMonths(m, 1)) options.push(m);
+  return options;
+}
+
+/**
+ * Mês da primeira parcela quando as opções mudam (data da compra, virada do
+ * dia): a escolha da pessoa fica enquanto continuar permitida; sem escolha,
+ * acompanha o mês da compra (a primeira opção); fora dos limites, vai para o
+ * mais próximo.
+ */
+export function keepFirstMonth(current: Competence, chosen: boolean, options: readonly Competence[]): Competence {
+  if (options.length === 0) return current;
+  if (!chosen) return options[0];
+  if (options.includes(current)) return current;
+  return current < options[0] ? options[0] : options[options.length - 1];
+}

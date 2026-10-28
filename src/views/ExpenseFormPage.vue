@@ -141,16 +141,16 @@
                 </div>
                 <div class="field">
                   <label for="primeira" class="label">Mês da primeira</label>
-                  <input
+                  <!-- Lista do app, só com os meses permitidos (o seletor de mês nativo do Android não respeitava a escolha). -->
+                  <select
                     id="primeira"
                     v-model="installmentFirstMonth"
                     class="input"
-                    type="month"
-                    @input="firstMonthTouched = true"
-                    :min="firstMonthBounds.min"
-                    :max="firstMonthBounds.max"
                     :aria-invalid="showErrors && !!errors.firstMonth"
-                  />
+                    @change="firstMonthTouched = true"
+                  >
+                    <option v-for="m in firstMonthChoices" :key="m" :value="m">{{ shortMonth(m) }}</option>
+                  </select>
                   <p v-if="showErrors && errors.firstMonth" class="field-error">{{ errors.firstMonth }}</p>
                 </div>
               </div>
@@ -207,7 +207,8 @@ import {
 import {
   MAX_INSTALLMENTS,
   MIN_INSTALLMENTS,
-  firstMonthRange,
+  firstMonthOptions,
+  keepFirstMonth,
   installmentPreview,
   lastInstallmentMonth,
 } from '@/domain/installments';
@@ -518,17 +519,21 @@ const competenceNote = computed(() => {
 });
 
 // ---- Compra parcelada ----
-const firstMonthBounds = computed(() => {
-  const range = isIsoDate(date.value) ? firstMonthRange(date.value, today.value) : { min: firstMonth.value, max: monthOf(maxDate.value) };
-  return { min: range.min > firstMonth.value ? range.min : firstMonth.value, max: range.max };
-});
+/** Meses permitidos para a primeira parcela: do mês da compra até o mês seguinte ao atual. */
+const firstMonthChoices = computed(() =>
+  firstMonthOptions(isIsoDate(date.value) ? date.value : today.value, today.value, firstMonth.value),
+);
 
-// A primeira parcela acompanha o mês da compra até a pessoa escolher outro mês.
+// A primeira parcela acompanha o mês da compra até a pessoa escolher outro mês;
+// a escolha fica enquanto continuar permitida (compara os meses, não o objeto).
 const firstMonthTouched = ref(false);
-watch(firstMonthBounds, (bounds) => {
-  const m = firstMonthTouched.value ? installmentFirstMonth.value : bounds.min;
-  installmentFirstMonth.value = m < bounds.min ? bounds.min : m > bounds.max ? bounds.max : m;
-});
+watch(
+  () => firstMonthChoices.value.join(','),
+  () => {
+    installmentFirstMonth.value = keepFirstMonth(installmentFirstMonth.value, firstMonthTouched.value, firstMonthChoices.value);
+  },
+  { immediate: true },
+);
 
 const shortMonth = (m: string) => monthLabel(m).toLowerCase().replace(/^(\S{3})\S* /, '$1/');
 
@@ -564,7 +569,7 @@ const errors = computed(() => {
   if (installmentOn.value) {
     const m = installmentFirstMonth.value;
     if (!/^\d{4}-\d{2}$/.test(m)) e.firstMonth = 'Informe o mês da primeira.';
-    else if (m < firstMonthBounds.value.min || m > firstMonthBounds.value.max) e.firstMonth = 'Mês fora do período permitido.';
+    else if (!firstMonthChoices.value.includes(m)) e.firstMonth = 'Mês fora do período permitido.';
     else if (closedMonths.value.has(m)) e.firstMonth = 'Este mês está fechado.';
     if (totalCents.value > 0 && totalCents.value < installmentCount.value) e.total = 'Valor menor que o número de parcelas.';
   }
