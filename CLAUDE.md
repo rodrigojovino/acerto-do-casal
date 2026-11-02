@@ -15,7 +15,7 @@ Escopo completo: documento "Acerto do Casal — Escopo do MVP" (Claude Docs). Es
 - Câmera, QR Code e código de barras: plugin Capacitor com ML Kit
 - Avisos (push): `@capacitor-firebase/messaging` (FCM nativo, só Android) e `@capawesome/capacitor-badge` (número no ícone, quando o fabricante permite). Canal `avisos`; ícone `ic_stat_notify` (silhueta branca) no AndroidManifest.
 - Testes: Vitest (domínio, `npm test`) e emuladores do Firebase para regras e Functions (`npm run test:emulators`, projeto `demo-acerto`)
-- Build: GitHub Actions gera o APK assinado e publica no Release (`release.yml`, tag `vX.Y.Z`). `ci.yml` roda os testes e compila um APK de debug a cada push. Instalação por download direto do GitHub.
+- Build: GitHub Actions gera o APK assinado e publica no Release (`release.yml`, tag `vX.Y.Z`). APK de teste: tag `vX.Y.Z-testeN`, publicada como pre-release (nunca a mais recente), com o código de versão anterior (`v0.8.5-teste1` → 804), que instala por cima da versão atual e é substituído pela `vX.Y.Z` final. `ci.yml` roda os testes e compila um APK de debug a cada push. Instalação por download direto do GitHub.
 
 ## Comandos e cuidados do Firebase
 
@@ -334,6 +334,8 @@ Comprovantes no app:
 - Chave digitada: funciona também na versão web.
 
 ## Risco conhecido: NFC-e
+
+**Bloqueio desde o fim de outubro de 2026:** a consulta automática da NFC-e de SP passou a ser barrada por um firewall de aplicação na SEFAZ (página "Request Rejected" do F5 BIG-IP ASM, ou conexão derrubada), tanto da Function quanto de uma conexão doméstica, sem disfarce de navegador. Primeira falha registrada em 29/10; em 02/11, 11 de 13 consultas da `resolveNfce` falharam (cerca de 30 ms, conexão recusada) e 2 passaram. O navegador do celular abre a mesma página. Teste em andamento (v0.8.5-teste1): tela experimental "Teste: abrir nota no app" (Ajustes, `NotaTestPage`, temporária), que lê o QR e abre a URL oficial num WebView nativo do app (`NotaWebViewActivity`/`NotaWebViewPlugin` em `android/app/src/main/java/...`: configurações padrão do Android, JavaScript e armazenamento ligados, User-Agent padrão, nenhum cabeçalho a mais; o mesmo WebView que uma leitura futura usaria) e no navegador, para comparar. Não lê o conteúdo: só mostra o que o WebView informou sobre a página principal (carregou, código HTTP, falha de rede), lembrando que "carregou" não quer dizer "liberada". Decidir o caminho (plano B para SP, ver a nota no navegador, ou leitura pelo WebView) depois do teste.
 
 O QR Code atual da NFC-e normalmente não traz o valor; é preciso consultar o portal da SEFAZ, que pode ter captcha. Só NFC-e de SP tem consulta automática; NF-e (a consulta exige captcha) e notas de outros estados valem como comprovante sem consulta. Plano B (SP, se a consulta falhar): a chave preenche data, emitente e mês; o valor é digitado e a chave continua valendo como comprovante.
 

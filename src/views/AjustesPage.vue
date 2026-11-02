@@ -38,6 +38,14 @@
           <span aria-hidden="true" class="chev">›</span>
         </router-link>
 
+        <router-link class="card row" :to="{ name: 'teste-nota' }">
+          <span class="row-main">
+            <span class="row-title">Teste: abrir nota no app</span>
+            <span class="hint">Experimental · a página da NFC-e de SP no app e no navegador</span>
+          </span>
+          <span aria-hidden="true" class="chev">›</span>
+        </router-link>
+
         <details class="card legend-card">
           <summary class="row-title">Legenda dos ícones</summary>
           <IconLegend />
