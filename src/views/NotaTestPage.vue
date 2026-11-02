@@ -36,7 +36,9 @@
 
         <section v-if="report" class="card report" aria-live="polite">
           <p class="strong">O que o WebView informou</p>
-          <p v-for="(line, i) in report" :key="i" class="hint">{{ line }}</p>
+          <p v-for="(line, i) in report.page" :key="`p${i}`" class="hint">{{ line }}</p>
+          <p class="strong small-title">Diagnóstico do WebView (sem ler a página)</p>
+          <p v-for="(line, i) in report.diagnostics" :key="`d${i}`" class="hint mono">{{ line }}</p>
         </section>
       </main>
     </ion-content>
@@ -48,7 +50,7 @@ import { IonContent, IonPage } from '@ionic/vue';
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { QrError, fiscalDocName, scanNfceQr, type ScannedNfce } from '@/services/nfce';
-import { notaTestReport } from '@/services/notaTest';
+import { notaTestReport, type NotaTestReport } from '@/services/notaTest';
 import { notaWebViewAvailable, openNotaInApp, openNotaInBrowser } from '@/services/notaWebView';
 
 /**
@@ -60,7 +62,7 @@ const available = notaWebViewAvailable();
 const scanned = ref<ScannedNfce | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
-const report = ref<string[] | null>(null);
+const report = ref<NotaTestReport | null>(null);
 
 const scannedLabel = computed(() => {
   const s = scanned.value;
@@ -138,6 +140,15 @@ function goBack(): void {
 
 .strong {
   font-weight: 700;
+}
+
+.small-title {
+  margin-top: 6px !important;
+  font-size: 13px;
+}
+
+.mono {
+  word-break: break-word;
 }
 
 .actions {

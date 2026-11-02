@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.webkit.CookieManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -20,16 +21,25 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+import android.content.pm.PackageInfo;
 import java.util.ArrayList;
+import java.util.Collections;
 
 /**
  * Teste experimental: abre a página oficial da nota (SEFAZ-SP) num WebView do
  * próprio app, visível e em tela cheia, com botão para fechar. É o mesmo
- * WebView que uma leitura futura usaria: configurações padrão do Android
- * (JavaScript e armazenamento ligados, como num navegador), User-Agent padrão,
- * nenhum cabeçalho a mais. Não lê o conteúdo da página: só anota o que o
+ * WebView que uma leitura futura usaria, configurado como um navegador comum:
+ * JavaScript e armazenamento ligados, cookies aceitos (inclusive de terceiros,
+ * que o WebView recusa por padrão) e gravados no disco ao fechar, sem o
+ * cabeçalho X-Requested-With (que o navegador não envia), User-Agent padrão.
+ * Nunca apaga cookies nem recria a sessão: entre aberturas, vale a sessão
+ * anterior, como num navegador. Não lê o conteúdo da página: só anota o que o
  * próprio WebView informa sobre a página principal (terminou de carregar,
- * código HTTP de erro ou falha de rede), para mostrar ao fechar.
+ * código HTTP de erro ou falha de rede) e um diagnóstico do próprio WebView
+ * (nomes dos cookies da SEFAZ, sem os valores; cabeçalho; versão; User-Agent).
  */
 public class NotaWebViewActivity extends AppCompatActivity {
 
@@ -69,10 +79,28 @@ public class NotaWebViewActivity extends AppCompatActivity {
         // Como num navegador: a página da SEFAZ usa JavaScript. O User-Agent fica o padrão (sem disfarce).
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+
+        // Cookies como num navegador: aceitos, inclusive de terceiros (o WebView recusa por padrão).
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(webView, true);
+
+        // O navegador não envia X-Requested-With (o WebView pode enviar o nome do pacote do app).
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, Collections.emptySet());
+            events.add("xrw:off");
+        } else {
+            events.add("xrw:unsupported");
+        }
+        PackageInfo engine = WebViewCompat.getCurrentWebViewPackage(this);
+        if (engine != null) events.add("webview:" + engine.packageName + " " + engine.versionName);
+        events.add("ua:" + settings.getUserAgentString());
+        events.add("cookies-before:" + cookieNames(url));
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 events.add("loaded");
+                events.add("cookies-after:" + cookieNames(loadedUrl));
             }
 
             @Override
@@ -107,7 +135,24 @@ public class NotaWebViewActivity extends AppCompatActivity {
         if (url != null) webView.loadUrl(url);
     }
 
+    /** Só os nomes dos cookies que o WebView guarda para a página (nunca os valores). */
+    private static String cookieNames(String url) {
+        if (url == null) return "";
+        String all = CookieManager.getInstance().getCookie(url);
+        if (all == null || all.isEmpty()) return "";
+        StringBuilder names = new StringBuilder();
+        for (String part : all.split(";")) {
+            String name = part.trim().split("=", 2)[0];
+            if (name.isEmpty()) continue;
+            if (names.length() > 0) names.append(", ");
+            names.append(name);
+        }
+        return names.toString();
+    }
+
     private void finishWithEvents() {
+        // Como o navegador: a sessão fica guardada no disco (nada é apagado).
+        CookieManager.getInstance().flush();
         Intent data = new Intent();
         data.putStringArrayListExtra(EXTRA_EVENTS, events);
         setResult(RESULT_OK, data);
