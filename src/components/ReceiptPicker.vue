@@ -113,6 +113,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: ReceiptState];
   /** Chave lida ou digitada: o formulário pré-preenche (e consulta a NFC-e de SP). */
   scanned: [value: ScannedNfce];
+  /** Foto sendo processada no aparelho (comprimida, com prévia): o Salvar espera. */
+  processing: [value: boolean];
 }>();
 
 const busy = ref(false);
@@ -153,6 +155,7 @@ async function pickPhoto(header: string): Promise<Blob | null> {
   if (data !== 'camera' && data !== 'gallery') return null;
 
   busy.value = true;
+  emit('processing', true);
   try {
     return (await pickReceiptPhoto(data))?.data ?? null;
   } catch (err) {
@@ -160,6 +163,7 @@ async function pickPhoto(header: string): Promise<Blob | null> {
     return null;
   } finally {
     busy.value = false;
+    emit('processing', false);
   }
 }
 

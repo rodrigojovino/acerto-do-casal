@@ -112,6 +112,7 @@
             :partner-name="partnerFirstName"
             :allow-key="!keyLocked"
             @scanned="onScanned"
+            @processing="(v) => (photoProcessing = v)"
           />
           <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
           <p v-if="payerSharePct !== 50" class="hint split-note" role="status">
@@ -166,7 +167,8 @@
             <div v-if="installmentOn" class="row note"><span>Na compra inteira; cada parcela entra no acerto do mês dela.</span></div>
           </div>
 
-          <button class="btn primary" type="submit">{{ isEdit ? 'Salvar alteração' : 'Salvar gasto' }}</button>
+          <!-- Desabilitado, com o motivo, enquanto a foto é processada ou a nota é consultada (com limite de tempo). -->
+          <button class="btn primary" type="submit" :disabled="saveBtn.disabled" :aria-busy="saveBtn.busy">{{ saveBtn.label }}</button>
         </form>
       </main>
     </ion-content>
@@ -220,6 +222,7 @@ import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 import { chooseCategory } from '@/components/categoryDialog';
+import { CNPJ_WAIT_MS, NFCE_WAIT_MS, createSaveLock, saveButton, withTimeout, type SaveWait } from '@/domain/saveButton';
 
 const route = useRoute();
 const router = useRouter();
@@ -240,6 +243,13 @@ const note = ref('');
 /** Categoria escolhida na janela ao salvar (na edição, a do gasto). */
 const categoryId = ref<string | undefined>(undefined);
 const saving = ref(false);
+/** Trava contra toque duplo no Salvar: nunca grava duas vezes. */
+const saveLock = createSaveLock();
+/** Foto sendo comprimida no aparelho (o upload não é esperado: segue pela fila). */
+const photoProcessing = ref(false);
+/** Chave cuja consulta está em andamento (a da SEFAZ ou a do nome pelo CNPJ). */
+const nfceWaitKey = ref<string | null>(null);
+const cnpjWaitKey = ref<string | null>(null);
 const date = ref(today.value);
 const payerUid = ref(myUid.value);
 /** Guardado como no banco: a parte de quem pagou. A tela converte com split.ts. */
@@ -270,6 +280,9 @@ let stopWatch: (() => void) | null = null;
 
 // Novo gasto: volta ao estado inicial a cada entrada na tela.
 onIonViewWillEnter(() => {
+  // A cada entrada (também na edição), o Salvar volta a ficar livre.
+  saving.value = false;
+  saveLock.release();
   if (isEdit) return;
   today.value = todayInSaoPaulo();
   totalCents.value = 0;
@@ -277,7 +290,9 @@ onIonViewWillEnter(() => {
   description.value = '';
   note.value = '';
   categoryId.value = undefined;
-  saving.value = false;
+  photoProcessing.value = false;
+  nfceWaitKey.value = null;
+  cnpjWaitKey.value = null;
   date.value = today.value;
   payerUid.value = myUid.value;
   payerSharePct.value = group.value?.defaultSplitPct ?? 50;
@@ -391,7 +406,12 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   }
 
   nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
-  const result = await lookupNfce(scanned.spUrl);
+  // O Salvar espera a resposta até o limite; esgotado, plano B (valor digitado, conferência depois).
+  nfceWaitKey.value = scanned.key;
+  const result = await withTimeout(lookupNfce(scanned.spUrl), NFCE_WAIT_MS, {
+    error: 'A SEFAZ não respondeu a tempo. Digite o valor; a nota continua valendo como comprovante e será conferida depois.',
+  });
+  if (nfceWaitKey.value === scanned.key) nfceWaitKey.value = null;
   // Outro comprovante escolhido enquanto consultava: ignora.
   if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if ('error' in result) {
@@ -422,7 +442,10 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
  * editar depois. Offline ou com falha, fica o CNPJ formatado.
  */
 async function fillIssuerName(scanned: ScannedNfce, provisional: string): Promise<void> {
-  const name = await lookupCnpjName(scanned.cnpj);
+  // O Salvar espera o nome até o limite curto; esgotado, fica o CNPJ.
+  cnpjWaitKey.value = scanned.key;
+  const name = await withTimeout(lookupCnpjName(scanned.cnpj), CNPJ_WAIT_MS, null);
+  if (cnpjWaitKey.value === scanned.key) cnpjWaitKey.value = null;
   // Outro comprovante escolhido enquanto consultava, ou descrição já editada: ignora.
   if (!name || receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if (description.value === provisional) description.value = name.slice(0, 80);
@@ -576,20 +599,38 @@ const errors = computed(() => {
   return e;
 });
 
+// ---- Botão Salvar: esperas (foto, nota, emitente) e toque duplo ----
+/** As esperas valem só para o comprovante que está escolhido agora. */
+const saveWaits = computed<SaveWait[]>(() => {
+  const r = receipt.value;
+  const key = r.type === 'nfce' ? r.nfceKey : null;
+  const waits: SaveWait[] = [];
+  if (photoProcessing.value) waits.push('photo');
+  if (key && nfceWaitKey.value === key) waits.push('nfce');
+  if (key && cnpjWaitKey.value === key) waits.push('cnpj');
+  return waits;
+});
+const saveBtn = computed(() => saveButton(saveWaits.value, saving.value, isEdit ? 'Salvar alteração' : 'Salvar gasto'));
+
 // ---- Ações ----
 async function save(): Promise<void> {
   showErrors.value = true;
-  if (saving.value || Object.keys(errors.value).length > 0 || duplicate.value || !group.value || !competence.value) return;
+  if (saveBtn.value.disabled || Object.keys(errors.value).length > 0 || duplicate.value || !group.value || !competence.value) return;
+  // Toque duplo: só o primeiro grava.
+  if (!saveLock.tryLock()) return;
+  saving.value = true;
 
   // Com a exigência ligada, a categoria é escolhida agora (obrigatória); desistir não salva.
   // Desligada, o gasto novo fica "Sem categoria" e a edição mantém a que já tinha.
   if (group.value.requireCategory) {
-    saving.value = true;
     const header = editing?.installment || (!editing && installmentOn.value) ? 'Categoria da compra' : 'Categoria do gasto';
     // Gasto novo: nada pré-marcado; edição: a categoria atual vem marcada.
     const chosen = await chooseCategory(categoryId.value, header);
-    saving.value = false;
-    if (!chosen || !group.value) return;
+    if (!chosen || !group.value) {
+      saving.value = false;
+      saveLock.release();
+      return;
+    }
     categoryId.value = chosen;
   }
 
