@@ -24,14 +24,23 @@ jobs:
         id: version
         run: |
           tag="${GITHUB_REF_NAME}"
-          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
-            echo "::error::Tag '$tag' fora do formato vX.Y.Z (minor e patch até 99)."
+          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]{1,2})\.([0-9]{1,2})(-teste[0-9]+)?$ ]]; then
+            echo "::error::Tag '$tag' fora do formato vX.Y.Z ou vX.Y.Z-testeN (minor e patch até 99)."
             exit 1
           fi
           major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
           # versionCode cresce junto com a versão: v1.2.3 -> 10203
+          code=$(( 10#$major * 10000 + 10#$minor * 100 + 10#$patch ))
+          if [[ -n "${BASH_REMATCH[4]}" ]]; then
+            # APK de teste (pre-release): o código da versão anterior. Instala por cima dela
+            # (código igual, mesma assinatura) e a versão final (vX.Y.Z) instala por cima dele.
+            code=$(( code - 1 ))
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "code=$(( 10#$major * 10000 + 10#$minor * 100 + 10#$patch ))" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
       - name: Conferir Secrets e Variables
         env:
@@ -132,9 +141,12 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${{ steps.apk.outputs.path }}" --clobber
           else
+            extra=()
+            # Teste: pre-release, nunca marcado como a versão mais recente.
+            if [[ "${{ steps.version.outputs.prerelease }}" == "true" ]]; then extra=(--prerelease --latest=false); fi
             gh release create "$GITHUB_REF_NAME" "${{ steps.apk.outputs.path }}" \
               --title "Acerto do Casal ${{ steps.version.outputs.name }}" \
-              --generate-notes
+              --generate-notes "${extra[@]}"
           fi
 
       - name: Apagar keystore do runner
