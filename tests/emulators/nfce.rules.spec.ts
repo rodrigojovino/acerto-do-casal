@@ -10,7 +10,7 @@ import { checkDigit, spConsultUrl } from '../../functions/src/nfce';
 import { fiscalKeyData, newExpenseData, type ExpenseInput } from '../../src/services/expenseData';
 import { RULES_PROJECT_ID, createTestEnv } from './setup';
 
-// NFC-e de SP depois do filtro da SEFAZ (v0.8.5): nota sem conferência
+// NFC-e de SP depois do filtro da SEFAZ (v0.9.0): nota sem conferência
 // ('unchecked') com a URL, itens lidos no aparelho e o limite da nova tentativa.
 // UIDs e chaves fictícios: A e B são o casal, C é um terceiro.
 const A = 'uid-a';

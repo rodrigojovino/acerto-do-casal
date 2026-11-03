@@ -145,7 +145,7 @@ export async function lookupNfce(spUrl: string): Promise<{ data: NfcePrefill } |
 }
 
 /**
- * Reserva (v0.8.5): a página oficial da nota no WebView do aparelho, visível,
+ * Reserva (v0.9.0): a página oficial da nota no WebView do aparelho, visível,
  * uma vez, com o tempo que sobra do limite. Lê os dados com o mesmo leitor das
  * Functions; página de bloqueio do filtro da SEFAZ, falha ou tempo esgotado
  * devolvem o motivo (o formulário segue no plano B). Sem disfarce: nunca apaga

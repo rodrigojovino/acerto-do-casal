@@ -24,37 +24,32 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebSettingsCompat;
-import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
-import android.content.pm.PackageInfo;
 import java.util.ArrayList;
 import java.util.Collections;
 import org.json.JSONTokener;
 
 /**
- * Teste experimental: abre a página oficial da nota (SEFAZ-SP) num WebView do
- * próprio app, visível e em tela cheia, com botão para fechar. É o mesmo
- * WebView que uma leitura futura usaria, configurado como um navegador comum:
- * JavaScript e armazenamento ligados, cookies aceitos (inclusive de terceiros,
- * que o WebView recusa por padrão) e gravados no disco ao fechar, sem o
- * cabeçalho X-Requested-With (que o navegador não envia), User-Agent padrão.
- * Nunca apaga cookies nem recria a sessão: entre aberturas, vale a sessão
- * anterior, como num navegador. Não lê o conteúdo da página: só anota o que o
- * próprio WebView informa sobre a página principal (terminou de carregar,
- * código HTTP de erro ou falha de rede) e um diagnóstico do próprio WebView
- * (nomes dos cookies da SEFAZ, sem os valores; cabeçalho; versão; User-Agent).
+ * Leitura da página oficial da nota (SEFAZ-SP) num WebView do próprio app,
+ * visível e em tela cheia, com botão para fechar: a reserva quando o servidor
+ * não consegue consultar. Configurado como um navegador comum: JavaScript e
+ * armazenamento ligados, cookies aceitos (inclusive de terceiros, que o WebView
+ * recusa por padrão) e gravados no disco ao fechar, sem o cabeçalho
+ * X-Requested-With quando o WebView permite, User-Agent padrão. Nunca apaga
+ * cookies nem recria a sessão: entre aberturas vale a sessão anterior, como
+ * num navegador. Lê o HTML uma vez, quando a página termina de carregar, e
+ * fecha cerca de 1 s depois; anota o que o WebView informa sobre a página
+ * principal (carregou, código HTTP de erro, falha de rede, tempo esgotado).
  */
 public class NotaWebViewActivity extends AppCompatActivity {
 
     static final String EXTRA_URL = "url";
     static final String EXTRA_EVENTS = "events";
-    /** Modo leitura (v0.8.5): lê o HTML da página uma vez, quando ela termina de carregar. */
-    static final String EXTRA_READ = "read";
     /** Tempo que sobra do limite do formulário; esgotado, fecha (plano B). */
     static final String EXTRA_TIMEOUT_MS = "timeoutMs";
 
     /**
-     * HTML lido no modo leitura (fora do Intent, que tem limite de tamanho).
+     * HTML lido (fora do Intent, que tem limite de tamanho).
      * O plugin pega e limpa ao fechar.
      */
     static volatile String readHtml = null;
@@ -62,7 +57,6 @@ public class NotaWebViewActivity extends AppCompatActivity {
     private final ArrayList<String> events = new ArrayList<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;
-    private boolean readMode = false;
     private boolean read = false;
     private boolean finished = false;
 
@@ -71,7 +65,6 @@ public class NotaWebViewActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         String url = getIntent().getStringExtra(EXTRA_URL);
-        readMode = getIntent().getBooleanExtra(EXTRA_READ, false);
         readHtml = null;
 
         LinearLayout root = new LinearLayout(this);
@@ -83,7 +76,7 @@ public class NotaWebViewActivity extends AppCompatActivity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(32, 16, 16, 16);
         TextView title = new TextView(this);
-        title.setText(readMode ? "Lendo a nota na SEFAZ…" : "Teste: nota na SEFAZ");
+        title.setText("Lendo a nota na SEFAZ…");
         title.setTextSize(16);
         title.setTextColor(Color.parseColor("#1C1C1A"));
         bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -107,21 +100,13 @@ public class NotaWebViewActivity extends AppCompatActivity {
         // O navegador não envia X-Requested-With (o WebView pode enviar o nome do pacote do app).
         if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, Collections.emptySet());
-            events.add("xrw:off");
-        } else {
-            events.add("xrw:unsupported");
         }
-        PackageInfo engine = WebViewCompat.getCurrentWebViewPackage(this);
-        if (engine != null) events.add("webview:" + engine.packageName + " " + engine.versionName);
-        events.add("ua:" + settings.getUserAgentString());
-        events.add("cookies-before:" + cookieNames(url));
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 events.add("loaded");
-                events.add("cookies-after:" + cookieNames(loadedUrl));
-                // Modo leitura: uma leitura só, da página que a pessoa está vendo; fecha ~1 s depois.
-                if (readMode && !read) {
+                // Uma leitura só, da página que a pessoa está vendo; fecha ~1 s depois.
+                if (!read) {
                     read = true;
                     view.evaluateJavascript("document.documentElement.outerHTML", (value) -> {
                         try {
@@ -165,9 +150,9 @@ public class NotaWebViewActivity extends AppCompatActivity {
         setContentView(root);
         // Uma abertura por toque: carrega uma vez, sem repetir sozinho.
         if (url != null) webView.loadUrl(url);
-        // Modo leitura: esgotado o tempo que sobra do limite, fecha (o formulário segue no plano B).
+        // Esgotado o tempo que sobra do limite, fecha (o formulário segue no plano B).
         long timeoutMs = getIntent().getLongExtra(EXTRA_TIMEOUT_MS, 0);
-        if (readMode && timeoutMs > 0) {
+        if (timeoutMs > 0) {
             handler.postDelayed(() -> {
                 if (!read) {
                     events.add("timeout");
@@ -175,21 +160,6 @@ public class NotaWebViewActivity extends AppCompatActivity {
                 }
             }, timeoutMs);
         }
-    }
-
-    /** Só os nomes dos cookies que o WebView guarda para a página (nunca os valores). */
-    private static String cookieNames(String url) {
-        if (url == null) return "";
-        String all = CookieManager.getInstance().getCookie(url);
-        if (all == null || all.isEmpty()) return "";
-        StringBuilder names = new StringBuilder();
-        for (String part : all.split(";")) {
-            String name = part.trim().split("=", 2)[0];
-            if (name.isEmpty()) continue;
-            if (names.length() > 0) names.append(", ");
-            names.append(name);
-        }
-        return names.toString();
     }
 
     private void finishWithEvents() {

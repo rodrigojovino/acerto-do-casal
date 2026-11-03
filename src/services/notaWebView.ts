@@ -1,26 +1,21 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
 /**
- * Teste experimental "abrir nota no app" (Android): plugin local
- * `NotaWebView` (android/.../NotaWebViewPlugin.java). `open` abre a página
- * oficial da nota num WebView do app e resolve ao fechar, com o que o WebView
- * informou sobre a página principal (sem o conteúdo); `openExternal` abre a
- * mesma URL no navegador do celular.
+ * Página oficial da NFC-e de SP (Android): plugin local `NotaWebView`
+ * (android/.../NotaWebViewPlugin.java). `read` abre a página num WebView do
+ * app, visível, uma vez, e devolve o HTML quando ela termina de carregar (a
+ * reserva quando o servidor não consegue consultar); `openExternal` abre a
+ * mesma URL no navegador do celular ("Ver a nota na SEFAZ").
  */
 interface NotaWebViewPlugin {
-  open(options: { url: string }): Promise<{ events: string[] }>;
   read(options: { url: string; timeoutMs: number }): Promise<{ html?: string | null; events: string[] }>;
   openExternal(options: { url: string }): Promise<void>;
 }
 
 const NotaWebView = registerPlugin<NotaWebViewPlugin>('NotaWebView');
 
-/** O teste só existe no app Android (o WebView nativo). */
+/** O WebView nativo só existe no app Android. */
 export const notaWebViewAvailable = (): boolean => Capacitor.getPlatform() === 'android';
-
-export async function openNotaInApp(url: string): Promise<string[]> {
-  return (await NotaWebView.open({ url })).events;
-}
 
 /**
  * Leitura da nota no WebView do app (Android), visível, uma vez: o HTML da

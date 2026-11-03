@@ -1,5 +1,5 @@
 /**
- * Leitura da NFC-e de SP ao ler o QR (v0.8.5). Um filtro de segurança da
+ * Leitura da NFC-e de SP ao ler o QR (v0.9.0). Um filtro de segurança da
  * SEFAZ barra a maioria das consultas automáticas, então cada nota tem no
  * máximo duas tentativas no formulário, cada uma uma vez só:
  * 1. pelo servidor (`resolveNfce`): conferida pela SEFAZ;
@@ -8,7 +8,7 @@
  * As duas dividem o mesmo limite de 10 s do Salvar. Nada se repete sozinho.
  */
 
-import { NFCE_WAIT_MS } from './saveButton';
+import { NFCE_WAIT_MS } from './saveButton.js';
 
 /** Limite das duas tentativas juntas: o mesmo do botão Salvar. */
 export const NFCE_BUDGET_MS = NFCE_WAIT_MS;

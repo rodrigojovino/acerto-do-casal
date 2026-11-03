@@ -19,8 +19,6 @@ export const SCREENS = [
   { name: 'avisos', path: '/ajustes/avisos', access: ['linked'] },
   { name: 'categorias', path: '/ajustes/categorias', access: ['linked'] },
   { name: 'foto-cartao', path: '/ajustes/foto', access: ['linked'] },
-  // Experimental e temporária: "Teste: abrir nota no app".
-  { name: 'teste-nota', path: '/ajustes/teste-nota', access: ['linked'] },
   { name: 'recorrente-novo', path: '/ajustes/recorrentes/nova', access: ['linked'] },
   { name: 'recorrente', path: '/ajustes/recorrentes/:id', access: ['linked'] },
   { name: 'gasto-novo', path: '/gasto/novo', access: ['linked'] },
