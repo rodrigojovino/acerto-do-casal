@@ -123,6 +123,9 @@
             <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
           </div>
           <p v-else-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
+          <button v-if="!duplicate && spReceiptUrl" class="link see-note" type="button" @click="openNotaInBrowser(spReceiptUrl)">
+            Ver a nota na SEFAZ
+          </button>
 
           <!-- Depois do comprovante, em linha compacta: abre os campos só quando marcada -->
           <div v-if="!isEdit" class="card installments" :class="{ open: installmentOn }">
@@ -216,13 +219,17 @@ import {
 } from '@/domain/installments';
 import { seriesTargets } from '@/services/series';
 import { MAX_NOTE } from '@/domain/notifications';
-import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, type ScannedNfce } from '@/services/nfce';
+import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, readNfceOnDevice, type NfcePrefill, type ScannedNfce } from '@/services/nfce';
+import { notaWebViewAvailable, openNotaInBrowser } from '@/services/notaWebView';
+import { saveDeviceItems } from '@/services/nfceItems';
+import { NFCE_BUDGET_MS, remainingMs, shouldTryDevice, spReceiptStatus, type NfceOutcome } from '@/domain/nfceFlow';
+import type { NfceItems } from '../../functions/src/nfce';
 import { debtView, duplicateNoteText } from '@/services/expenseView';
 import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
 import { chooseCategory } from '@/components/categoryDialog';
-import { CNPJ_WAIT_MS, NFCE_WAIT_MS, createSaveLock, saveButton, withTimeout, type SaveWait } from '@/domain/saveButton';
+import { CNPJ_WAIT_MS, createSaveLock, saveButton, withTimeout, type SaveWait } from '@/domain/saveButton';
 
 const route = useRoute();
 const router = useRouter();
@@ -258,6 +265,12 @@ const showErrors = ref(false);
 const receipt = ref<ReceiptState>({ type: 'none' });
 const dateTouched = ref(false);
 const nfceMessage = ref<{ kind: 'info' | 'ok' | 'warn'; text: string } | null>(null);
+/** Tentativas feitas por chave (servidor, aparelho), para o estado gravado na nota. */
+const nfceOutcomes = new Map<string, NfceOutcome>();
+/** Itens lidos no aparelho por chave, gravados depois de salvar o gasto. */
+const deviceReads = new Map<string, { items: NfceItems; page: NfcePrefill }>();
+/** URL oficial da NFC-e de SP escolhida agora ("Ver a nota na SEFAZ"). */
+const spReceiptUrl = computed(() => (receipt.value.type === 'nfce' ? receipt.value.spUrl : null));
 const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
 /** `?anexar=qr` (aba Pendências): abre o leitor de QR assim que o gasto carregar. */
 const attachQr = route.query.anexar === 'qr';
@@ -300,6 +313,8 @@ onIonViewWillEnter(() => {
   receipt.value = { type: 'none' };
   dateTouched.value = false;
   nfceMessage.value = null;
+  nfceOutcomes.clear();
+  deviceReads.clear();
   installmentOn.value = false;
   installmentCount.value = MIN_INSTALLMENTS;
   installmentFirstMonth.value = monthOf(today.value);
@@ -405,17 +420,45 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
     return;
   }
 
-  nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
-  // O Salvar espera a resposta até o limite; esgotado, plano B (valor digitado, conferência depois).
+  // Até duas tentativas, cada uma uma vez só, no mesmo limite de 10 s do Salvar:
+  // 1. pelo servidor (conferida pela SEFAZ); 2. se falhar, no aparelho (WebView
+  // visível, "lida no aparelho"); 3. se falhar também, plano B na hora.
+  const outcome: NfceOutcome = { server: 'skipped', device: 'skipped' };
+  nfceOutcomes.set(scanned.key, outcome);
+  if (!navigator.onLine) {
+    nfceMessage.value = { kind: 'warn', text: 'Sem conexão: digite o valor. A nota será conferida quando a conexão voltar.' };
+    await fillIssuerName(scanned, provisional);
+    return;
+  }
+  const deadline = Date.now() + NFCE_BUDGET_MS;
   nfceWaitKey.value = scanned.key;
-  const result = await withTimeout(lookupNfce(scanned.spUrl), NFCE_WAIT_MS, {
-    error: 'A SEFAZ não respondeu a tempo. Digite o valor; a nota continua valendo como comprovante e será conferida depois.',
-  });
+  nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
+  let result: { data: NfcePrefill } | { error: string } = await withTimeout(
+    lookupNfce(scanned.spUrl),
+    remainingMs(deadline, Date.now()),
+    { error: 'A SEFAZ não respondeu a tempo.' },
+  );
+  outcome.server = 'data' in result ? 'ok' : 'failed';
+  let fromDevice = false;
+  if (shouldTryDevice(outcome.server, notaWebViewAvailable(), remainingMs(deadline, Date.now()))) {
+    nfceMessage.value = { kind: 'info', text: 'O servidor não conseguiu consultar: abrindo a nota no aparelho…' };
+    const device = await readNfceOnDevice(scanned.spUrl, remainingMs(deadline, Date.now()));
+    outcome.device = 'data' in device ? 'ok' : 'failed';
+    if ('data' in device) {
+      result = { data: device.data };
+      fromDevice = true;
+      if (device.items) deviceReads.set(scanned.key, { items: device.items, page: device.data });
+    }
+  }
   if (nfceWaitKey.value === scanned.key) nfceWaitKey.value = null;
   // Outro comprovante escolhido enquanto consultava: ignora.
   if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   if ('error' in result) {
-    nfceMessage.value = { kind: 'warn', text: result.error };
+    // Plano B: valor digitado, emitente pelo CNPJ, a chave continua valendo como comprovante.
+    nfceMessage.value = {
+      kind: 'warn',
+      text: 'A SEFAZ não liberou a consulta. Digite o valor; a nota continua valendo como comprovante. Use "Ver a nota na SEFAZ" para conferir.',
+    };
     await fillIssuerName(scanned, provisional);
     return;
   }
@@ -430,10 +473,11 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   if (!dateTouched.value && nota.date >= minDate.value && nota.date <= maxDate.value) date.value = nota.date;
 
   const when = nota.date.split('-').reverse().join('/');
+  const how = fromDevice ? 'Lida no aparelho, sem conferência da SEFAZ: n' : 'N';
   nfceMessage.value =
     totalCents.value === nota.totalCents
-      ? { kind: 'ok', text: `Nota de ${formatBRL(nota.totalCents)} em ${when}.` }
-      : { kind: 'warn', text: `Valor diferente da nota (${formatBRL(nota.totalCents)}). ${partnerFirstName.value} verá o aviso e poderá contestar.` };
+      ? { kind: 'ok', text: `${how}ota de ${formatBRL(nota.totalCents)} em ${when}.` }
+      : { kind: 'warn', text: `${how}ota de ${formatBRL(nota.totalCents)}, diferente do valor digitado. ${partnerFirstName.value} verá o aviso e poderá contestar.` };
 }
 
 /**
@@ -645,6 +689,12 @@ async function save(): Promise<void> {
     receipt: receiptChoice(),
     categoryId: categoryId.value,
   };
+  // Itens lidos no aparelho (o servidor falhou): gravados depois do gasto, uma vez por nota.
+  const saveDevice = () => {
+    const r = receipt.value;
+    const read = r.type === 'nfce' ? deviceReads.get(r.nfceKey) : undefined;
+    if (r.type === 'nfce' && read && group.value) saveDeviceItems(group.value.id, r.nfceKey, read.items, read.page);
+  };
   // Foto nova: de recibo, ou da nota junto com a chave.
   const photo =
     receipt.value.type === 'photo' ? receipt.value.data : receipt.value.type === 'nfce' ? receipt.value.photo?.data : undefined;
@@ -652,6 +702,7 @@ async function save(): Promise<void> {
   if (editing?.installment) {
     const targets = seriesParcels.value.length > 0 ? seriesTargets(seriesParcels.value, 'edit', myUid.value, closedMonths.value) : [editing];
     updateSeries(group.value.id, editing.installment.seriesId, targets, input, photo);
+    saveDevice();
     router.replace({ name: 'gasto', params: { id: editing.id } });
     return;
   }
@@ -663,12 +714,14 @@ async function save(): Promise<void> {
       myUid.value,
       photo,
     );
+    saveDevice();
     router.replace({ name: 'painel', query: { mes: result.competence } });
     return;
   }
   const result = editing
     ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value, photo)
     : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value, photo);
+  saveDevice();
 
   router.replace(
     editing
@@ -681,7 +734,15 @@ function receiptChoice(): ReceiptChoice {
   const r = receipt.value;
   if (r.type === 'photo') return { type: 'photo', replaced: r.data !== undefined };
   if (r.type === 'nfce') {
-    return { type: 'nfce', nfceKey: r.nfceKey, entry: r.entry, ...(r.photo ? { photo: { replaced: r.photo.data !== undefined } } : {}) };
+    // NFC-e de SP: o estado pelas tentativas feitas aqui (servidor e aparelho); sem tentativa, 'pending'.
+    const outcome = r.spUrl ? nfceOutcomes.get(r.nfceKey) : undefined;
+    return {
+      type: 'nfce',
+      nfceKey: r.nfceKey,
+      entry: r.entry,
+      ...(r.photo ? { photo: { replaced: r.photo.data !== undefined } } : {}),
+      ...(outcome ? { sefaz: spReceiptStatus(outcome) } : {}),
+    };
   }
   return { type: 'none' };
 }

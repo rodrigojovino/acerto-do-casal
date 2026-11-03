@@ -4,6 +4,8 @@ import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -27,6 +29,7 @@ import androidx.webkit.WebViewFeature;
 import android.content.pm.PackageInfo;
 import java.util.ArrayList;
 import java.util.Collections;
+import org.json.JSONTokener;
 
 /**
  * Teste experimental: abre a página oficial da nota (SEFAZ-SP) num WebView do
@@ -45,15 +48,31 @@ public class NotaWebViewActivity extends AppCompatActivity {
 
     static final String EXTRA_URL = "url";
     static final String EXTRA_EVENTS = "events";
+    /** Modo leitura (v0.8.5): lê o HTML da página uma vez, quando ela termina de carregar. */
+    static final String EXTRA_READ = "read";
+    /** Tempo que sobra do limite do formulário; esgotado, fecha (plano B). */
+    static final String EXTRA_TIMEOUT_MS = "timeoutMs";
+
+    /**
+     * HTML lido no modo leitura (fora do Intent, que tem limite de tamanho).
+     * O plugin pega e limpa ao fechar.
+     */
+    static volatile String readHtml = null;
 
     private final ArrayList<String> events = new ArrayList<>();
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;
+    private boolean readMode = false;
+    private boolean read = false;
+    private boolean finished = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         String url = getIntent().getStringExtra(EXTRA_URL);
+        readMode = getIntent().getBooleanExtra(EXTRA_READ, false);
+        readHtml = null;
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -64,7 +83,7 @@ public class NotaWebViewActivity extends AppCompatActivity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(32, 16, 16, 16);
         TextView title = new TextView(this);
-        title.setText("Teste: nota na SEFAZ");
+        title.setText(readMode ? "Lendo a nota na SEFAZ…" : "Teste: nota na SEFAZ");
         title.setTextSize(16);
         title.setTextColor(Color.parseColor("#1C1C1A"));
         bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -101,6 +120,19 @@ public class NotaWebViewActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String loadedUrl) {
                 events.add("loaded");
                 events.add("cookies-after:" + cookieNames(loadedUrl));
+                // Modo leitura: uma leitura só, da página que a pessoa está vendo; fecha ~1 s depois.
+                if (readMode && !read) {
+                    read = true;
+                    view.evaluateJavascript("document.documentElement.outerHTML", (value) -> {
+                        try {
+                            Object decoded = new JSONTokener(value).nextValue();
+                            if (decoded instanceof String) readHtml = (String) decoded;
+                        } catch (Exception ignored) {
+                            readHtml = null;
+                        }
+                        handler.postDelayed(() -> finishWithEvents(), 1000);
+                    });
+                }
             }
 
             @Override
@@ -133,6 +165,16 @@ public class NotaWebViewActivity extends AppCompatActivity {
         setContentView(root);
         // Uma abertura por toque: carrega uma vez, sem repetir sozinho.
         if (url != null) webView.loadUrl(url);
+        // Modo leitura: esgotado o tempo que sobra do limite, fecha (o formulário segue no plano B).
+        long timeoutMs = getIntent().getLongExtra(EXTRA_TIMEOUT_MS, 0);
+        if (readMode && timeoutMs > 0) {
+            handler.postDelayed(() -> {
+                if (!read) {
+                    events.add("timeout");
+                    finishWithEvents();
+                }
+            }, timeoutMs);
+        }
     }
 
     /** Só os nomes dos cookies que o WebView guarda para a página (nunca os valores). */
@@ -151,6 +193,9 @@ public class NotaWebViewActivity extends AppCompatActivity {
     }
 
     private void finishWithEvents() {
+        if (finished) return;
+        finished = true;
+        handler.removeCallbacksAndMessages(null);
         // Como o navegador: a sessão fica guardada no disco (nada é apagado).
         CookieManager.getInstance().flush();
         Intent data = new Intent();

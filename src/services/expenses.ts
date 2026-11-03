@@ -8,7 +8,6 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch,
   type DocumentSnapshot,
@@ -366,22 +365,6 @@ export function approveDeletion(
   for (const p of parcels) batch.delete(doc(expensesCol(groupId), p.id));
   applyFiscalKeyChange(batch, groupId, owner, '', parcels[0].receipt, undefined, parcels.some((p) => p.id === owner));
   trackWrite(batch.commit(), 'Não foi possível aprovar a exclusão.');
-}
-
-/** Pede à Function para consultar a nota de novo (depois de uma falha). */
-export function retryNfceCheck(groupId: string, expense: Pick<Expense, 'id' | 'receipt' | 'installment'>): void {
-  // Só notas de SP (com URL) têm conferência automática, e só depois de uma falha.
-  // Numa série, a consulta é da parcela 1, que repassa o resultado às outras.
-  if (expense.receipt.type !== 'nfce' || !expense.receipt.nfceUrl || expense.receipt.nfceStatus !== 'failed') return;
-  trackWrite(
-    updateDoc(doc(expensesCol(groupId), receiptOwnerId(expense)), {
-      'receipt.nfceStatus': 'pending',
-      'receipt.nfceError': deleteField(),
-      'receipt.nfceData': deleteField(),
-      updatedAt: serverTimestamp(),
-    }),
-    'Não foi possível pedir uma nova consulta da nota.',
-  );
 }
 
 /**

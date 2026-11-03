@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { closeBlockers } from '@/domain/closing';
+import { checkDigit } from '../../functions/src/nfce';
 import { expenseUpdateData, fiscalKeyChange, installmentUpdateData, newExpenseData, newInstallmentSeriesData, receiptData, type StoredReceipt } from './expenseData';
 import { flagsFor, originLabel } from './expenseView';
 
@@ -86,5 +87,22 @@ describe('categoria', () => {
     expect(installmentUpdateData({ ...input, categoryId: 'c2' }, current, { groupId: 'g', seriesId: 's' }, 'agora', 'APAGAR').categoryId).toBe('c2');
     const parcels = newInstallmentSeriesData({ ...input, categoryId: 'c3' }, { count: 3, firstMonth: '2026-10' }, 'a', { groupId: 'g', seriesId: 's' }, 'agora');
     expect(parcels.map((p) => p.data.categoryId)).toEqual(['c3', 'c3', 'c3']);
+  });
+});
+
+describe('NFC-e de SP: estado depois das tentativas do formulário', () => {
+  // Chave fictícia de NFC-e de SP (modelo 65), com dígito verificador válido.
+  const base = `35261011222333000181650${'7'.padStart(20, '0')}`;
+  const spKey = base + checkDigit(base);
+
+  it("sem indicação: 'pending'; depois das duas tentativas: 'unchecked', sempre com a URL", () => {
+    const pending = receiptData({ type: 'nfce', nfceKey: spKey, entry: 'qr' }, ids);
+    expect(pending).toMatchObject({ nfceStatus: 'pending', nfceUrl: expect.stringContaining(spKey) });
+    const done = receiptData({ type: 'nfce', nfceKey: spKey, entry: 'qr', sefaz: 'unchecked' }, ids);
+    expect(done).toMatchObject({ nfceStatus: 'unchecked', nfceUrl: expect.stringContaining(spKey) });
+  });
+
+  it('nota de outro estado continua unchecked, sem URL', () => {
+    expect(receiptData({ type: 'nfce', nfceKey: KEY, entry: 'qr', sefaz: 'pending' }, ids)).toMatchObject({ nfceStatus: 'unchecked' });
   });
 });

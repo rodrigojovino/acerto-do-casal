@@ -4,6 +4,7 @@
       <div>
         <h2>Itens da nota</h2>
         <p v-if="issuer" class="hint">{{ issuer }}</p>
+        <p v-if="device" class="hint device">Lidos no aparelho, sem conferência da SEFAZ.</p>
       </div>
       <button class="icon-btn" type="button" aria-label="Fechar" @click="emit('close')">
         <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -51,7 +52,8 @@ import { itemLine } from '@/services/nfceItems';
 import type { NfceItems } from '../../functions/src/nfce';
 
 /** Lista dos itens de uma NFC-e de SP conferida (funciona offline, do cache). */
-defineProps<{ items: NfceItems; issuer?: string }>();
+/** `device`: itens lidos no aparelho (o servidor não conseguiu consultar), sem conferência da SEFAZ. */
+defineProps<{ items: NfceItems; issuer?: string; device?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 </script>
 

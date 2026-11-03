@@ -86,7 +86,14 @@
           <div v-if="expense.receipt.type !== 'photo' || !photoUrl" class="receipt">
             <p class="strong">{{ receiptTitle }}</p>
             <p v-if="receiptDetail" class="hint">{{ receiptDetail }}</p>
-            <button v-if="canRetryNfce" type="button" class="link" @click="retryNfce">Tentar conferir de novo</button>
+            <template v-if="canRetryNfce">
+              <button type="button" class="link" :disabled="retryBusy || retryLocked" @click="retryNfce">
+                {{ retryBusy ? 'Consultando a nota…' : 'Tentar conferir de novo' }}
+              </button>
+              <p v-if="retryLocked" class="hint">Tente de novo mais tarde (a partir das {{ retryTime }}).</p>
+            </template>
+            <p v-if="retryMessage" class="hint" role="status">{{ retryMessage }}</p>
+            <button v-if="spUrl" type="button" class="link" @click="openNotaInBrowser(spUrl)">Ver a nota na SEFAZ</button>
             <button v-if="noteItems" type="button" class="btn outline items-btn" @click="itemsOpen = true">
               Ver itens da nota ({{ noteItems.items.length }})
             </button>
@@ -214,7 +221,8 @@
         <NfceItemsSheet
           v-if="noteItems"
           :items="noteItems"
-          :issuer="expense?.receipt.type === 'nfce' ? expense.receipt.nfceData?.issuerName : undefined"
+          :issuer="expense?.receipt.type === 'nfce' ? (expense.receipt.nfceData?.issuerName ?? noteItems.issuerName) : undefined"
+          :device="isDeviceItems(noteItems)"
           @close="itemsOpen = false"
         />
       </ion-modal>
@@ -245,7 +253,6 @@ import {
   deleteExpense,
   receiptPhotoUrl,
   rejectExpense,
-  retryNfceCheck,
   deleteSeries,
   validateExpense,
   watchExpense,
@@ -259,10 +266,12 @@ import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originL
 import TypeBadge from '@/components/TypeBadge.vue';
 import PhotoViewer from '@/components/PhotoViewer.vue';
 import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
-import { nfceItemsByKey } from '@/services/nfceItems';
+import { isDeviceItems, nfceItemsByKey, saveDeviceItems, watchNfceRetry } from '@/services/nfceItems';
+import { notaWebViewAvailable, openNotaInBrowser } from '@/services/notaWebView';
+import { NFCE_BUDGET_MS } from '@/domain/nfceFlow';
 import StatusBadge from '@/components/StatusBadge.vue';
 import { closedMonths } from '@/services/months';
-import { formatCnpj } from '@/services/nfce';
+import { formatCnpj, readNfceOnDevice, retryNfceOnServer } from '@/services/nfce';
 import { UF_BY_CODE, parseAccessKey } from '../../functions/src/nfce';
 import { pendingPhotoIds } from '@/services/photoQueue';
 import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
@@ -452,6 +461,9 @@ const receiptTitle = computed(() => {
   const r = expense.value?.receipt;
   if (!r || r.type === 'none') return 'Nenhum comprovante anexado';
   if (r.type === 'photo') return isCreator.value ? 'Foto pendente de envio' : 'Foto ainda não enviada';
+  if (r.nfceStatus === 'unchecked' && r.nfceUrl) {
+    return deviceItems.value ? 'NFC-e lida no aparelho, sem conferência da SEFAZ' : 'NFC-e de SP: a SEFAZ não liberou a consulta';
+  }
   if (r.nfceStatus === 'unchecked') {
     return r.nfceKey.slice(20, 22) === '55'
       ? `NF-e de ${nfceUf.value}: sem conferência automática`
@@ -481,7 +493,11 @@ const receiptDetail = computed(() => {
       : `${partnerFirstName.value} já anexou a foto; ela aparece aqui assim que for enviada.`;
   }
   const parts: string[] = [];
-  if (r.nfceStatus === 'unchecked') {
+  if (r.nfceStatus === 'unchecked' && r.nfceUrl) {
+    const d = deviceItems.value;
+    if (d?.issuerName && d.date) parts.push(`${d.issuerName} · ${formatDateBR(d.date)} · ${formatBRL(d.totalCents)}.`);
+    parts.push('A chave vale como comprovante.');
+  } else if (r.nfceStatus === 'unchecked') {
     const access = parseAccessKey(r.nfceKey);
     const [y, m] = access.yearMonth.split('-');
     parts.push(`CNPJ ${formatCnpj(access.cnpj)} · emitida em ${m}/${y}.`);
@@ -509,17 +525,52 @@ const categoryName = computed(() => categoryLabel(expense.value?.categoryId, cat
 
 const noteItems = computed(() => {
   const r = expense.value?.receipt;
-  if (r?.type !== 'nfce' || !r.nfceUrl || r.nfceStatus !== 'ok') return null;
-  return nfceItemsByKey.value.get(r.nfceKey) ?? null;
+  if (r?.type !== 'nfce' || !r.nfceUrl) return null;
+  const items = nfceItemsByKey.value.get(r.nfceKey) ?? null;
+  // Conferida: os itens oficiais. Sem conferência: os lidos no aparelho, se houver.
+  return r.nfceStatus === 'ok' || isDeviceItems(items) ? items : null;
 });
 
+/** Itens lidos no aparelho (sem conferência da SEFAZ), para o título e o detalhe. */
+const deviceItems = computed(() => (noteItems.value && isDeviceItems(noteItems.value) ? noteItems.value : null));
+
+/** URL oficial da NFC-e de SP ("Ver a nota na SEFAZ"). */
+const spUrl = computed(() => (expense.value?.receipt.type === 'nfce' ? (expense.value.receipt.nfceUrl ?? null) : null));
+
+// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada 15 minutos por nota ----
 const canRetryNfce = computed(
   () =>
     isCreator.value &&
+    !!spUrl.value &&
     expense.value?.receipt.type === 'nfce' &&
-    expense.value.receipt.nfceStatus === 'failed' &&
+    (expense.value.receipt.nfceStatus === 'failed' || expense.value.receipt.nfceStatus === 'unchecked') &&
     !isClosed.value,
 );
+const retryBusy = ref(false);
+const retryMessage = ref<string | null>(null);
+/** Quando a próxima tentativa fica liberada (do servidor: vale para os dois aparelhos). */
+const retryAt = ref(0);
+const now = ref(Date.now());
+const clock = setInterval(() => (now.value = Date.now()), 20_000);
+const retryLocked = computed(() => retryAt.value > now.value);
+const retryTime = computed(() => new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(retryAt.value));
+let stopRetry: (() => void) | null = null;
+watch(
+  () => (group.value && expense.value?.receipt.type === 'nfce' ? `${group.value.id}/${expense.value.receipt.nfceKey}` : null),
+  (path) => {
+    stopRetry?.();
+    stopRetry = null;
+    retryAt.value = 0;
+    if (!path) return;
+    const [groupId, key] = path.split('/');
+    stopRetry = watchNfceRetry(groupId, key, (at) => (retryAt.value = at));
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  stopRetry?.();
+  clearInterval(clock);
+});
 
 /** UF da nota (pela chave), para o aviso de notas de fora de SP. */
 const nfceUf = computed(() => {
@@ -647,8 +698,52 @@ async function approveDel(): Promise<void> {
   router.replace({ name: 'painel', query: { mes: e.competence } });
 }
 
-function retryNfce(): void {
-  if (group.value && expense.value) retryNfceCheck(group.value.id, expense.value);
+/**
+ * Uma tentativa pelo servidor; se falhar, no Android, oferece abrir a nota no
+ * aparelho, uma vez, visível. Nada se repete sozinho; o limite de 15 minutos é
+ * contado no servidor.
+ */
+async function retryNfce(): Promise<void> {
+  const g = group.value;
+  const e = expense.value;
+  if (!g || !e || e.receipt.type !== 'nfce' || !e.receipt.nfceUrl || retryBusy.value || retryLocked.value) return;
+  const key = e.receipt.nfceKey;
+  const url = e.receipt.nfceUrl;
+  retryBusy.value = true;
+  retryMessage.value = null;
+  try {
+    const r = await retryNfceOnServer(g.id, e.id);
+    if (r.retryAt) retryAt.value = r.retryAt;
+    now.value = Date.now();
+    if (r.ok) {
+      retryMessage.value = 'Nota conferida pela SEFAZ.';
+      return;
+    }
+    if (r.limited || !notaWebViewAvailable()) {
+      retryMessage.value = r.limited ? r.message : `${r.message} Use "Ver a nota na SEFAZ" para conferir.`;
+      return;
+    }
+    const alert = await alertController.create({
+      header: 'Abrir a nota no aparelho?',
+      message: 'O servidor não conseguiu consultar a SEFAZ. Dá para abrir a página da nota aqui no aparelho, uma vez; os dados lidos ficam marcados como "sem conferência da SEFAZ".',
+      buttons: [
+        { text: 'Agora não', role: 'cancel' },
+        { text: 'Abrir no aparelho', role: 'confirm' },
+      ],
+    });
+    await alert.present();
+    const { role } = await alert.onDidDismiss();
+    if (role !== 'confirm') return;
+    const device = await readNfceOnDevice(url, NFCE_BUDGET_MS);
+    if ('data' in device) {
+      if (device.items) saveDeviceItems(g.id, key, device.items, device.data);
+      retryMessage.value = `Nota lida no aparelho, sem conferência da SEFAZ: ${device.data.issuerName} · ${formatBRL(device.data.totalCents)}.`;
+    } else {
+      retryMessage.value = 'A SEFAZ não liberou a consulta. Use "Ver a nota na SEFAZ" para conferir.';
+    }
+  } finally {
+    retryBusy.value = false;
+  }
 }
 
 async function confirmDelete(): Promise<void> {

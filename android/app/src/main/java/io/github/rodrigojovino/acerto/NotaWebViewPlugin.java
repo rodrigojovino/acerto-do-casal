@@ -52,6 +52,37 @@ public class NotaWebViewPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * Leitura (v0.8.5): abre a página no WebView do app, visível, uma vez; lê o
+     * HTML quando ela termina de carregar e fecha sozinho. Resolve com o HTML
+     * (ou null: bloqueio, falha, tempo esgotado ou fechado antes) e o que o
+     * WebView informou. `timeoutMs`: o que sobra do limite do formulário.
+     */
+    @PluginMethod
+    public void read(PluginCall call) {
+        String url = sefazUrl(call);
+        if (url == null) return;
+        Intent intent = new Intent(getContext(), NotaWebViewActivity.class);
+        intent.putExtra(NotaWebViewActivity.EXTRA_URL, url);
+        intent.putExtra(NotaWebViewActivity.EXTRA_READ, true);
+        intent.putExtra(NotaWebViewActivity.EXTRA_TIMEOUT_MS, (long) call.getInt("timeoutMs", 10000));
+        startActivityForResult(call, intent, "onRead");
+    }
+
+    @ActivityCallback
+    private void onRead(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        ArrayList<String> events = result.getData() != null
+            ? result.getData().getStringArrayListExtra(NotaWebViewActivity.EXTRA_EVENTS)
+            : null;
+        JSObject ret = new JSObject();
+        String html = NotaWebViewActivity.readHtml;
+        NotaWebViewActivity.readHtml = null;
+        ret.put("html", html);
+        ret.put("events", events != null ? new JSArray(events) : new JSArray());
+        call.resolve(ret);
+    }
+
     /** Abre a mesma URL no navegador padrão do celular, para comparar. */
     @PluginMethod
     public void openExternal(PluginCall call) {

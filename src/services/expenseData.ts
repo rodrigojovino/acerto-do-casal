@@ -49,6 +49,12 @@ export type ReceiptChoice =
       entry: KeyEntry;
       /** Foto da nota anexada à chave (opcional); `replaced`: foto nova escolhida agora. */
       photo?: { replaced: boolean };
+      /**
+       * Só NFC-e de SP: 'pending' (o servidor ainda pode conferir) ou 'unchecked'
+       * (as duas tentativas do formulário já foram feitas), por `spReceiptStatus`.
+       * Ausente: 'pending'.
+       */
+      sefaz?: 'pending' | 'unchecked';
     };
 
 /** Como a chave chegou: lida pelo leitor (QR Code ou código de barras) ou digitada. */
@@ -114,7 +120,7 @@ export function receiptData(choice: ReceiptChoice, ids: ExpenseIds, current?: St
       // nota dão o mesmo comprovante (URL montada da chave).
       const nfceUrl = spConsultUrl(choice.nfceKey);
       base = nfceUrl
-        ? { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceUrl, nfceStatus: 'pending' }
+        ? { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceUrl, nfceStatus: choice.sefaz ?? 'pending' }
         : { type: 'nfce', nfceKey: choice.nfceKey, entry: choice.entry, nfceStatus: 'unchecked' };
     }
     if (!choice.photo) return base;

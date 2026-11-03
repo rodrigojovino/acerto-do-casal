@@ -3,7 +3,16 @@ import { Capacitor } from '@capacitor/core';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 // Mesmo parser das Functions: lê a chave de qualquer estado e monta a URL de consulta de SP.
-import { NfceError, parseFiscalCode, parseTypedKey, type FiscalCode, type FiscalModel } from '../../functions/src/nfce';
+import {
+  NfceError,
+  parseFiscalCode,
+  parseTypedKey,
+  readNfcePage,
+  type FiscalCode,
+  type FiscalModel,
+  type NfceItems,
+} from '../../functions/src/nfce';
+import { notaWebViewAvailable, readNotaInApp } from './notaWebView';
 import type { KeyEntry } from './expenseData';
 import type { IsoDate } from '@/domain/calendar';
 import type { Cents } from '@/domain/settlement';
@@ -132,5 +141,58 @@ export async function lookupNfce(spUrl: string): Promise<{ data: NfcePrefill } |
         ? err.message
         : 'A SEFAZ não respondeu.';
     return { error: `${message} Digite o valor; a nota continua valendo como comprovante.` };
+  }
+}
+
+/**
+ * Reserva (v0.8.5): a página oficial da nota no WebView do aparelho, visível,
+ * uma vez, com o tempo que sobra do limite. Lê os dados com o mesmo leitor das
+ * Functions; página de bloqueio do filtro da SEFAZ, falha ou tempo esgotado
+ * devolvem o motivo (o formulário segue no plano B). Sem disfarce: nunca apaga
+ * cookies, recria a sessão nem reinicia o WebView.
+ */
+export async function readNfceOnDevice(
+  spUrl: string,
+  timeoutMs: number,
+): Promise<{ data: NfcePrefill; items: NfceItems | null } | { error: string }> {
+  if (!notaWebViewAvailable() || !navigator.onLine) return { error: 'A leitura no aparelho não está disponível.' };
+  try {
+    const { html } = await readNotaInApp(spUrl, timeoutMs);
+    if (!html) return { error: 'A página da nota não carregou a tempo.' };
+    const { result, items } = readNfcePage(spUrl, html);
+    return { data: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date }, items };
+  } catch (err) {
+    return { error: err instanceof NfceError ? err.message : 'Não foi possível ler a nota no aparelho.' };
+  }
+}
+
+// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada 15 minutos por nota ----
+
+export type RetryResult = { ok: true; retryAt: number } | { ok: false; retryAt: number; limited: boolean; message: string };
+
+/**
+ * Pede ao servidor (`retryNfce`) uma nova conferência. O limite de 15 minutos
+ * por nota é contado lá; recusado pelo limite, devolve quando tentar.
+ */
+export async function retryNfceOnServer(groupId: string, expenseId: string): Promise<RetryResult> {
+  if (!navigator.onLine) return { ok: false, retryAt: 0, limited: false, message: 'Sem conexão: tente quando a conexão voltar.' };
+  try {
+    const call = httpsCallable<{ groupId: string; expenseId: string }, { ok: boolean; reason?: string; retryAt: number }>(
+      functions,
+      'retryNfce',
+      { timeout: 20_000 },
+    );
+    const { data } = await call({ groupId, expenseId });
+    return data.ok
+      ? { ok: true, retryAt: data.retryAt }
+      : { ok: false, retryAt: data.retryAt, limited: false, message: 'A SEFAZ não respondeu pelo servidor.' };
+  } catch (err) {
+    if (err instanceof FirebaseError && err.code === 'functions/resource-exhausted') {
+      // O erro das Functions traz os detalhes enviados pelo servidor (quando tentar de novo).
+      const retryAt = Number((err as FirebaseError & { details?: { retryAt?: number } }).details?.retryAt ?? 0);
+      return { ok: false, retryAt, limited: true, message: 'Tente de novo mais tarde.' };
+    }
+    const message = err instanceof FirebaseError && err.code !== 'functions/internal' ? err.message : 'Não foi possível pedir a conferência.';
+    return { ok: false, retryAt: 0, limited: false, message };
   }
 }
