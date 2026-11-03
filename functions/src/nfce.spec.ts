@@ -200,6 +200,14 @@ describe('parsePage e toResult', () => {
     expect(() => toResult(parseNfceQr(CANONICAL), data)).toThrow(/captcha/);
   });
 
+  it('página de bloqueio do filtro da SEFAZ ("Request Rejected") é bloqueio, não nota', () => {
+    const blocked =
+      "<html><head><title>Request Rejected</title></head><body>The requested URL was rejected. Please consult with your administrator.<br><br>Your support ID is: <1234567890><br><br><a href='javascript:history.back();'>[Go Back]</body></html>";
+    const data = parsePage(blocked);
+    expect(data.blockers).toEqual(['waf']);
+    expect(() => toResult(parseNfceQr(CANONICAL), data)).toThrow(/filtro de segurança/);
+  });
+
   it('layout desconhecido não vira dado errado', () => {
     expect(() => toResult(parseNfceQr(CANONICAL), parsePage('<html>nova página</html>'))).toThrow(/ler os dados/);
   });

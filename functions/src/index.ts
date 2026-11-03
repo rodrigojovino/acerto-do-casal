@@ -1,7 +1,7 @@
 import './options.js';
 
 export { createGroup, joinGroup, renewInvite } from './group.js';
-export { checkNfce, resolveNfce } from './nfceFunctions.js';
+export { checkNfce, resolveNfce, retryNfce } from './nfceFunctions.js';
 export { generateRecurringDaily, generateRecurringOnWrite } from './recurring.js';
 export { answerReopen, cancelReopen, closeMonth, registerPayment, requestReopen } from './closing.js';
 export { notifyExpense, notifyMonth, notifyRecurring } from './notify.js';

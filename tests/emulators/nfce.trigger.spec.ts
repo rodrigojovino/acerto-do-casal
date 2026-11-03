@@ -274,6 +274,43 @@ describe('checkNfce: itens da nota', () => {
     expect(await readAt(itemsPath)).toBeUndefined();
   });
 
+  it('resultado já conferido pelo servidor no formulário (nfceCache): grava ok e os itens sem consultar de novo', async () => {
+    // A página fictícia tem outro emitente: se o gatilho consultasse de novo, o nome seria outro.
+    await fixture(sefazPage([{ name: 'OUTRO ITEM', total: '55,48' }], '55,48').replace('LOJA TESTE LTDA', 'NAO DEVIA CONSULTAR'));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`nfceCache/${KEY}`).set({
+        result: okData(5548),
+        items: { items: [{ description: 'DO CACHE', quantity: 1, unit: 'UN', unitPrice: '55,48', totalCents: 5548 }], discountCents: 0, totalCents: 5548, payments: [], itemsSumCents: 5548, consistent: true },
+        fetchedAt: new Date(),
+        expireAt: new Date(Date.now() + 86_400_000),
+      });
+    });
+    await write('cache', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'pending' }, { status: 'confirmed' }));
+    const d = await waitFor('cache', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
+    expect(d?.receipt).toMatchObject({ nfceStatus: 'ok', nfceData: okData(5548) });
+    const items = await waitForDoc(itemsPath);
+    expect((items?.items as Array<{ description: string }>).map((i) => i.description)).toEqual(['DO CACHE']);
+  });
+
+  it('consulta desligada (config/nfce.sefazEnabled: false): fica "unchecked", sem rede', async () => {
+    await fixture(sefazPage([{ name: 'ITEM', total: '55,48' }], '55,48'));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('config/nfce').set({ sefazEnabled: false });
+    });
+    await write('desligada', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'pending' }, { status: 'confirmed' }));
+    const d = await waitFor('desligada', (x) => (x.receipt as { nfceStatus: string }).nfceStatus !== 'pending');
+    expect((d?.receipt as { nfceStatus: string }).nfceStatus).toBe('unchecked');
+    expect(await readAt(itemsPath)).toBeUndefined();
+  });
+
+  it('nota "unchecked" (as duas tentativas do formulário já feitas) não é consultada de novo', async () => {
+    await fixture(sefazPage([{ name: 'ITEM', total: '55,48' }], '55,48'));
+    await write('feitas', nfceExpense({ nfceUrl: SP_URL, nfceStatus: 'unchecked' }, { status: 'confirmed' }));
+    await new Promise((r) => setTimeout(r, 3000));
+    expect(((await read('feitas'))?.receipt as { nfceStatus: string }).nfceStatus).toBe('unchecked');
+    expect(await readAt(itemsPath)).toBeUndefined();
+  });
+
   it('regras: membros leem os itens; terceiro não; o app não grava', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       await ctx.firestore().doc(itemsPath).set({ items: [], totalCents: 1, itemsSumCents: 1, discountCents: 0, payments: [], consistent: true });

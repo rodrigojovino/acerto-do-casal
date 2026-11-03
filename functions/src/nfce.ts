@@ -236,6 +236,8 @@ function decodeEntities(s: string): string {
 export function parsePage(html: string): PageData {
   const blockers: string[] = [];
   if (/g-recaptcha|hcaptcha|cf-turnstile|captcha/i.test(html)) blockers.push('captcha');
+  // Página de bloqueio do filtro de segurança da SEFAZ (F5): "Request Rejected".
+  if (/<title>\s*Request Rejected\s*<\/title>|The requested URL was rejected/i.test(html)) blockers.push('waf');
 
   const issuer = html.match(/id="u20"[^>]*>([^<]+)</);
   const cnpj = html.match(/CNPJ:\s*([\d./-]+)/);
@@ -264,6 +266,7 @@ export function parsePage(html: string): PageData {
  */
 export function toResult(qr: QrData, page: PageData): NfceResult {
   if (page.error) throw new NfceError('sefaz_error', `A SEFAZ recusou a nota: ${page.error}.`);
+  if (page.blockers.includes('waf')) throw new NfceError('blocked', 'O filtro de segurança da SEFAZ recusou a consulta.');
   if (page.blockers.length) throw new NfceError('blocked', 'A consulta da SEFAZ pediu verificação (captcha).');
   if (!page.issuerName || page.totalCents === undefined || !page.date || !page.issuerCnpj) {
     throw new NfceError('unparsed', 'Não foi possível ler os dados da nota.');

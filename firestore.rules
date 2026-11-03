@@ -251,7 +251,8 @@ service cloud.firestore {
                 && (
                   r.keys().hasOnly(['type', 'nfceKey', 'entry', 'nfceUrl', 'nfceStatus', 'photoPath', 'photoUploaded'])
                     && validKeyPhoto(r, ownerId, isNew)
-                    && r.nfceStatus == 'pending'
+                    // 'pending': a conferir no servidor; 'unchecked': as tentativas do formulário já foram feitas.
+                    && r.nfceStatus in ['pending', 'unchecked']
                     && r.nfceKey.matches('^35[0-9]{18}65[0-9]{22}$')
                     && r.nfceUrl == 'https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica/Paginas/ConsultaQRCode.aspx?p='
                          + r.nfceKey + '|3|1'
@@ -479,19 +480,9 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time;
       }
 
-      // Nova consulta da NFC-e de SP que falhou ("Consultar de novo"): só volta
-      // a conferência para 'pending', sem mexer em mais nada (nem no status).
-      function isNfceRetry() {
-        let old = resource.data.receipt;
-        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receipt', 'updatedAt'])
-          && old.type == 'nfce'
-          && old.nfceStatus == 'failed'
-          && old.keys().hasAny(['nfceUrl'])
-          && request.resource.data.receipt.diff(old).affectedKeys().hasOnly(['nfceStatus', 'nfceData', 'nfceError'])
-          && request.resource.data.receipt.nfceStatus == 'pending'
-          && !request.resource.data.receipt.keys().hasAny(['nfceData', 'nfceError'])
-          && request.resource.data.updatedAt == request.time;
-      }
+      // A nova consulta da NFC-e ("Tentar conferir de novo") é só pela Function
+      // retryNfce, com o limite de uma a cada 15 minutos por nota: o app não
+      // volta a conferência para 'pending'.
 
       // ---- O outro membro ----
       // Mexe só em status, approval/rejection e updatedAt:
@@ -618,7 +609,6 @@ service cloud.firestore {
               && validExpense(request.resource.data, expenseId, false)
               && keyChangeRegistered(expenseId)
             || resource.data.createdBy == request.auth.uid && isPhotoUploadedMark()
-            || resource.data.createdBy == request.auth.uid && isNfceRetry()
             || isReviewWrite()
             || isDeletionRequest()
             || isDeletionCancel()
@@ -661,9 +651,39 @@ service cloud.firestore {
       }
 
       // ---- Itens da nota (NFC-e de SP) ----
-      // Um documento por chave, gravado só pela Function de conferência (e pela
-      // reconsulta, com credencial de dono). Membros leem; o app não grava.
+      // Um documento por chave. Oficiais: gravados pelas Functions (conferência,
+      // nova tentativa) e pela reconsulta. Lidos no aparelho (`source: 'device'`,
+      // quando o servidor falhou e a página da nota abriu no app): criados uma
+      // vez, por quem lançou o gasto com essa chave, nunca alterados pelo app.
+      // As regras conferem o formato geral (não percorrem a lista de itens): por
+      // isso a tela sempre os mostra como "lidos no aparelho".
+      function validDeviceItems(d) {
+        return d.keys().hasAll(['items', 'discountCents', 'totalCents', 'payments', 'itemsSumCents', 'consistent', 'fetchedAt', 'source'])
+          && d.keys().hasOnly(['items', 'grossCents', 'discountCents', 'totalCents', 'payments', 'changeCents', 'itemsSumCents', 'consistent', 'fetchedAt', 'source', 'issuerName', 'date'])
+          && d.source == 'device'
+          && d.items is list && d.items.size() <= 200
+          && d.payments is list && d.payments.size() <= 20
+          && d.discountCents is int && d.totalCents is int && d.itemsSumCents is int
+          && (!d.keys().hasAny(['grossCents']) || d.grossCents is int)
+          && (!d.keys().hasAny(['changeCents']) || d.changeCents is int)
+          && d.consistent is bool
+          && (!d.keys().hasAny(['issuerName']) || d.issuerName is string && d.issuerName.size() <= 120)
+          && (!d.keys().hasAny(['date']) || d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+          && d.fetchedAt == request.time;
+      }
+
       match /nfceItems/{nfceKey} {
+        allow read: if isMember(groupId);
+        allow create: if isMember(groupId)
+          && validDeviceItems(request.resource.data)
+          && exists(fiscalKeyPath(nfceKey))
+          && get(fiscalKeyPath(nfceKey)).data.createdBy == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // ---- Limite do "Tentar conferir de novo" (uma a cada 15 minutos por nota) ----
+      // Gravado só pela Function retryNfce; membros leem para a tela mostrar quando tentar.
+      match /nfceRetry/{nfceKey} {
         allow read: if isMember(groupId);
         allow write: if false;
       }

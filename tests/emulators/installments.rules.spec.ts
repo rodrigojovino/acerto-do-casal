@@ -307,7 +307,7 @@ describe('edição da série', () => {
   });
 });
 
-describe('nova consulta da NFC-e ("Consultar de novo")', () => {
+describe('nova consulta da NFC-e ("Tentar conferir de novo") pelo app: recusada', () => {
   const keyFor = (ufCode: string) => {
     const base = `${ufCode}26101122233300018165001000000123112345678`;
     return base + checkDigit(base);
@@ -336,12 +336,12 @@ describe('nova consulta da NFC-e ("Consultar de novo")', () => {
     });
   }
 
-  it('quem lançou volta uma consulta que falhou para pendente, sem mudar o status', async () => {
+  it('o app não volta mais a conferência para pendente: a nova tentativa é só pela Function retryNfce (com o limite de 15 minutos)', async () => {
     await seedOne(failed);
-    await assertSucceeds(db(A).doc(expPath('nota')).update(retry));
+    await assertFails(db(A).doc(expPath('nota')).update(retry));
   });
 
-  it('não vale para nota já conferida nem para o outro membro', async () => {
+  it('nem para nota já conferida nem para o outro membro', async () => {
     await seedOne({ ...failed, nfceStatus: 'ok' });
     await assertFails(db(A).doc(expPath('nota')).update(retry));
     await seedOne(failed);
