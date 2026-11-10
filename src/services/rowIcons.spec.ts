@@ -92,3 +92,28 @@ describe('rowIcons', () => {
     expect(recurringApprovalIcons(A, A, 'Bia').indicator).toMatchObject({ kind: 'pending', dot: false });
   });
 });
+
+describe('etiquetas das partes só de uma pessoa (v0.9.2)', () => {
+  const ctx = { partnerUid: B, initialOf: (uid: string) => (uid === A ? 'R' : 'Q') };
+
+  it('antes do indicador: a de quem vê preenchida, a do parceiro vazada, valor sem centavos e nome completo', () => {
+    const icons = rowIcons(expense({ personalCents: 10000, partnerOnlyCents: 4950 }), A, 'Queila', undefined, ctx);
+    expect(icons.parts).toEqual([
+      { initial: 'R', text: '100', filled: true, label: 'Só meu R$ 100,00' },
+      { initial: 'Q', text: '50', filled: false, label: 'Só de Queila R$ 49,50' },
+    ]);
+  });
+
+  it('a mesma inicial para quem vê do outro lado; o preenchimento troca', () => {
+    const icons = rowIcons(expense({ personalCents: 10000, partnerOnlyCents: 49 }), B, 'Rodrigo', undefined, { partnerUid: A, initialOf: ctx.initialOf });
+    expect(icons.parts).toEqual([
+      { initial: 'Q', text: '<1', filled: true, label: 'Só meu R$ 0,49' },
+      { initial: 'R', text: '100', filled: false, label: 'Só de Rodrigo R$ 100,00' },
+    ]);
+  });
+
+  it('sem partes (ou fora do Painel): sem etiquetas', () => {
+    expect(rowIcons(expense(), A, 'Queila', undefined, ctx).parts).toBeUndefined();
+    expect(rowIcons(expense({ personalCents: 500 }), A, 'Queila').parts).toBeUndefined();
+  });
+});

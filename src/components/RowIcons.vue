@@ -20,6 +20,20 @@
     <span v-if="icons.split" class="num-tag" role="img" :aria-label="icons.split.label" @pointerdown="hold($event, icons.split.label)" @pointerenter="hover($event, icons.split.label)" @pointerleave="unhover">
       {{ icons.split.text }}
     </span>
+    <!-- Partes só de uma pessoa: inicial do dono + valor sem centavos (até 340 px, só a inicial). -->
+    <span
+      v-for="(p, i) in icons.parts ?? []"
+      :key="`p${i}`"
+      class="part-tag"
+      :class="{ filled: p.filled }"
+      role="img"
+      :aria-label="p.label"
+      @pointerdown="hold($event, p.label)"
+      @pointerenter="hover($event, p.label)"
+      @pointerleave="unhover"
+    >
+      <span class="circle" aria-hidden="true">{{ p.initial }}</span><span class="val" aria-hidden="true">{{ p.text }}</span>
+    </span>
     <span
       class="indicator"
       :class="icons.indicator.kind"
@@ -217,5 +231,41 @@ onBeforeUnmount(() => {
   width: max-content;
   z-index: 5;
   pointer-events: none;
+}
+/* Etiquetas das partes: preenchida = de quem vê; vazada = do parceiro (não depende só de cor). */
+.part-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--app-meta-font);
+  font-weight: 800;
+  color: var(--app-text);
+  white-space: nowrap;
+}
+
+.part-tag .circle {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  border: 1.5px solid var(--app-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.part-tag.filled .circle {
+  background: var(--app-text);
+  color: var(--app-surface);
+}
+
+@media (max-width: 340px) {
+  .part-tag .val {
+    display: none;
+  }
 }
 </style>

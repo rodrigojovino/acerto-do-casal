@@ -1,3 +1,5 @@
+import { formatBRL, wholeReais } from '@/domain/money';
+import { partTagsForViewer } from '@/domain/parts';
 import { isAutoConfirmed, splitLabel } from './expenseView';
 import type { Expense } from './expenses';
 
@@ -22,6 +24,17 @@ export interface RowIcons {
   parcel?: { text: string; label: string };
   /** Divisão diferente de 50/50, com a parte de quem vê primeiro. */
   split?: { text: string; label: string };
+  /**
+   * Etiquetas das partes só de uma pessoa (v0.9.2, lista do Painel): a inicial
+   * do dono e o valor sem centavos; preenchida = de quem vê, vazada = do parceiro.
+   */
+  parts?: Array<{ initial: string; text: string; filled: boolean; label: string }>;
+}
+
+/** Para as etiquetas das partes: o parceiro e as iniciais do casal. */
+export interface PartsContext {
+  partnerUid: string;
+  initialOf: (uid: string) => string;
 }
 
 export const ORIGIN_LABEL: Record<OriginKind, string> = {
@@ -35,6 +48,8 @@ export const ORIGIN_LABEL: Record<OriginKind, string> = {
 export const RECURRING_LABEL = 'Recorrente';
 
 type Source = Pick<Expense, 'status' | 'approval' | 'createdBy' | 'receipt' | 'payerSharePct' | 'payerUid'> & {
+  personalCents?: number;
+  partnerOnlyCents?: number;
   recurringId?: string;
   installment?: { index: number; count: number };
   deletionRequest?: { status: string };
@@ -77,7 +92,7 @@ export function indicatorOf(e: Source, viewerUid: string, partnerName: string): 
  * Ícones de um gasto. `parcelText`: em Pendências, uma série resumida numa
  * linha mostra "10x" em vez de "1/10".
  */
-export function rowIcons(e: Source, viewerUid: string, partnerName: string, parcelText?: string): RowIcons {
+export function rowIcons(e: Source, viewerUid: string, partnerName: string, parcelText?: string, parts?: PartsContext): RowIcons {
   const icons: RowIcons = {
     indicator: indicatorOf(e, viewerUid, partnerName),
     origins: originsOf(e),
@@ -92,6 +107,17 @@ export function rowIcons(e: Source, viewerUid: string, partnerName: string, parc
   if (e.payerSharePct !== 50) {
     const text = splitLabel(e, viewerUid);
     icons.split = { text, label: `Divisão ${text}: a primeira parte é a sua` };
+  }
+  if (parts) {
+    const tags = partTagsForViewer({ personalCents: e.personalCents ?? 0, partnerOnlyCents: e.partnerOnlyCents, payerUid: e.payerUid }, viewerUid, parts.partnerUid);
+    if (tags.length > 0) {
+      icons.parts = tags.map((t) => ({
+        initial: parts.initialOf(t.ownerUid),
+        text: wholeReais(t.cents),
+        filled: t.owner === 'viewer',
+        label: t.owner === 'viewer' ? `Só meu ${formatBRL(t.cents)}` : `Só de ${partnerName} ${formatBRL(t.cents)}`,
+      }));
+    }
   }
   return icons;
 }

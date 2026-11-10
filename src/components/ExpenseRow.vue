@@ -3,7 +3,8 @@
     <span class="name">{{ name }}</span>
     <span class="amount num">
       <svg v-if="syncing" class="sync-icon" role="img" aria-label="Sincronizando" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
-      {{ amount }}
+      <span :aria-hidden="amountLabel ? 'true' : undefined">{{ amount }}</span>
+      <span v-if="amountLabel" class="sr-only">{{ amountLabel }}</span>
     </span>
     <span class="meta">
       <span class="sub">{{ sub }}</span>
@@ -36,6 +37,8 @@ withDefaults(
     muted?: boolean;
     /** Gravado no aparelho, ainda não confirmado pelo servidor. */
     syncing?: boolean;
+    /** Valor completo, com centavos, para leitores de tela (quando `amount` vem sem centavos). */
+    amountLabel?: string;
   }>(),
   { muted: false, syncing: false },
 );
@@ -125,6 +128,15 @@ withDefaults(
 .muted .name,
 .muted .amount {
   color: var(--app-muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .sync-icon {

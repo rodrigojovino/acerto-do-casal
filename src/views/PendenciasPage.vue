@@ -33,6 +33,7 @@
             <h2 id="sec-aprovar" class="title warn">Para você aprovar · {{ toApprove.length }}</h2>
             <router-link v-for="e in toApprove" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
               <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :icons="iconsFor(e)">
+                <PartChips v-if="partTags(e).length > 0" class="line" :tags="partTags(e)" :partner-name="partnerFirstName" :initial-of="initialOf" :suffix="e.installment ? ' por parcela' : ''" />
                 <span v-if="noteSummary(e.note)" class="line note">“{{ noteSummary(e.note) }}”</span>
                 <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
               </ExpenseRow>
@@ -46,6 +47,7 @@
             <h2 id="sec-exclusao" class="title warn">Exclusão para aprovar · {{ deletionToAnswer.length }}</h2>
             <router-link v-for="e in deletionToAnswer" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
               <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :icons="iconsFor(e)">
+                <PartChips v-if="partTags(e).length > 0" class="line" :tags="partTags(e)" :partner-name="partnerFirstName" :initial-of="initialOf" :suffix="e.installment ? ' por parcela' : ''" />
                 <span class="line">{{ firstNameOf(e.createdBy) }} pediu para excluir{{ e.deletionRequest?.reason ? `: “${e.deletionRequest.reason}”` : '' }}</span>
                 <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
               </ExpenseRow>
@@ -59,6 +61,7 @@
             <div v-for="e in waiting" :key="e.id" class="waiting">
               <router-link class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
                 <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :icons="iconsFor(e)">
+                  <PartChips v-if="partTags(e).length > 0" class="line" :tags="partTags(e)" :partner-name="partnerFirstName" :initial-of="initialOf" :suffix="e.installment ? ' por parcela' : ''" />
                   <span v-if="noteSummary(e.note)" class="line note">“{{ noteSummary(e.note) }}”</span>
                   <span v-if="e.installment" class="line">{{ seriesLine(e) }}</span>
                 </ExpenseRow>
@@ -76,6 +79,7 @@
             <h2 id="sec-exclusao-aguardando" class="title">Aguardando {{ partnerFirstName }} aprovar a exclusão · {{ deletionWaiting.length }}</h2>
             <router-link v-for="e in deletionWaiting" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
               <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :icons="iconsFor(e)">
+                <PartChips v-if="partTags(e).length > 0" class="line" :tags="partTags(e)" :partner-name="partnerFirstName" :initial-of="initialOf" :suffix="e.installment ? ' por parcela' : ''" />
                 <span class="line">Toque para ver ou cancelar o pedido</span>
               </ExpenseRow>
               <span aria-hidden="true" class="chev">›</span>
@@ -87,6 +91,7 @@
             <h2 id="sec-devolvidos" class="title">Devolvidos para você corrigir · {{ returned.length }}</h2>
             <router-link v-for="e in returned" :key="e.id" class="item card" :to="{ name: 'gasto', params: { id: e.id } }">
               <ExpenseRow :name="e.description" :sub="subtitle(e)" :amount="formatBRL(e.installment?.purchaseCents ?? e.totalCents)" :icons="iconsFor(e)">
+                <PartChips v-if="partTags(e).length > 0" class="line" :tags="partTags(e)" :partner-name="partnerFirstName" :initial-of="initialOf" :suffix="e.installment ? ' por parcela' : ''" />
                 <span class="line danger">
                   {{ e.rejection?.kind === 'contest' ? 'Contestado' : 'Recusado' }}{{ e.rejection?.reason ? `: "${e.rejection.reason}"` : ' sem motivo informado' }}
                 </span>
@@ -160,9 +165,17 @@ import { formatBRL } from '@/domain/money';
 import { watchOpenItems, type Expense } from '@/services/expenses';
 import { flagLabel, flagsFor } from '@/services/expenseView';
 import ExpenseRow from '@/components/ExpenseRow.vue';
-import { firstNameOf, group, partnerFirstName, user } from '@/services/session';
+import PartChips from '@/components/PartChips.vue';
+import { coupleInitials } from '@/domain/itemMarks';
+import { partTagsForViewer } from '@/domain/parts';
+import { firstNameOf, group, memberFirstName, partnerFirstName, partnerUid, user } from '@/services/session';
 
 const myUid = computed(() => user.value?.uid ?? '');
+
+// Partes só de uma pessoa (modelo A): chips com a inicial do dono e centavos, abaixo da linha.
+const initials = computed(() => coupleInitials(memberFirstName(myUid.value), memberFirstName(partnerUid.value)));
+const initialOf = (uid: string) => (uid === myUid.value ? initials.value[0] : initials.value[1]);
+const partTags = (e: Expense) => partTagsForViewer(e, myUid.value, partnerUid.value ?? '');
 
 // ---- Pendentes e devolvidos de todos os meses, em tempo real ----
 const items = ref<Expense[]>([]);

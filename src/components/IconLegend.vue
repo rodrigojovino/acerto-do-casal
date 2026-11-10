@@ -30,6 +30,10 @@
         <span class="num" aria-hidden="true">70/30</span>
         <span>Divisão diferente de 50/50, com a sua parte primeiro</span>
       </li>
+      <li>
+        <span class="num" aria-hidden="true">R 100</span>
+        <span>Parte só de uma pessoa, com a inicial do dono e o valor sem centavos: preenchida é a sua; só o contorno, a de quem está com você</span>
+      </li>
     </ul>
     <p class="hint">Toque e segure um ícone na lista para ver o nome.</p>
   </div>

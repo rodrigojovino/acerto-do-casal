@@ -134,8 +134,9 @@
               <ExpenseRow
                 :name="item.description"
                 :sub="expenseSubtitle(item, firstNameOf(item.payerUid))"
-                :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(item.totalCents)"
-                :icons="rowIcons(item, myUid, partnerFirstName)"
+                :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRLWhole(item.totalCents - item.personalCents)"
+                :amount-label="item.status === 'awaiting_confirmation' ? undefined : `No rateio: ${formatBRL(item.totalCents - item.personalCents)}`"
+                :icons="rowIcons(item, myUid, partnerFirstName, undefined, partsContext)"
                 :syncing="item.pendingWrite"
               >
                 <span v-for="flag in flagsFor(item)" :key="flag" class="line warn">{{ flagLabel[flag] }}</span>
@@ -148,7 +149,8 @@
               <ExpenseRow
                 :name="f.description"
                 :sub="`${firstNameOf(f.payerUid)} · ${formatDateBR(f.date, false)} · previsto${f.adjustmentPending ? ' · reajuste aguardando aprovação' : ''}`"
-                :amount="f.amountCents === null ? 'a definir' : formatBRL(f.amountCents)"
+                :amount="f.amountCents === null ? 'a definir' : formatBRLWhole(f.amountCents)"
+                :amount-label="f.amountCents === null ? undefined : formatBRL(f.amountCents)"
                 :icons="forecastIcons()"
                 muted
               />
@@ -191,7 +193,8 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import ExpenseRow from '@/components/ExpenseRow.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { clampMonth, formatDateBR, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
-import { formatBRL } from '@/domain/money';
+import { formatBRL, formatBRLWhole } from '@/domain/money';
+import { coupleInitials } from '@/domain/itemMarks';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
 import { watchLatestInstallmentMonth, watchMonthExpenses, type Expense } from '@/services/expenses';
 import { navigationLastMonth } from '@/domain/installments';
@@ -206,7 +209,7 @@ import { forecastRecurring, forecastTotal, type Forecast } from '@/domain/recurr
 import { forecastNotice } from '@/services/recurringView';
 import { watchRecurring, type RecurringDoc } from '@/services/recurring';
 import { closedMonths } from '@/services/months';
-import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
+import { firstNameOf, group, memberFirstName, partnerFirstName, partnerUid, user } from '@/services/session';
 
 const route = useRoute();
 const router = useRouter();
@@ -399,6 +402,12 @@ async function openForecast(f: Forecast): Promise<void> {
 
 // ---- Saldo e resumos: só funções de src/domain ----
 const balance = computed(() => (partnerUid.value ? monthBalance(expenses.value, members.value) : null));
+
+/** Etiquetas das partes só de uma pessoa na lista (inicial do dono; iguais viram duas letras). */
+const partsContext = computed(() => {
+  const [mine, partner] = coupleInitials(memberFirstName(myUid.value), memberFirstName(partnerUid.value));
+  return { partnerUid: partnerUid.value ?? '', initialOf: (uid: string) => (uid === myUid.value ? mine : partner) };
+});
 const paid = computed(() => (partnerUid.value ? paidByMember(expenses.value, members.value) : {}));
 const pending = computed(() => pendingSummary(expenses.value, myUid.value));
 

@@ -46,6 +46,13 @@
           </div>
 
           <dl class="card calc">
+            <PartChips
+              v-if="partTags.length > 0"
+              class="calc-chips"
+              :tags="partTags"
+              :partner-name="partnerFirstName"
+              :initial-of="(uid: string) => (uid === myUid ? initials.mine : initials.partner)"
+            />
             <div class="calc-row">
               <dt>Parte pessoal de quem pagou</dt>
               <dd class="num">{{ formatBRL(expense.personalCents) }}</dd>
@@ -53,6 +60,10 @@
             <div class="calc-row">
               <dt>Entra no rateio</dt>
               <dd class="num">{{ formatBRL(sharedCents) }}</dd>
+            </div>
+            <div v-if="(expense.partnerOnlyCents ?? 0) > 0" class="calc-row">
+              <dt>Parte só de {{ expense.payerUid === myUid ? partnerFirstName : 'você' }} (deve inteira)</dt>
+              <dd class="num">{{ formatBRL(expense.partnerOnlyCents ?? 0) }}</dd>
             </div>
             <div class="calc-row">
               <dt>Divisão (você / {{ partnerFirstName.toLowerCase() }})</dt>
@@ -274,6 +285,8 @@ import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originL
 import TypeBadge from '@/components/TypeBadge.vue';
 import PhotoViewer from '@/components/PhotoViewer.vue';
 import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
+import PartChips from '@/components/PartChips.vue';
+import { partTagsForViewer } from '@/domain/parts';
 import { isDeviceItems, nfceItemsByKey, watchNfceRetry } from '@/services/nfceItems';
 import { rejectedItems, saveItemsAgain, saveItemsAlone } from '@/services/itemsGuard';
 import { canWriteDeviceItems } from '@/services/nfceItemsData';
@@ -634,16 +647,23 @@ const debt = computed(() =>
     : { label: '', amountCents: 0 },
 );
 
-/** Memória de cálculo: rateio × parte de quem não pagou = dívida. */
+/** Memória de cálculo: parte só de quem não pagou + restante × parte dele = dívida (a mesma conta de expenseDebt). */
 const formula = computed(() => {
   const e = expense.value;
   if (!e) return '';
   const otherPct = 100 - e.payerSharePct;
-  const base = e.personalCents > 0
-    ? `(${formatBRL(e.totalCents)} − ${formatBRL(e.personalCents)} pessoal)`
-    : formatBRL(e.totalCents);
-  return `${base} × ${otherPct}% de quem não pagou = ${formatBRL(debt.value.amountCents)}`;
+  const partner = e.partnerOnlyCents ?? 0;
+  const minus = [
+    e.personalCents > 0 ? ` − ${formatBRL(e.personalCents)} pessoal` : '',
+    partner > 0 ? ` − ${formatBRL(partner)} só de quem não pagou` : '',
+  ].join('');
+  const base = minus ? `(${formatBRL(e.totalCents)}${minus})` : formatBRL(e.totalCents);
+  const plus = partner > 0 ? ` + ${formatBRL(partner)}` : '';
+  return `${base} × ${otherPct}% de quem não pagou${plus} = ${formatBRL(debt.value.amountCents)}`;
 });
+
+/** Chips das partes só de uma pessoa (com centavos), do ponto de vista de quem vê. */
+const partTags = computed(() => (expense.value ? partTagsForViewer(expense.value, myUid.value, partnerUid.value ?? '') : []));
 
 const competenceNote = computed(() => {
   const e = expense.value;
@@ -978,6 +998,10 @@ function goBack(): void {
   margin: 0;
   display: flex;
   flex-direction: column;
+}
+
+.calc-chips {
+  margin-bottom: 4px;
 }
 
 .calc-row {

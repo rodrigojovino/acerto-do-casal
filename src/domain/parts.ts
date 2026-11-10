@@ -48,3 +48,30 @@ export function partsFitTotal(parts: PayerParts | ViewerParts, totalCents: Cents
   const sum = 'personalCents' in parts ? parts.personalCents + parts.partnerOnlyCents : parts.mineCents + parts.partnerCents;
   return sum <= totalCents;
 }
+
+/** Parte só de uma pessoa, do ponto de vista de quem vê (etiquetas e chips). */
+export interface PartTag {
+  /** 'viewer': de quem vê (preenchida); 'partner': do parceiro (vazada). */
+  owner: 'viewer' | 'partner';
+  /** Quem é o dono (a inicial identifica a pessoa e não muda com quem vê). */
+  ownerUid: string;
+  cents: Cents;
+}
+
+/**
+ * Banco (relativo a quem pagou) → etiquetas (relativas a quem vê): a parte
+ * pessoal é de quem pagou; a do parceiro, do outro membro. Só as maiores que
+ * zero, a de quem vê primeiro.
+ */
+export function partTagsForViewer(
+  e: { personalCents: Cents; partnerOnlyCents?: Cents; payerUid: string },
+  viewerUid: string,
+  partnerUid: string,
+): PartTag[] {
+  const nonPayer = e.payerUid === viewerUid ? partnerUid : viewerUid;
+  const tags: PartTag[] = [];
+  if (e.personalCents > 0) tags.push({ owner: e.payerUid === viewerUid ? 'viewer' : 'partner', ownerUid: e.payerUid, cents: e.personalCents });
+  const partner = e.partnerOnlyCents ?? 0;
+  if (partner > 0) tags.push({ owner: nonPayer === viewerUid ? 'viewer' : 'partner', ownerUid: nonPayer, cents: partner });
+  return tags.sort((a, b) => (a.owner === b.owner ? 0 : a.owner === 'viewer' ? -1 : 1));
+}
