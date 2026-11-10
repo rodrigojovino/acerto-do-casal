@@ -163,6 +163,7 @@ describe('splitInstallments', () => {
       count: 1,
       totalCents: 21400,
       personalCents: 400,
+      partnerOnlyCents: 0,
       competence: '2026-10',
     });
   });

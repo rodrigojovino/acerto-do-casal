@@ -34,7 +34,9 @@ export interface MonthBreakdown {
   totalCents: Cents;
   /** Partes pessoais (sempre de quem pagou). */
   personalCents: Cents;
-  /** Total no rateio = total − partes pessoais. */
+  /** Partes só do outro membro (v0.9.2; entram no rateio e ele deve inteiras a quem pagou). */
+  partnerOnlyCents: Cents;
+  /** Total no rateio = total − partes pessoais (inclui as partes do parceiro). */
   sharedCents: Cents;
   byMember: Record<string, MemberBreakdown>;
   /** Quem paga quanto a quem; `null` = ninguém deve nada. Igual a `monthBalance`. */
@@ -43,8 +45,9 @@ export interface MonthBreakdown {
 
 /**
  * Memória de cálculo do mês, com o mesmo arredondamento do saldo (por gasto):
- * em cada gasto, o não pagador fica com `outroDeve` do rateio e quem pagou com
- * o resto. A diferença de cada um (pagou − parte) dá o acerto.
+ * em cada gasto, o não pagador fica com `outroDeve` do rateio (a parte só dele
+ * mais a divisão do restante, `expenseDebt`) e quem pagou com o resto. A
+ * diferença de cada um (pagou − parte) dá o acerto.
  */
 export function monthBreakdown(expenses: readonly SettlementExpense[], members: Members): MonthBreakdown {
   const byMember: Record<string, MemberBreakdown> = {
@@ -54,6 +57,7 @@ export function monthBreakdown(expenses: readonly SettlementExpense[], members: 
   let expenseCount = 0;
   let totalCents = 0;
   let personalCents = 0;
+  let partnerOnlyCents = 0;
   for (const expense of expenses) {
     if (!countsInBalance(expense.status)) continue;
     const debt = expenseDebt(expense, members);
@@ -61,6 +65,7 @@ export function monthBreakdown(expenses: readonly SettlementExpense[], members: 
     expenseCount++;
     totalCents += expense.totalCents;
     personalCents += expense.personalCents;
+    partnerOnlyCents += expense.partnerOnlyCents ?? 0;
     byMember[debt.fromUid].shareCents += debt.amountCents;
     byMember[debt.toUid].shareCents += shared - debt.amountCents;
     byMember[debt.toUid].paidSharedCents += shared;
@@ -70,6 +75,7 @@ export function monthBreakdown(expenses: readonly SettlementExpense[], members: 
     expenseCount,
     totalCents,
     personalCents,
+    partnerOnlyCents,
     sharedCents: totalCents - personalCents,
     byMember,
     result: monthBalance(expenses, members),
