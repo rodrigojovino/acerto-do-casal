@@ -57,6 +57,8 @@ async function membersOf(tx: Transaction, groupId: string, uid: string): Promise
 interface ExpenseRow {
   totalCents: number;
   personalCents: number;
+  /** Parte só do outro membro (v0.9.2); ausente = 0. Entra na conta por monthBreakdown. */
+  partnerOnlyCents?: number;
   payerUid: string;
   payerSharePct: number;
   status: ExpenseStatus;

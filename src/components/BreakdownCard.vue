@@ -8,6 +8,10 @@
       </div>
       <div class="row"><dt>Partes pessoais</dt><dd class="num">− {{ formatBRL(breakdown.personalCents) }}</dd></div>
       <div class="row strong"><dt>Total no rateio</dt><dd class="num">{{ formatBRL(breakdown.sharedCents) }}</dd></div>
+      <!-- v0.9.2: partes só de quem não pagou (entram inteiras na parte dele); meses fechados antes não têm a linha. -->
+      <div v-if="(breakdown.partnerOnlyCents ?? 0) > 0" class="row">
+        <dt>inclui partes só de quem não pagou</dt><dd class="num">{{ formatBRL(breakdown.partnerOnlyCents ?? 0) }}</dd>
+      </div>
     </dl>
     <table class="members">
       <thead>
@@ -15,11 +19,18 @@
       </thead>
       <tbody>
         <tr><th scope="row">Parte no rateio</th><td class="num">{{ formatBRL(mine.shareCents) }}</td><td class="num">{{ formatBRL(theirs.shareCents) }}</td></tr>
+        <tr v-if="(breakdown.partnerOnlyCents ?? 0) > 0" class="sub">
+          <th scope="row">inclui só sua / só de {{ partnerFirstName }}</th>
+          <td class="num">{{ formatBRL(mine.partnerOnlyCents ?? 0) }}</td><td class="num">{{ formatBRL(theirs.partnerOnlyCents ?? 0) }}</td>
+        </tr>
         <tr><th scope="row">Pagou do rateio</th><td class="num">{{ formatBRL(mine.paidSharedCents) }}</td><td class="num">{{ formatBRL(theirs.paidSharedCents) }}</td></tr>
         <tr class="diff"><th scope="row">Diferença</th><td class="num">{{ signedBRL(mine.diffCents) }}</td><td class="num">{{ signedBRL(theirs.diffCents) }}</td></tr>
       </tbody>
     </table>
-    <p class="hint">Diferença positiva: pagou mais que a parte e tem a receber. As partes pessoais ficam com quem pagou.</p>
+    <p class="hint">
+      Diferença positiva: pagou mais que a parte e tem a receber. As partes pessoais ficam com quem pagou;
+      a parte só de quem não pagou entra inteira na parte dele.
+    </p>
   </section>
 </template>
 
@@ -105,5 +116,10 @@ dl {
   border-top: 1px solid var(--app-subtle);
   font-weight: 800;
   color: var(--app-text);
+}
+.members .sub th,
+.members .sub td {
+  font-size: 12px;
+  color: var(--app-muted);
 }
 </style>

@@ -2,7 +2,8 @@ import { assertFails, type RulesTestEnvironment } from '@firebase/rules-unit-tes
 import { FirebaseError } from 'firebase/app';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { monthOf, todayInSaoPaulo } from '../../src/domain/calendar';
-import { addMonths } from '../../src/domain/settlement';
+import { monthBreakdown } from '../../src/domain/closing';
+import { addMonths, monthBalance } from '../../src/domain/settlement';
 import { PROJECT_ID, clearAuth, closeApps, createTestEnv, signInAs, type TestUser } from './setup';
 
 // Fechamento, pagamento do acerto e reabertura (Functions no emulador), com
@@ -216,5 +217,36 @@ describe('regras: mês fechado e reabertura só pelas Functions', () => {
     const fs = env.authenticatedContext(a.uid).firestore();
     await assertFails(fs.doc(`groups/${GROUP}/expenses/${id}`).update({ description: 'Outro', status: 'pending_approval', updatedAt: new Date() }));
     await assertFails(fs.doc(`groups/${GROUP}/expenses/${id}`).delete());
+  });
+});
+
+describe('parte só do parceiro (v0.9.2): a mesma conta do app no fechamento', () => {
+  it('o pagamento e a memória de cálculo da Function batem com monthBalance e monthBreakdown do app', async () => {
+    // A paga R$ 200,00 (R$ 50,00 só de A, R$ 30,00 só de B); B paga R$ 100,00 (R$ 40,00 só de A), divisão 70/30.
+    const rows = [
+      { payer: a, total: 20000, personalCents: 5000, partnerOnlyCents: 3000, payerSharePct: 50 },
+      { payer: b, total: 10000, personalCents: 0, partnerOnlyCents: 4000, payerSharePct: 70 },
+      { payer: b, total: 12345, personalCents: 0, partnerOnlyCents: 0, payerSharePct: 50 },
+    ];
+    for (const r of rows) await expense(PAST, r.payer, r.total, { personalCents: r.personalCents, partnerOnlyCents: r.partnerOnlyCents, payerSharePct: r.payerSharePct });
+    const members = [a.uid, b.uid] as const;
+    const appView = rows.map((r) => ({
+      totalCents: r.total,
+      personalCents: r.personalCents,
+      partnerOnlyCents: r.partnerOnlyCents,
+      payerUid: r.payer.uid,
+      payerSharePct: r.payerSharePct,
+      status: 'confirmed' as const,
+    }));
+    const expected = monthBalance(appView, members)!;
+    // B deve 3000 + 6000 = 9000; A deve 4000 + round(6000 × 30%) = 5800 e 6173 (12345/2 arredondado): A deve 2973 a B.
+    expect(expected).toEqual({ fromUid: a.uid, toUid: b.uid, amountCents: 5800 + 6173 - 9000 });
+    const payer = expected.fromUid === a.uid ? a : b;
+    const payment = await payer.call<{ fromUid: string; amountCents: number }>('registerPayment', args(PAST, { method: 'cash', paymentId: paymentId() }));
+    expect(payment).toMatchObject({ fromUid: expected.fromUid, amountCents: expected.amountCents });
+    await a.call('closeMonth', args(PAST));
+    const summary = (await monthDoc(PAST))?.summary as Record<string, unknown>;
+    expect(summary).toEqual(JSON.parse(JSON.stringify(monthBreakdown(appView, members))));
+    expect(summary).toMatchObject({ partnerOnlyCents: 7000, personalCents: 5000 });
   });
 });

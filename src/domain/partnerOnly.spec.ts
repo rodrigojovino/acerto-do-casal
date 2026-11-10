@@ -80,6 +80,9 @@ describe('exemplos do mês', () => {
     expect(monthBalance(withParts, members)).toEqual({ fromUid: A, toUid: B, amountCents: 9500 });
     const breakdown = monthBreakdown(withParts, members);
     expect(breakdown.partnerOnlyCents).toBe(5000);
+    // Por pessoa: R$ 30,00 só de B (pago por A) e R$ 20,00 só de A (pago por B).
+    expect(breakdown.byMember[A].partnerOnlyCents).toBe(2000);
+    expect(breakdown.byMember[B].partnerOnlyCents).toBe(3000);
     expect(breakdown.result).toEqual(monthBalance(withParts, members));
     expect(breakdown.byMember[A].diffCents).toBe(-9500);
     expect(breakdown.byMember[B].diffCents).toBe(9500);

@@ -32,8 +32,8 @@ describe('monthBreakdown', () => {
   it('exemplo de referência: memória de cálculo completa e A paga R$ 100,00 a B', () => {
     const b = monthBreakdown(reference, members);
     expect(b).toMatchObject({ expenseCount: 6, totalCents: 95000, personalCents: 5000, sharedCents: 90000 });
-    expect(b.byMember[A]).toEqual({ shareCents: 45000, paidSharedCents: 35000, diffCents: -10000 });
-    expect(b.byMember[B]).toEqual({ shareCents: 45000, paidSharedCents: 55000, diffCents: 10000 });
+    expect(b.byMember[A]).toEqual({ shareCents: 45000, paidSharedCents: 35000, diffCents: -10000, partnerOnlyCents: 0 });
+    expect(b.byMember[B]).toEqual({ shareCents: 45000, paidSharedCents: 55000, diffCents: 10000, partnerOnlyCents: 0 });
     expect(b.result).toEqual({ fromUid: A, toUid: B, amountCents: 10000 });
   });
 

@@ -25,6 +25,11 @@ export interface MemberBreakdown {
   paidSharedCents: Cents;
   /** Pagou − parte: positivo, tem a receber; negativo, tem a pagar. */
   diffCents: Cents;
+  /**
+   * Partes só dele em gastos que o outro pagou (v0.9.2; já incluídas em
+   * `shareCents`). Ausente nas memórias guardadas antes da v0.9.2.
+   */
+  partnerOnlyCents?: Cents;
 }
 
 export interface MonthBreakdown {
@@ -51,8 +56,8 @@ export interface MonthBreakdown {
  */
 export function monthBreakdown(expenses: readonly SettlementExpense[], members: Members): MonthBreakdown {
   const byMember: Record<string, MemberBreakdown> = {
-    [members[0]]: { shareCents: 0, paidSharedCents: 0, diffCents: 0 },
-    [members[1]]: { shareCents: 0, paidSharedCents: 0, diffCents: 0 },
+    [members[0]]: { shareCents: 0, paidSharedCents: 0, diffCents: 0, partnerOnlyCents: 0 },
+    [members[1]]: { shareCents: 0, paidSharedCents: 0, diffCents: 0, partnerOnlyCents: 0 },
   };
   let expenseCount = 0;
   let totalCents = 0;
@@ -66,6 +71,7 @@ export function monthBreakdown(expenses: readonly SettlementExpense[], members: 
     totalCents += expense.totalCents;
     personalCents += expense.personalCents;
     partnerOnlyCents += expense.partnerOnlyCents ?? 0;
+    byMember[debt.fromUid].partnerOnlyCents = (byMember[debt.fromUid].partnerOnlyCents ?? 0) + (expense.partnerOnlyCents ?? 0);
     byMember[debt.fromUid].shareCents += debt.amountCents;
     byMember[debt.toUid].shareCents += shared - debt.amountCents;
     byMember[debt.toUid].paidSharedCents += shared;
