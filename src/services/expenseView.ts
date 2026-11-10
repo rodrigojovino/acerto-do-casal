@@ -106,6 +106,15 @@ export function debtView(
     : { label: `${nameOf(debt.fromUid)} te deve por ${subject}`, amountCents: debt.amountCents };
 }
 
+/**
+ * Valor em destaque na linha do Painel: o rateio (valor − parte pessoal de quem
+ * pagou; numa parcela, o da parcela), SEMPRE com centavos ("R$ 121,77"). O
+ * arredondamento sem centavos vale só dentro das etiquetas de parte (rowIcons).
+ */
+export function rowAmountText(e: Pick<SettlementExpense, 'totalCents' | 'personalCents' | 'status'>): string {
+  return e.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRL(e.totalCents - e.personalCents);
+}
+
 /** Tipos de selo de status (cor + ícone + texto). */
 export type BadgeKind = 'pending' | 'auto' | 'photo' | 'recurring' | 'validated' | 'returned' | 'awaiting' | 'forecast' | 'deletion';
 

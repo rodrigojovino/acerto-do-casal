@@ -134,8 +134,7 @@
               <ExpenseRow
                 :name="item.description"
                 :sub="expenseSubtitle(item, firstNameOf(item.payerUid))"
-                :amount="item.status === 'awaiting_confirmation' ? 'a confirmar' : formatBRLWhole(item.totalCents - item.personalCents)"
-                :amount-label="item.status === 'awaiting_confirmation' ? undefined : `No rateio: ${formatBRL(item.totalCents - item.personalCents)}`"
+                :amount="rowAmountText(item)"
                 :icons="rowIcons(item, myUid, partnerFirstName, undefined, partsContext)"
                 :syncing="item.pendingWrite"
               >
@@ -149,8 +148,7 @@
               <ExpenseRow
                 :name="f.description"
                 :sub="`${firstNameOf(f.payerUid)} · ${formatDateBR(f.date, false)} · previsto${f.adjustmentPending ? ' · reajuste aguardando aprovação' : ''}`"
-                :amount="f.amountCents === null ? 'a definir' : formatBRLWhole(f.amountCents)"
-                :amount-label="f.amountCents === null ? undefined : formatBRL(f.amountCents)"
+                :amount="f.amountCents === null ? 'a definir' : formatBRL(f.amountCents)"
                 :icons="forecastIcons()"
                 muted
               />
@@ -193,7 +191,7 @@ import AppTabBar from '@/components/AppTabBar.vue';
 import ExpenseRow from '@/components/ExpenseRow.vue';
 import SyncStatus from '@/components/SyncStatus.vue';
 import { clampMonth, formatDateBR, lastAllowedMonth, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
-import { formatBRL, formatBRLWhole } from '@/domain/money';
+import { formatBRL } from '@/domain/money';
 import { coupleInitials } from '@/domain/itemMarks';
 import { addMonths, monthBalance, paidByMember, pendingSummary, type Members } from '@/domain/settlement';
 import { watchLatestInstallmentMonth, watchMonthExpenses, type Expense } from '@/services/expenses';
@@ -203,7 +201,7 @@ import { closingErrorMessage, requestReopen, watchMonth, type MonthDoc, type Mon
 import { askReopenReason } from '@/components/reopenDialog';
 import { isOnline } from '@/services/sync';
 import { dismissPushInvite, enablePush, pushAskedBefore, pushPermission } from '@/services/push';
-import { expenseSubtitle, flagLabel, flagsFor } from '@/services/expenseView';
+import { expenseSubtitle, flagLabel, flagsFor, rowAmountText } from '@/services/expenseView';
 import { forecastIcons, rowIcons } from '@/services/rowIcons';
 import { forecastRecurring, forecastTotal, type Forecast } from '@/domain/recurrence';
 import { forecastNotice } from '@/services/recurringView';

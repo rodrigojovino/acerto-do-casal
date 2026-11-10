@@ -1,30 +1,65 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { formatBRLWhole, wholeReais } from './money';
+import { wholeReais } from './money';
 import { partTagsForViewer } from './parts';
+import { rowAmountText } from '@/services/expenseView';
+import { rowIcons } from '@/services/rowIcons';
+import type { Expense } from '@/services/expenses';
 
-describe('valor sem centavos (lista do Painel)', () => {
+describe('valor sem centavos: só dentro das etiquetas de parte', () => {
   it.each([
-    [12149, 'R$ 121'],
-    [12150, 'R$ 122'],
-    [12177, 'R$ 122'],
-    [129990, 'R$ 1.300'],
-    [50, 'R$ 1'],
-    [0, 'R$ 0'],
-    [1, '< R$ 1'],
-    [49, '< R$ 1'],
-    [99, 'R$ 1'],
-    [100049, 'R$ 1.000'],
-    [123456789, 'R$ 1.234.568'],
-  ])('%i centavos → %s', (cents, text) => {
-    expect(formatBRLWhole(cents)).toBe(text);
+    [12149, '121'],
+    [12150, '122'],
+    [12177, '122'],
+    [129990, '1.300'],
+    [50, '1'],
+    [0, '0'],
+    [1, '<1'],
+    [49, '<1'],
+    [99, '1'],
+    [123456789, '1.234.568'],
+  ])('%i centavos → "%s"', (cents, text) => {
+    expect(wholeReais(cents)).toBe(text);
+  });
+});
+
+describe('o valor do gasto na lista do Painel tem centavos (v0.9.3)', () => {
+  const A = 'uid-a';
+  const B = 'uid-b';
+  const expense = (o: Partial<Expense>): Expense =>
+    ({
+      id: 'e1', description: 'Mercado', totalCents: 12177, personalCents: 0, payerUid: A, payerSharePct: 50,
+      date: '2026-11-05', competence: '2026-11', receipt: { type: 'none' }, status: 'pending_approval', createdBy: A,
+      createdAt: null, updatedAt: null, pendingWrite: false, ...o,
+    }) as Expense;
+
+  it('"Só minha" de R$ 121,77: a linha mostra os centavos; só a etiqueta mostra "122"', () => {
+    const e = expense({ totalCents: 30000, personalCents: 12177 });
+    expect(rowAmountText(e)).toBe('R$ 178,23'); // o rateio, com centavos
+    const icons = rowIcons(e, A, 'Queila', undefined, { partnerUid: B, initialOf: (u) => (u === A ? 'R' : 'Q') });
+    expect(icons.parts).toEqual([{ initial: 'R', text: '122', filled: true, label: 'Só meu R$ 121,77' }]);
   });
 
-  it('nas etiquetas, só o número ("100", "<1")', () => {
-    expect(wholeReais(10000)).toBe('100');
-    expect(wholeReais(12150)).toBe('122');
-    expect(wholeReais(129990)).toBe('1.300');
-    expect(wholeReais(49)).toBe('<1');
-    expect(wholeReais(0)).toBe('0');
+  it('R$ 121,77 e R$ 1.299,90 aparecem com centavos; a confirmar continua "a confirmar"', () => {
+    expect(rowAmountText(expense({ totalCents: 12177 }))).toBe('R$ 121,77');
+    expect(rowAmountText(expense({ totalCents: 129990 }))).toBe('R$ 1.299,90');
+    expect(rowAmountText(expense({ status: 'awaiting_confirmation', totalCents: 0 }))).toBe('a confirmar');
+  });
+
+  it('nenhum arquivo do app arredonda valor fora das etiquetas de parte', () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.(ts|vue)$/.test(name) && !/\.spec\.ts$/.test(name)) files.push(path);
+      }
+    };
+    walk('src');
+    const using = files.filter((f) => /wholeReais|formatBRLWhole|maximumFractionDigits:\s*0/.test(readFileSync(f, 'utf8')));
+    // money.ts define wholeReais; rowIcons.ts é o único que o usa (as etiquetas).
+    expect(using.map((f) => f.replace(/\\/g, '/')).sort()).toEqual(['src/domain/money.ts', 'src/services/rowIcons.ts']);
   });
 });
 
