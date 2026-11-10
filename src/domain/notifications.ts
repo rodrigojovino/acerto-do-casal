@@ -413,3 +413,23 @@ export function countLabel(count: number): string | null {
   if (count <= 0) return null;
   return count > 9 ? '9+' : String(count);
 }
+
+/**
+ * Pagamento do acerto cancelado por quem registrou (v0.9.3): aviso para o outro
+ * membro, na categoria "Acerto e fechamento". Enviado pela própria Function
+ * cancelPayment (um cancelamento administrativo, por script, não avisa).
+ */
+export function paymentCancelledNotice(
+  payment: { amountCents: Cents; byUid: string; atMs: number | null },
+  month: Competence,
+  ctx: NoticeContext,
+): Notice {
+  const when = payment.atMs === null ? '' : ` registrado em ${new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }).format(new Date(payment.atMs))}`;
+  return {
+    toUid: other(ctx, payment.byUid),
+    category: 'settlement',
+    title: 'Pagamento cancelado',
+    body: `${ctx.nameOf(payment.byUid)} cancelou o pagamento de ${formatBRL(payment.amountCents)}${when}`,
+    route: `/fechar/${month}`,
+  };
+}

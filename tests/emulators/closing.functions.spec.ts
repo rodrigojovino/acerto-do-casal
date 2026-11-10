@@ -250,3 +250,141 @@ describe('parte só do parceiro (v0.9.2): a mesma conta do app no fechamento', (
     expect(summary).toMatchObject({ partnerOnlyCents: 7000, personalCents: 5000 });
   });
 });
+
+describe('cancelar pagamento (v0.9.3)', () => {
+  const pixPhoto = async (month: string, id: string) =>
+    env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .storage(`gs://${PROJECT_ID}.appspot.com`)
+        .ref(`groups/${GROUP}/settlements/${month}/${id}.jpg`)
+        .put(new Uint8Array(512), { contentType: 'image/jpeg' });
+    });
+  const outbox = async () => {
+    let docs: Array<Record<string, unknown>> = [];
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      docs = (await ctx.firestore().collection('notificationOutbox').get()).docs.map((d) => d.data());
+    });
+    return docs;
+  };
+  type CallError = FirebaseError & { details?: { reason?: string; remaining?: { amountCents: number; fromUid: string } } };
+  const failure = (p: Promise<unknown>) => p.then(() => undefined, (e: unknown) => e as CallError);
+
+  it('quem recebe não cancela; terceiro não cancela; quem registrou cancela, com log sem a foto e aviso para o outro', async () => {
+    await expense(PAST, b, 20000); // A deve R$ 100,00 a B
+    const id = paymentId();
+    await pixPhoto(PAST, id);
+    await a.call('registerPayment', args(PAST, { method: 'pix', paymentId: id, expectedCents: 10000 }));
+    await expectError(b.call('cancelPayment', args(PAST, { paymentId: id })), 'permission-denied', /Só quem registrou/);
+    const c = await signInAs('cris', 'Pessoa C');
+    await expectError(c.call('cancelPayment', args(PAST, { paymentId: id })), 'permission-denied');
+
+    await a.call('cancelPayment', args(PAST, { paymentId: id, reason: 'comprovante errado' }));
+    expect((await monthDoc(PAST))?.payments).toEqual([]);
+    const log = await read(`groups/${GROUP}/months/${PAST}/log/cancel-${id}`);
+    expect(log).toMatchObject({ type: 'payment_cancelled', by: 'member', byUid: a.uid, paymentId: id, amountCents: 10000, method: 'pix', reason: 'comprovante errado' });
+    expect(JSON.stringify(log)).not.toContain('settlements/');
+
+    // Aviso para B (quem recebe), na categoria do acerto.
+    const until = Date.now() + 15_000;
+    let notices: Array<Record<string, unknown>> = [];
+    while (Date.now() < until && !notices.some((n) => n.title === 'Pagamento cancelado')) {
+      await new Promise((r) => setTimeout(r, 300));
+      notices = await outbox();
+    }
+    const notice = notices.find((n) => n.title === 'Pagamento cancelado');
+    expect(notice).toMatchObject({ toUid: b.uid, category: 'settlement' });
+    expect(String(notice?.body)).toMatch(/^Pessoa cancelou o pagamento de R\$\s?100,00 registrado em \d\d\/\d\d$/);
+  }, 60_000);
+
+  it('cancelar e registrar de novo com outra foto: o valor exato que falta é recalculado', async () => {
+    await expense(PAST, b, 20000);
+    const first = paymentId();
+    await pixPhoto(PAST, first);
+    await a.call('registerPayment', args(PAST, { method: 'pix', paymentId: first }));
+    await expectError(a.call('registerPayment', args(PAST, { method: 'cash', paymentId: paymentId() })), 'failed-precondition', /nada a pagar/);
+    await a.call('cancelPayment', args(PAST, { paymentId: first }));
+    const second = paymentId();
+    await pixPhoto(PAST, second);
+    const again = await a.call<{ amountCents: number; receiptPath: string }>(
+      'registerPayment',
+      args(PAST, { method: 'pix', paymentId: second, expectedCents: 10000 }),
+    );
+    expect(again).toMatchObject({ amountCents: 10000, receiptPath: `groups/${GROUP}/settlements/${PAST}/${second}.jpg` });
+    await b.call('closeMonth', args(PAST));
+    expect((await monthDoc(PAST))?.status).toBe('closed');
+  }, 60_000);
+
+  it('valor que mudou desde a confirmação: registerPayment recusa e devolve o novo valor', async () => {
+    await expense(PAST, b, 20000);
+    const err = await failure(a.call('registerPayment', args(PAST, { method: 'cash', paymentId: paymentId(), expectedCents: 9000 })));
+    expect(err?.code).toBe('functions/failed-precondition');
+    expect(err?.details).toMatchObject({ reason: 'amount_changed', remaining: { amountCents: 10000, fromUid: a.uid } });
+    expect((await monthDoc(PAST))?.payments ?? []).toEqual([]);
+  }, 60_000);
+
+  it('mês fechado recusa, com o motivo claro', async () => {
+    await expense(PAST, b, 20000);
+    const id = paymentId();
+    await a.call('registerPayment', args(PAST, { method: 'cash', paymentId: id }));
+    await a.call('closeMonth', args(PAST));
+    const err = await failure(a.call('cancelPayment', args(PAST, { paymentId: id })));
+    expect(err?.code).toBe('functions/failed-precondition');
+    expect(err?.details?.reason).toBe('closed');
+    expect(err?.message).toMatch(/fechado/);
+  }, 60_000);
+
+  it('mês reaberto: pagamento do fechamento anterior recusa; o registrado depois da reabertura pode', async () => {
+    await expense(PAST, b, 20000);
+    const old = paymentId();
+    await a.call('registerPayment', args(PAST, { method: 'cash', paymentId: old }));
+    await a.call('closeMonth', args(PAST));
+    await a.call('requestReopen', args(PAST, { reason: 'Faltou um gasto' }));
+    await b.call('answerReopen', args(PAST, { approve: true }));
+    const err = await failure(a.call('cancelPayment', args(PAST, { paymentId: old })));
+    expect(err?.details?.reason).toBe('previous_closing');
+    await expense(PAST, b, 4000); // A deve mais R$ 20,00
+    const after = paymentId();
+    await a.call('registerPayment', args(PAST, { method: 'cash', paymentId: after, expectedCents: 2000 }));
+    await a.call('cancelPayment', args(PAST, { paymentId: after }));
+    expect(((await monthDoc(PAST))?.payments as Array<{ id: string }>).map((p) => p.id)).toEqual([old]);
+  }, 60_000);
+
+  it('cancelPayment e closeMonth ao mesmo tempo: só um vence e o mês fica consistente', async () => {
+    await expense(PAST, b, 20000);
+    const id = paymentId();
+    await a.call('registerPayment', args(PAST, { method: 'cash', paymentId: id }));
+    const [cancel, close] = await Promise.allSettled([a.call('cancelPayment', args(PAST, { paymentId: id })), b.call('closeMonth', args(PAST))]);
+    const m = await monthDoc(PAST);
+    expect([cancel.status, close.status].filter((s) => s === 'fulfilled')).toHaveLength(1);
+    if (close.status === 'fulfilled') expect(m).toMatchObject({ status: 'closed', payments: [{ id }] });
+    else expect(m).toMatchObject({ status: 'open', payments: [] });
+  }, 60_000);
+
+  it('cancelPayment e registerPayment ao mesmo tempo: nunca dois pagamentos, e o que falta fecha com a lista', async () => {
+    await expense(PAST, b, 20000);
+    const first = paymentId();
+    await a.call('registerPayment', args(PAST, { method: 'cash', paymentId: first }));
+    const second = paymentId();
+    const [cancel, register] = await Promise.allSettled([
+      a.call('cancelPayment', args(PAST, { paymentId: first })),
+      a.call('registerPayment', args(PAST, { method: 'cash', paymentId: second, expectedCents: 10000 })),
+    ]);
+    expect(cancel.status).toBe('fulfilled');
+    const list = ((await monthDoc(PAST))?.payments as Array<{ id: string; amountCents: number }>) ?? [];
+    // Registrado antes do cancelamento: recusado (nada a pagar) e a lista fica vazia;
+    // depois: entra no lugar do cancelado. Nunca os dois.
+    if (register.status === 'fulfilled') expect(list).toMatchObject([{ id: second, amountCents: 10000 }]);
+    else expect(list).toEqual([]);
+  }, 60_000);
+
+  it('o log do mês é fechado para o app: nenhum membro lê nem grava', async () => {
+    const path = `groups/${GROUP}/months/${PAST}/log/x`;
+    await write(path, { type: 'payment_cancelled' });
+    for (const uid of [a.uid, b.uid]) {
+      const fs = env.authenticatedContext(uid).firestore();
+      await assertFails(fs.doc(path).get());
+      await assertFails(fs.collection(`groups/${GROUP}/months/${PAST}/log`).get());
+      await assertFails(fs.doc(`groups/${GROUP}/months/${PAST}/log/y`).set({ type: 'payment_cancelled' }));
+    }
+  });
+});

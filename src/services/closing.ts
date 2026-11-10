@@ -2,7 +2,9 @@ import { FirebaseError } from 'firebase/app';
 import { Timestamp, collection, doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
-import type { MonthBreakdown, Payment } from '@/domain/closing';
+import { CANCEL_REFUSAL_TEXT, paymentCancelRefusal, type CancelRefusal, type MonthBreakdown, type Payment } from '@/domain/closing';
+import type { Transfer } from '@/domain/settlement';
+import { formatBRL } from '@/domain/money';
 import type { Competence } from '@/domain/settlement';
 import { db, functions, storage } from './firebase';
 
@@ -31,6 +33,8 @@ export interface MonthDoc {
   summary?: MonthBreakdown;
   closedAt: Date | null;
   closedBy?: string;
+  /** Última reabertura: pagamentos de antes dela pertencem ao fechamento desfeito. */
+  reopenedAt: Date | null;
   reopenRequest?: ReopenRequest;
 }
 
@@ -46,6 +50,7 @@ function toMonth(id: string, data: Record<string, unknown> | undefined): MonthDo
     summary: d.summary as MonthBreakdown | undefined,
     closedAt: toDate(d.closedAt),
     closedBy: d.closedBy as string | undefined,
+    reopenedAt: toDate(d.reopenedAt),
     reopenRequest: request ? { ...request, at: toDate(request.at), answeredAt: toDate(request.answeredAt) } : undefined,
   };
 }
@@ -88,7 +93,7 @@ async function call<T>(name: string, data: Record<string, unknown>): Promise<T> 
 }
 
 /** Id do pagamento (também o nome da foto do PIX). */
-function newPaymentId(): string {
+export function newPaymentId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 20);
 }
@@ -96,22 +101,73 @@ function newPaymentId(): string {
 export const settlementPhotoPath = (groupId: string, month: Competence, paymentId: string) =>
   `groups/${groupId}/settlements/${month}/${paymentId}.jpg`;
 
+/** Envia a foto do comprovante PIX (só depois da confirmação na tela). */
+export async function uploadPixPhoto(groupId: string, month: Competence, paymentId: string, photo: Blob): Promise<void> {
+  await uploadBytes(storageRef(storage, settlementPhotoPath(groupId, month, paymentId)), photo, { contentType: 'image/jpeg' });
+}
+
+/** O valor que falta mudou entre a confirmação e o registro: o novo valor, para confirmar de novo. */
+export class AmountChangedError extends Error {
+  constructor(readonly remaining: Transfer) {
+    super(`O valor que falta mudou para ${formatBRL(remaining.amountCents)}. Confira e registre de novo.`);
+  }
+}
+
 /**
- * Registra o pagamento do que falta (quem paga). PIX: envia a foto primeiro;
- * a Function só registra com a foto já no Storage.
+ * Registra o pagamento do que falta (quem paga), com o valor que a tela mostrou
+ * (`expectedCents`): se mudou, a Function recusa e devolve o novo valor
+ * (`AmountChangedError`). PIX: a foto já precisa estar no Storage
+ * (`uploadPixPhoto`, com o mesmo `paymentId`).
  */
 export async function registerPayment(
   groupId: string,
   month: Competence,
   method: 'pix' | 'cash',
-  photo?: Blob,
+  options: { paymentId?: string; expectedCents?: number } = {},
 ): Promise<void> {
-  const paymentId = newPaymentId();
-  if (method === 'pix') {
-    if (!photo) throw new Error('Escolha a foto do comprovante PIX.');
-    await uploadBytes(storageRef(storage, settlementPhotoPath(groupId, month, paymentId)), photo, { contentType: 'image/jpeg' });
+  const paymentId = options.paymentId ?? newPaymentId();
+  try {
+    await call('registerPayment', {
+      groupId,
+      month,
+      method,
+      paymentId,
+      ...(options.expectedCents !== undefined ? { expectedCents: options.expectedCents } : {}),
+    });
+  } catch (err) {
+    const details = (err as FirebaseError & { details?: { reason?: string; remaining?: Transfer } }).details;
+    if (details?.reason === 'amount_changed' && details.remaining) throw new AmountChangedError(details.remaining);
+    throw err;
   }
-  await call('registerPayment', { groupId, month, method, paymentId });
+}
+
+/** Recusa do cancelamento com o motivo claro (mês fechado, fechamento anterior…). */
+export class CancelRefusedError extends Error {
+  constructor(readonly refusal: CancelRefusal) {
+    super(CANCEL_REFUSAL_TEXT[refusal]);
+  }
+}
+
+/** O pagamento pode ser cancelado por quem vê (a mesma regra da Function). */
+export function canCancelPayment(month: Pick<MonthDoc, 'status' | 'reopenedAt'>, payment: MonthPayment, uid: string): boolean {
+  return (
+    paymentCancelRefusal(
+      { status: month.status, reopenedAtMs: month.reopenedAt ? month.reopenedAt.getTime() : null },
+      { byUid: payment.byUid, atMs: payment.at ? payment.at.getTime() : null },
+      uid,
+    ) === null
+  );
+}
+
+/** Cancela um pagamento (só quem registrou, antes do fechamento). Recusado: `CancelRefusedError` com o motivo. */
+export async function cancelPayment(groupId: string, month: Competence, paymentId: string, reason?: string): Promise<void> {
+  try {
+    await call('cancelPayment', { groupId, month, paymentId, ...(reason?.trim() ? { reason: reason.trim() } : {}) });
+  } catch (err) {
+    const refusal = (err as FirebaseError & { details?: { reason?: CancelRefusal } }).details?.reason;
+    if (refusal && refusal in CANCEL_REFUSAL_TEXT) throw new CancelRefusedError(refusal);
+    throw err;
+  }
 }
 
 export const closeMonth = (groupId: string, month: Competence) => call('closeMonth', { groupId, month });

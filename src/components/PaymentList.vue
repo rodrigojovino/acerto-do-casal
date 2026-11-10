@@ -18,6 +18,8 @@
         <span class="amount num">{{ formatBRL(p.amountCents) }}</span>
         <span class="direction">{{ name(p.fromUid) }} → {{ name(p.toUid, true) }}</span>
         <span class="meta">{{ p.method === 'pix' ? 'PIX' : 'Dinheiro' }} · registrado por {{ name(p.byUid, true) }}{{ p.at ? ` em ${dateTime(p.at)}` : '' }}</span>
+        <!-- Só quem registrou, antes do fechamento (tela de fechamento). -->
+        <button v-if="canCancel?.(p)" type="button" class="link cancel" @click="emit('cancel', p)">Cancelar pagamento</button>
       </span>
     </li>
 
@@ -54,7 +56,10 @@ const props = defineProps<{
   viewerUid: string;
   /** Pagamento PIX deste aparelho cuja foto ainda está subindo. */
   uploading?: Pick<Transfer, 'fromUid' | 'toUid' | 'amountCents'> | null;
+  /** Quem vê pode cancelar este pagamento (só na tela de fechamento: quem registrou, antes do fechamento). */
+  canCancel?: (p: MonthPayment) => boolean;
 }>();
+const emit = defineEmits<{ cancel: [payment: MonthPayment] }>();
 
 /** URL da miniatura por pagamento: `undefined` carregando, `null` indisponível. */
 const urls = reactive<Record<string, string | null | undefined>>({});
@@ -175,4 +180,9 @@ const dateTime = (d: Date) => fmt.format(d).replace(', ', ' às ');
   color: #fff;
 }
 
+.cancel {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 13px;
+}
 </style>

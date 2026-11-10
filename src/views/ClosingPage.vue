@@ -46,7 +46,13 @@
             <!-- Pagamentos já registrados -->
             <section v-if="(monthDoc && monthDoc.payments.length > 0) || uploading" class="card payments" aria-labelledby="pag-titulo">
               <h2 id="pag-titulo" class="calc-title">Pagamentos do acerto</h2>
-              <PaymentList :payments="monthDoc?.payments ?? []" :viewer-uid="myUid" :uploading="uploading" />
+              <PaymentList
+                :payments="monthDoc?.payments ?? []"
+                :viewer-uid="myUid"
+                :uploading="uploading"
+                :can-cancel="(p) => !!monthDoc && isOnline && !busy && canCancelPayment(monthDoc, p, myUid)"
+                @cancel="askCancel"
+              />
             </section>
 
             <!-- O que falta pagar -->
@@ -86,12 +92,18 @@ import { formatDateBR, monthLabel, monthName, monthOf, todayInSaoPaulo } from '@
 import { formatBRL } from '@/domain/money';
 import type { Members } from '@/domain/settlement';
 import {
+  canCancelPayment,
+  cancelPayment,
   closeMonth,
   closingErrorMessage,
+  newPaymentId,
   registerPayment,
+  uploadPixPhoto,
   watchMonth,
   type MonthDoc,
+  type MonthPayment,
 } from '@/services/closing';
+import { MAX_CANCEL_REASON } from '@/domain/closing';
 import { watchMonthExpenses, type Expense } from '@/services/expenses';
 import PaymentList from '@/components/PaymentList.vue';
 import BreakdownCard from '@/components/BreakdownCard.vue';
@@ -242,10 +254,13 @@ async function payPix(): Promise<void> {
   if (data !== 'camera' && data !== 'gallery') return;
   await run(async () => {
     const photo = await pickReceiptPhoto(data);
-    if (!photo || !group.value || !remaining.value) return;
-    uploading.value = { ...remaining.value };
+    const r = remaining.value;
+    if (!photo || !group.value || !r) return;
+    uploading.value = { ...r };
     try {
-      await registerPayment(group.value.id, month, 'pix', photo.data);
+      const paymentId = newPaymentId();
+      await uploadPixPhoto(group.value.id, month, paymentId, photo.data);
+      await registerPayment(group.value.id, month, 'pix', { paymentId, expectedCents: r.amountCents });
     } finally {
       uploading.value = null;
     }
@@ -266,7 +281,29 @@ async function payCash(): Promise<void> {
   await alert.present();
   const { role } = await alert.onDidDismiss();
   if (role !== 'confirm') return;
-  await run(() => registerPayment(group.value!.id, month, 'cash'));
+  await run(() => registerPayment(group.value!.id, month, 'cash', { expectedCents: r.amountCents }));
+}
+
+/**
+ * Cancela um pagamento registrado por quem vê (antes do fechamento), com
+ * confirmação e motivo opcional. Recusado (mês fechado, fechamento anterior):
+ * o motivo claro aparece no aviso da tela.
+ */
+async function askCancel(p: MonthPayment): Promise<void> {
+  const when = p.at ? formatDateBR(todayInSaoPaulo(p.at), false) : '';
+  const alert = await alertController.create({
+    header: 'Cancelar pagamento?',
+    message: `Cancelar o pagamento de ${formatBRL(p.amountCents)}${when ? ` registrado em ${when}` : ''}? O comprovante deixa de valer e você poderá registrar de novo.`,
+    inputs: [{ name: 'reason', type: 'textarea', placeholder: 'Motivo (opcional)', attributes: { maxlength: MAX_CANCEL_REASON } }],
+    buttons: [
+      { text: 'Voltar', role: 'cancel' },
+      { text: 'Cancelar pagamento', role: 'destructive' },
+    ],
+  });
+  await alert.present();
+  const { role, data } = await alert.onDidDismiss<{ values?: { reason?: string } }>();
+  if (role !== 'destructive' || !group.value) return;
+  await run(() => cancelPayment(group.value!.id, month, p.id, data?.values?.reason));
 }
 
 async function confirmClose(): Promise<void> {

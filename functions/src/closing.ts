@@ -5,12 +5,17 @@ import { getStorage } from 'firebase-admin/storage';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { monthOf, todayInSaoPaulo } from '../../src/domain/calendar.js';
 import {
+  CANCEL_REFUSAL_TEXT,
+  MAX_CANCEL_REASON,
   closeBlockers,
   monthBreakdown,
+  paymentCancelRefusal,
   remainingTransfer,
   type Blocker,
   type Payment,
 } from '../../src/domain/closing.js';
+import { paymentCancelledNotice } from '../../src/domain/notifications.js';
+import { sendNotices } from './notify.js';
 import type { ExpenseStatus, Members } from '../../src/domain/settlement.js';
 
 if (getApps().length === 0) initializeApp();
@@ -97,8 +102,11 @@ export function settlementPhotoPath(groupId: string, month: string, paymentId: s
 export const registerPayment = onCall(async (request): Promise<Payment> => {
   const uid = requireUid(request);
   const { groupId, month } = monthArgs(request.data);
-  const { method, paymentId } = (request.data ?? {}) as { method?: unknown; paymentId?: unknown };
+  const { method, paymentId, expectedCents } = (request.data ?? {}) as { method?: unknown; paymentId?: unknown; expectedCents?: unknown };
   if (method !== 'pix' && method !== 'cash') throw new HttpsError('invalid-argument', 'Forma de pagamento inválida.');
+  if (expectedCents !== undefined && (typeof expectedCents !== 'number' || !Number.isSafeInteger(expectedCents) || expectedCents <= 0)) {
+    throw new HttpsError('invalid-argument', 'Valor esperado inválido.');
+  }
   if (typeof paymentId !== 'string' || !ID_RE.test(paymentId)) throw new HttpsError('invalid-argument', 'Pagamento inválido.');
 
   const receiptPath = method === 'pix' ? settlementPhotoPath(groupId, month, paymentId) : undefined;
@@ -120,6 +128,14 @@ export const registerPayment = onCall(async (request): Promise<Payment> => {
     if (!remaining) throw new HttpsError('failed-precondition', 'Não há nada a pagar neste mês.');
     if (remaining.fromUid !== uid) {
       throw new HttpsError('permission-denied', 'Quem registra o pagamento é quem paga.');
+    }
+    // A tela confirmou um valor (v0.9.3): se o que falta mudou desde então, recusa
+    // e devolve o valor novo, para confirmar de novo (o app reaproveita a foto).
+    if (expectedCents !== undefined && expectedCents !== remaining.amountCents) {
+      throw new HttpsError('failed-precondition', `O valor que falta mudou para ${brl(remaining.amountCents)}.`, {
+        reason: 'amount_changed',
+        remaining,
+      });
     }
 
     const payment: Payment = {
@@ -178,6 +194,67 @@ export const closeMonth = onCall(async (request): Promise<{ closed: true }> => {
     );
     return { closed: true as const };
   });
+});
+
+/**
+ * Cancela um pagamento do acerto (v0.9.3): só quem registrou, só enquanto o
+ * pagamento não entrou num fechamento (mês aberto e registrado depois da última
+ * reabertura). Numa transação que lê o mês, como closeMonth e registerPayment
+ * (as três disputam o mesmo documento: só uma vence). Remove o pagamento da
+ * lista (o valor que falta volta ao saldo) e grava o cancelamento em
+ * months/{mês}/log, sem a foto (a foto vira órfã e sai na varredura semanal).
+ * Sem aprovação do outro membro, que recebe um aviso.
+ */
+export const cancelPayment = onCall(async (request): Promise<{ cancelled: true }> => {
+  const uid = requireUid(request);
+  const { groupId, month } = monthArgs(request.data);
+  const { paymentId, reason: rawReason } = (request.data ?? {}) as { paymentId?: unknown; reason?: unknown };
+  if (typeof paymentId !== 'string' || !ID_RE.test(paymentId)) throw new HttpsError('invalid-argument', 'Pagamento inválido.');
+  if (rawReason !== undefined && typeof rawReason !== 'string') throw new HttpsError('invalid-argument', 'Motivo inválido.');
+  const reason = (rawReason ?? '').trim();
+  if (reason.length > MAX_CANCEL_REASON) throw new HttpsError('invalid-argument', `Motivo com mais de ${MAX_CANCEL_REASON} caracteres.`);
+
+  const result = await db.runTransaction(async (tx) => {
+    const members = await membersOf(tx, groupId, uid);
+    const ref = monthRef(groupId, month);
+    const current = await tx.get(ref);
+    const payments = (current.get('payments') as Payment[] | undefined) ?? [];
+    const payment = payments.find((p) => p.id === paymentId);
+    const atMs = (t: unknown) => (t instanceof Timestamp ? t.toMillis() : null);
+    const refusal = paymentCancelRefusal(
+      { status: current.get('status') as string | undefined, reopenedAtMs: atMs(current.get('reopenedAt')) },
+      payment ? { byUid: payment.byUid, atMs: atMs(payment.at) } : undefined,
+      uid,
+    );
+    if (refusal) {
+      const code = refusal === 'not_yours' ? 'permission-denied' : refusal === 'not_found' ? 'not-found' : 'failed-precondition';
+      throw new HttpsError(code, CANCEL_REFUSAL_TEXT[refusal], { reason: refusal });
+    }
+    const p = payment!;
+    tx.update(ref, { payments: payments.filter((x) => x.id !== paymentId) });
+    tx.create(ref.collection('log').doc(`cancel-${paymentId}`), {
+      type: 'payment_cancelled',
+      by: 'member',
+      byUid: uid,
+      at: FieldValue.serverTimestamp(),
+      paymentId,
+      amountCents: p.amountCents,
+      method: p.method,
+      fromUid: p.fromUid,
+      toUid: p.toUid,
+      registeredBy: p.byUid,
+      registeredAt: p.at,
+      ...(reason ? { reason } : {}),
+    });
+    return { members, payment: { amountCents: p.amountCents, byUid: p.byUid, atMs: atMs(p.at) } };
+  });
+
+  // Aviso para o outro membro (fora da transação: a transação pode ser repetida).
+  const group = await db.doc(`groups/${groupId}`).get();
+  const names = (group.get('memberNames') as Record<string, string> | undefined) ?? {};
+  const nameOf = (u: string) => (names[u] ?? '').trim().split(/\s+/)[0] || 'A outra pessoa';
+  await sendNotices(groupId, [paymentCancelledNotice(result.payment, month, { members: result.members, nameOf })]).catch(() => undefined);
+  return { cancelled: true as const };
 });
 
 /** Pede a reabertura de um mês fechado, com motivo; o outro membro aprova ou recusa. */

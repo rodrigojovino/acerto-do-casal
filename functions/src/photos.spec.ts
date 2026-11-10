@@ -53,3 +53,15 @@ describe('orphanPhotos', () => {
     expect(orphanPhotos([file('groups/g1/receipts/x.jpg', 6.9)], new Set(), NOW).recent).toBe(1);
   });
 });
+
+describe('pagamento do acerto cancelado (v0.9.3)', () => {
+  it('a foto do PIX de um pagamento cancelado deixa de ser usada e sai depois de 7 dias', () => {
+    const path = 'groups/g1/settlements/2026-10/cancelado.jpg';
+    const before = { payments: [{ id: 'cancelado', receiptPath: path }] };
+    const after = { payments: [] }; // o pagamento saiu da lista (cancelPayment ou o script)
+    expect(monthPhotoPaths(before)).toEqual([path]);
+    const referenced = new Set(monthPhotoPaths(after));
+    expect(orphanPhotos([file(path, 6)], referenced, NOW)).toMatchObject({ orphans: [], recent: 1 });
+    expect(orphanPhotos([file(path, 8)], referenced, NOW).orphans.map((f) => f.path)).toEqual([path]);
+  });
+});

@@ -192,3 +192,36 @@ export function closeReasons(input: {
   if (input.remaining) reasons.push('unpaid');
   return reasons;
 }
+
+// ---- Cancelar um pagamento do acerto (v0.9.3) ----
+
+/** Motivo opcional do cancelamento (o mesmo limite na Function). */
+export const MAX_CANCEL_REASON = 200;
+
+/** Por que o cancelamento é recusado. */
+export type CancelRefusal = 'closed' | 'not_found' | 'not_yours' | 'previous_closing';
+
+export const CANCEL_REFUSAL_TEXT: Record<CancelRefusal, string> = {
+  closed: 'O mês já está fechado: o pagamento entrou no acerto e não pode mais ser cancelado.',
+  not_found: 'Este pagamento não está mais na lista (já foi cancelado ou o mês mudou).',
+  not_yours: 'Só quem registrou o pagamento pode cancelá-lo.',
+  previous_closing: 'Este pagamento é de um fechamento anterior à reabertura do mês e não pode ser cancelado.',
+};
+
+/**
+ * Quem registrou cancela o próprio pagamento enquanto ele não entrou num
+ * fechamento: o mês está aberto e o pagamento foi registrado depois da última
+ * reabertura (os anteriores pertencem ao fechamento desfeito e continuam
+ * valendo). `null` = pode cancelar. Horários em epoch ms.
+ */
+export function paymentCancelRefusal(
+  month: { status?: string; reopenedAtMs?: number | null },
+  payment: { byUid: string; atMs: number | null } | undefined,
+  uid: string,
+): CancelRefusal | null {
+  if (month.status === 'closed') return 'closed';
+  if (!payment) return 'not_found';
+  if (payment.byUid !== uid) return 'not_yours';
+  if (month.reopenedAtMs != null && (payment.atMs === null || payment.atMs <= month.reopenedAtMs)) return 'previous_closing';
+  return null;
+}
