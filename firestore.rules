@@ -652,16 +652,20 @@ service cloud.firestore {
 
       // ---- Itens da nota (NFC-e de SP) ----
       // Um documento por chave. Oficiais: gravados pelas Functions (conferência,
-      // nova tentativa) e pela reconsulta. Lidos no aparelho (`source: 'device'`,
-      // quando o servidor falhou e a página da nota abriu no app): criados uma
-      // vez, por quem lançou o gasto com essa chave, nunca alterados pelo app.
+      // nova tentativa) e pela reconsulta; substituem os lidos no aparelho e
+      // nunca são alterados pelo app. Lidos no aparelho (`source: 'device'`,
+      // quando o servidor falhou e a página da nota abriu no app): gravados por
+      // quem lançou o gasto com essa chave, no mesmo lote do gasto (v0.9.1) ou
+      // sozinhos (nova tentativa no Detalhe, e os apps da v0.9.0); um lido no
+      // aparelho pode ser trocado por outro lido no aparelho, nunca apagado.
       // As regras conferem o formato geral (não percorrem a lista de itens): por
-      // isso a tela sempre os mostra como "lidos no aparelho".
+      // isso a tela sempre os mostra como "lidos no aparelho". Até 990 itens, o
+      // máximo de uma NFC-e.
       function validDeviceItems(d) {
         return d.keys().hasAll(['items', 'discountCents', 'totalCents', 'payments', 'itemsSumCents', 'consistent', 'fetchedAt', 'source'])
           && d.keys().hasOnly(['items', 'grossCents', 'discountCents', 'totalCents', 'payments', 'changeCents', 'itemsSumCents', 'consistent', 'fetchedAt', 'source', 'issuerName', 'date'])
           && d.source == 'device'
-          && d.items is list && d.items.size() <= 200
+          && d.items is list && d.items.size() <= 990
           && d.payments is list && d.payments.size() <= 20
           && d.discountCents is int && d.totalCents is int && d.itemsSumCents is int
           && (!d.keys().hasAny(['grossCents']) || d.grossCents is int)
@@ -672,13 +676,23 @@ service cloud.firestore {
           && d.fetchedAt == request.time;
       }
 
+      // O registro da nota existe ao fim do lote e foi criado por quem grava
+      // (no mesmo lote do gasto, ou antes).
+      function ownsFiscalKeyAfter(key) {
+        return existsAfter(fiscalKeyPath(key))
+          && getAfter(fiscalKeyPath(key)).data.createdBy == request.auth.uid;
+      }
+
       match /nfceItems/{nfceKey} {
         allow read: if isMember(groupId);
         allow create: if isMember(groupId)
           && validDeviceItems(request.resource.data)
-          && exists(fiscalKeyPath(nfceKey))
-          && get(fiscalKeyPath(nfceKey)).data.createdBy == request.auth.uid;
-        allow update, delete: if false;
+          && ownsFiscalKeyAfter(nfceKey);
+        allow update: if isMember(groupId)
+          && resource.data.source == 'device'
+          && validDeviceItems(request.resource.data)
+          && ownsFiscalKeyAfter(nfceKey);
+        allow delete: if false;
       }
 
       // ---- Limite do "Tentar conferir de novo" (uma a cada 15 minutos por nota) ----
