@@ -73,6 +73,9 @@ jobs:
       - name: Build web
         run: npm run build
 
+      - name: Conferir que o build não leva emuladores nem o modo duo
+        run: node scripts/ci/sem-emuladores.mjs dist
+
       - name: Sincronizar Capacitor
         run: npx cap sync android
 

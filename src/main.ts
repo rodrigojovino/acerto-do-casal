@@ -46,3 +46,6 @@ router.isReady().then(() => {
   app.mount('#app');
   initPush(router);
 });
+
+// Ambiente de dois aparelhos (npm run dev:duo): só em desenvolvimento; o build de produção não leva este módulo.
+if (import.meta.env.DEV && import.meta.env.VITE_DEV_DUO === 'true') void import('./dev/duo');

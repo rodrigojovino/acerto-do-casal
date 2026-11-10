@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Acerto do Casal · dois aparelhos</title>
+    <style>
+      :root {
+        --bg: #ecebe6;
+        --card: #ffffff;
+        --text: #1c1c1a;
+        --muted: #5f5f5a;
+        --border: #d4d3cd;
+        --ok: #1f7a4d;
+        --bad: #a3271d;
+        --accent: #2457c5;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+      header { padding: 10px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #1c1c1a; color: #fff; }
+      header h1 { font-size: 15px; margin: 0 12px 0 0; }
+      button { font: inherit; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); padding: 5px 10px; cursor: pointer; }
+      header button { background: #33332f; color: #fff; border-color: #55554f; }
+      button:disabled { opacity: 0.5; cursor: wait; }
+      button.on { background: var(--bad); color: #fff; border-color: var(--bad); }
+      main { display: grid; grid-template-columns: auto auto minmax(300px, 1fr); gap: 16px; padding: 16px; align-items: start; }
+      .device { display: flex; flex-direction: column; gap: 6px; }
+      .device h2 { font-size: 14px; margin: 0; display: flex; gap: 8px; align-items: center; }
+      .device .route { color: var(--muted); font-size: 12px; font-weight: 400; }
+      .device iframe { width: 390px; height: 844px; border: 10px solid #111; border-radius: 28px; background: #fff; }
+      .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+      aside { display: flex; flex-direction: column; gap: 16px; }
+      section.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+      section.card h3 { margin: 0 0 8px; font-size: 14px; }
+      .check { font-weight: 700; }
+      .check.ok { color: var(--ok); }
+      .check.bad { color: var(--bad); }
+      table { border-collapse: collapse; width: 100%; font-size: 13px; }
+      td, th { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      .keys code { font-size: 12px; }
+      .notice { border-bottom: 1px solid var(--border); padding: 6px 0; }
+      .notice .to { font-weight: 700; }
+      .notice .when { color: var(--muted); font-size: 12px; }
+      .status { color: var(--muted); font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Acerto do Casal · dois aparelhos (emuladores, projeto demo)</h1>
+      <span>Cenários:</span>
+      <button data-scenario="zerar">Zerar tudo</button>
+      <button data-scenario="casal">Casal vinculado com categorias</button>
+      <button data-scenario="todos-estados">Mês com gastos em todos os estados</button>
+      <button data-scenario="fechamento">Mês passado para fechar</button>
+      <button data-scenario="recorrentes-dia1">Gerar recorrentes do dia 1 (próximo mês)</button>
+      <span id="scenario-status" class="status"></span>
+    </header>
+    <main>
+      <div class="device" data-who="rodrigo">
+        <h2>Rodrigo <span class="route" data-route></span></h2>
+        <div class="controls">
+          <button data-action="offline">Modo avião</button>
+          <button data-action="reload">Recarregar</button>
+          <button data-action="mirror">Abrir esta tela na Queila</button>
+        </div>
+        <iframe title="Aparelho do Rodrigo" data-frame></iframe>
+      </div>
+      <div class="device" data-who="queila">
+        <h2>Queila <span class="route" data-route></span></h2>
+        <div class="controls">
+          <button data-action="offline">Modo avião</button>
+          <button data-action="reload">Recarregar</button>
+          <button data-action="mirror">Abrir esta tela no Rodrigo</button>
+        </div>
+        <iframe title="Aparelho da Queila" data-frame></iframe>
+      </div>
+      <aside>
+        <section class="card">
+          <h3>Conferência do saldo</h3>
+          <p>
+            Mês <input id="check-month" type="month" />
+            <button id="check-run">Conferir</button>
+          </p>
+          <p id="check-result" class="check" role="status">Ainda não conferido.</p>
+          <table id="check-table"></table>
+        </section>
+        <section class="card keys">
+          <h3>Notas de teste (digite a chave no formulário: "Digitar chave")</h3>
+          <table id="keys"></table>
+        </section>
+        <section class="card">
+          <h3>Caixa de avisos (o que cada um receberia)</h3>
+          <div id="outbox" aria-live="polite"></div>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="./duoPage.ts"></script>
+  </body>
+</html>
