@@ -72,26 +72,24 @@
             </div>
           </div>
 
-          <div class="grid-2">
-            <div v-if="!editingSeries" class="field">
-              <label for="pessoal" class="label">{{ personalLabel }}</label>
-              <MoneyInput
-                id="pessoal"
-                v-model="personalCents"
-                class="input num"
-                :aria-invalid="showErrors && !!errors.personal"
-              />
-              <p v-if="showErrors && errors.personal" class="field-error">{{ errors.personal }}</p>
-            </div>
-            <div class="field">
-              <span id="divisao" class="label">Divisão (eu / {{ partnerFirstName.toLowerCase() }})</span>
-              <div class="stepper" role="group" aria-labelledby="divisao">
-                <button type="button" aria-label="Diminuir minha parte" :disabled="viewerSplit.mine <= 0" @click="step(-1)">−</button>
-                <output class="num" aria-live="polite">{{ viewerSplit.mine }} / {{ viewerSplit.partner }}</output>
-                <button type="button" aria-label="Aumentar minha parte" :disabled="viewerSplit.mine >= 100" @click="step(1)">+</button>
+          <!-- Partes só de um de vocês: rótulos fixos, relativos a quem lança (não mudam com quem pagou). -->
+          <template v-if="showParts">
+            <div class="grid-2">
+              <div class="field">
+                <label for="so-minha" class="label">Só minha</label>
+                <MoneyInput id="so-minha" v-model="mineCents" class="input num" :aria-invalid="showErrors && !!errors.parts" />
+              </div>
+              <div class="field">
+                <label for="so-parceiro" class="label">Só de {{ partnerFirstName }}</label>
+                <MoneyInput id="so-parceiro" v-model="partnerCents" class="input num" :aria-invalid="showErrors && !!errors.parts" />
               </div>
             </div>
-          </div>
+            <p v-if="errors.parts" class="field-error" role="alert">{{ errors.parts }}</p>
+            <p v-if="marksUndone" class="hint" role="status">As marcações dos itens foram desfeitas porque você digitou um valor.</p>
+            <p v-if="payerParts.partnerOnlyCents > 0" class="hint split-note" role="status">
+              Parte do parceiro: este gasto vai para a aprovação de {{ partnerFirstName }}, mesmo com comprovante.
+            </p>
+          </template>
 
           <div class="field">
             <label for="obs" class="label">Observação (opcional)</label>
@@ -115,9 +113,6 @@
             @processing="(v) => (photoProcessing = v)"
           />
           <p v-if="keyLocked" class="hint">A parcela 1 é de um mês fechado: a nota da compra não pode ser trocada.</p>
-          <p v-if="payerSharePct !== 50" class="hint split-note" role="status">
-            Divisão diferente de 50/50: vai para a aprovação de {{ partnerFirstName }}, mesmo com comprovante.
-          </p>
           <div v-if="duplicate" class="alert-error duplicate" role="alert">
             <p>{{ duplicateText }}</p>
             <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
@@ -126,7 +121,7 @@
           <div v-if="!duplicate && itemsNow.kind !== 'none'" class="items-state" :class="itemsNow.kind">
             <p class="items-text" role="status" aria-live="polite">{{ itemsText }}</p>
             <button v-if="itemsNow.kind === 'loaded'" class="btn outline items-see" type="button" @click="itemsOpen = true">
-              Ver itens
+              {{ canMarkItems ? 'Ver e marcar itens' : 'Ver itens' }}
             </button>
             <p v-if="itemsDiff" class="items-diff" role="alert">{{ itemsDiff }}</p>
           </div>
@@ -139,16 +134,39 @@
               :items="itemsNow.items"
               :issuer="itemsIssuer"
               :device="itemsNow.source === 'device'"
+              :marks="currentMarks"
+              :editable="canMarkItems"
+              :partner-name="partnerFirstName"
+              :initials="initials"
+              @update:marks="applyMarks"
               @close="itemsOpen = false"
             />
           </ion-modal>
 
-          <!-- Depois do comprovante, em linha compacta: abre os campos só quando marcada -->
-          <div v-if="!isEdit" class="card installments" :class="{ open: installmentOn }">
-            <label class="check">
-              <input v-model="installmentOn" type="checkbox" />
-              <span class="strong">Compra parcelada</span>
-            </label>
+          <!-- Parcelamento e Divisão na mesma linha (duas colunas iguais); abaixo de 300 px, uma embaixo da outra. -->
+          <div class="plan-row">
+            <div class="plan-grid" :class="{ single: isEdit }">
+              <div v-if="!isEdit" class="field">
+                <span id="parcelamento" class="label">Parcelamento</span>
+                <label class="check plan-box">
+                  <input v-model="installmentOn" type="checkbox" />
+                  <span class="strong">Compra parcelada</span>
+                </label>
+              </div>
+              <div class="field">
+                <span id="divisao" class="label" :aria-label="`Divisão (eu / ${partnerFirstName})`">Divisão (eu / {{ partnerFirstName.toLowerCase() }})</span>
+                <div class="stepper compact" role="group" :aria-label="`Divisão (eu / ${partnerFirstName})`">
+                  <button type="button" aria-label="Diminuir minha parte" :disabled="viewerSplit.mine <= 0" @click="step(-1)">−</button>
+                  <output class="num" aria-live="polite">{{ viewerSplit.mine }} / {{ viewerSplit.partner }}</output>
+                  <button type="button" aria-label="Aumentar minha parte" :disabled="viewerSplit.mine >= 100" @click="step(1)">+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-if="payerSharePct !== 50" class="hint split-note" role="status">
+            Divisão diferente de 50/50: vai para a aprovação de {{ partnerFirstName }}, mesmo com comprovante.
+          </p>
+          <div v-if="!isEdit && installmentOn" class="card installments open">
             <template v-if="installmentOn">
               <div class="grid-2">
                 <div class="field">
@@ -182,6 +200,7 @@
           <div class="dark-card" aria-live="polite">
             <div class="row"><span class="muted">Entra no rateio</span><span class="num"><strong>{{ formatBRL(sharedCents) }}</strong></span></div>
             <div class="row"><span class="muted">{{ preview.label }}</span><span class="num"><strong>{{ formatBRL(preview.amountCents) }}</strong></span></div>
+            <div v-if="partnerOnlyText" class="row sub"><span>{{ partnerOnlyText }}</span></div>
             <div v-if="competenceNote && !installmentOn" class="row note"><span>{{ competenceNote }}</span></div>
             <div v-if="installmentOn" class="row note"><span>Na compra inteira; cada parcela entra no acerto do mês dela.</span></div>
           </div>
@@ -205,7 +224,7 @@ import {
   type ItemsMissingReason,
   type ItemsRead,
 } from '@/domain/nfceItemsState';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ReceiptPicker, { type ReceiptState } from '@/components/ReceiptPicker.vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -247,12 +266,15 @@ import { MAX_NOTE } from '@/domain/notifications';
 import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, readNfceOnDevice, type NfcePrefill, type ScannedNfce } from '@/services/nfce';
 import { notaWebViewAvailable, openNotaInBrowser } from '@/services/notaWebView';
 import { itemsToSave } from '@/services/nfceItemsData';
+import { coupleInitials, hasMarks, itemsSignature, marksMatch, readMarks, storeMarks, sumsFromMarks, type ViewerMark } from '@/domain/itemMarks';
+import { partsFitTotal, payerPartsFromViewer, viewerPartsFromPayer } from '@/domain/parts';
+import { isDeviceItems, nfceItemsByKey } from '@/services/nfceItems';
 import { NFCE_BUDGET_MS, mergeOutcome, remainingMs, shouldTryDevice, spReceiptStatus, type NfceOutcome } from '@/domain/nfceFlow';
 import type { NfceItems } from '../../functions/src/nfce';
 import { debtView, duplicateNoteText } from '@/services/expenseView';
 import { usedByOther } from '@/services/fiscalKeys';
 import { closedMonths } from '@/services/months';
-import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
+import { firstNameOf, group, memberFirstName, partnerFirstName, partnerUid, user } from '@/services/session';
 import { chooseCategory } from '@/components/categoryDialog';
 import { CNPJ_WAIT_MS, createSaveLock, saveButton, withTimeout, type SaveWait } from '@/domain/saveButton';
 
@@ -269,7 +291,15 @@ const members = computed<Members>(() => [myUid.value, partnerUid.value ?? ''] as
 // ---- Estado do formulário ----
 const today = ref(todayInSaoPaulo());
 const totalCents = ref(0);
-const personalCents = ref(0);
+/** "Só minha" e "Só de [nome]": relativas a quem lança; gravadas relativas a quem pagou (src/domain/parts.ts). */
+const mineCents = ref(0);
+const partnerCents = ref(0);
+/** Marcações dos itens (relativas a quem lança), da nota `marksKey`; null = nenhuma. */
+const marks = ref<ViewerMark[] | null>(null);
+const marksKey = ref<string | null>(null);
+const marksUndone = ref(false);
+/** Partes preenchidas pela marcação agora (não é digitação: não desfaz as marcações). */
+let applyingMarks = false;
 const description = ref('');
 const note = ref('');
 /** Categoria escolhida na janela ao salvar (na edição, a do gasto). */
@@ -333,6 +363,21 @@ function itemsPage(key: string): NfcePrefill | undefined {
   return state.source === 'device' ? deviceReads.get(key)?.page : serverReads.get(key);
 }
 const itemsIssuer = computed(() => (receipt.value.type === 'nfce' ? itemsPage(receipt.value.nfceKey)?.issuerName : undefined));
+
+// Edição: os itens já gravados da nota aparecem (para ver e marcar) e as
+// marcações guardadas voltam, se ainda correspondem a eles. Itens gravados não
+// são regravados (sem a página lida agora, itemsToSave não manda nada).
+watch(
+  () => [receipt.value.type === 'nfce' ? receipt.value.nfceKey : null, nfceItemsByKey.value] as const,
+  ([key, byKey]) => {
+    if (!isEdit || !key || itemsReads.value[key]) return;
+    const stored = byKey.get(key);
+    if (!stored) return;
+    itemsReads.value = { ...itemsReads.value, [key]: { source: isDeviceItems(stored) ? 'device' : 'server', items: stored } };
+    if (editing && !marks.value) restoreMarks(editing);
+  },
+  { immediate: true },
+);
 /** URL oficial da NFC-e de SP escolhida agora ("Ver a nota na SEFAZ"). */
 const spReceiptUrl = computed(() => (receipt.value.type === 'nfce' ? receipt.value.spUrl : null));
 const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
@@ -363,7 +408,11 @@ onIonViewWillEnter(() => {
   if (isEdit) return;
   today.value = todayInSaoPaulo();
   totalCents.value = 0;
-  personalCents.value = 0;
+  mineCents.value = 0;
+  partnerCents.value = 0;
+  marks.value = null;
+  marksKey.value = null;
+  marksUndone.value = false;
   description.value = '';
   note.value = '';
   categoryId.value = undefined;
@@ -410,7 +459,12 @@ if (editId && group.value) {
           stopSeries = watchSeries(group.value.id, expense.installment.seriesId, (list) => (seriesParcels.value = list), () => undefined);
         }
         totalCents.value = expense.totalCents;
-        personalCents.value = expense.personalCents;
+        const parts = viewerPartsFromPayer(expense, myUid.value, expense.payerUid);
+        applyingMarks = true;
+        mineCents.value = parts.mineCents;
+        partnerCents.value = parts.partnerCents;
+        void nextTick(() => (applyingMarks = false));
+        restoreMarks(expense);
         description.value = expense.description;
         note.value = expense.note ?? '';
         categoryId.value = expense.categoryId;
@@ -647,10 +701,66 @@ const firstMonth = computed(() => {
 const minDate = computed(() => firstDayOf(firstMonth.value));
 const maxDate = computed(() => lastAllowedDate(today.value));
 
-// ---- Valores (campos MoneyInput, estilo app do banco) ----
-const personalLabel = computed(() =>
-  payerUid.value === myUid.value ? 'Parte só minha' : `Parte só de ${partnerFirstName.value}`,
+// ---- Partes só de um de vocês (v0.9.2) ----
+/** Os campos aparecem no lançamento e na edição de um gasto; não na série (fixas) nem na confirmação do recorrente variável. */
+const showParts = computed(() => !editingSeries.value && !confirmingValue.value);
+/** As partes como o banco guarda (relativas a quem pagou). */
+const payerParts = computed(() =>
+  showParts.value
+    ? payerPartsFromViewer({ mineCents: mineCents.value, partnerCents: partnerCents.value }, myUid.value, payerUid.value)
+    : { personalCents: editing?.personalCents ?? 0, partnerOnlyCents: editing?.partnerOnlyCents ?? 0 },
 );
+const initials = computed(() => {
+  const [mine, partner] = coupleInitials(memberFirstName(myUid.value), memberFirstName(partnerUid.value));
+  return { mine, partner };
+});
+
+// Digitar em "Só minha" ou "Só de [nome]" desfaz as marcações (com aviso).
+watch([mineCents, partnerCents], () => {
+  if (applyingMarks) return;
+  if (hasMarks(marks.value)) {
+    marks.value = null;
+    marksUndone.value = true;
+  }
+});
+
+/** Marcações da nota escolhida agora (outra nota: nenhuma). */
+const currentMarks = computed(() =>
+  receipt.value.type === 'nfce' && marksKey.value === receipt.value.nfceKey ? marks.value : null,
+);
+/** Marca itens só no lançamento e na edição de um gasto avulso, com os itens carregados. */
+const canMarkItems = computed(() => showParts.value && itemsNow.value.kind === 'loaded');
+
+function applyMarks(next: ViewerMark[]): void {
+  const state = itemsNow.value;
+  if (state.kind !== 'loaded' || receipt.value.type !== 'nfce') return;
+  marks.value = next;
+  marksKey.value = receipt.value.nfceKey;
+  marksUndone.value = false;
+  const sums = sumsFromMarks(state.items, next);
+  applyingMarks = true;
+  mineCents.value = sums.mineCents;
+  partnerCents.value = sums.partnerCents;
+  void nextTick(() => (applyingMarks = false));
+}
+
+/** Edição: as marcações guardadas voltam se ainda correspondem aos itens gravados da nota. */
+function restoreMarks(expense: Expense): void {
+  const r = expense.receipt;
+  const stored = expense.itemMarks;
+  if (r.type !== 'nfce' || !stored) return;
+  const items = nfceItemsByKey.value.get(r.nfceKey);
+  if (!items || !marksMatch(stored, items)) return;
+  marks.value = readMarks(stored.m, myUid.value, expense.payerUid);
+  marksKey.value = r.nfceKey;
+}
+
+/** Marcações a gravar (relativas a quem pagou), só com os itens mostrados e alguma marcação. */
+function marksToSave(): { m: string; sig: string } | undefined {
+  const state = itemsNow.value;
+  if (!showParts.value || state.kind !== 'loaded' || !hasMarks(currentMarks.value)) return undefined;
+  return { m: storeMarks(currentMarks.value!, myUid.value, payerUid.value), sig: itemsSignature(state.items) };
+}
 
 // ---- Divisão: sempre pela conversão de src/domain/split.ts ----
 const viewerSplit = computed(() => splitForViewer(payerSharePct.value, payerUid.value, myUid.value));
@@ -661,15 +771,17 @@ function step(direction: 1 | -1): void {
 }
 
 // ---- Prévia do acerto (funções de domínio) ----
-const sharedCents = computed(() => Math.max(0, totalCents.value - personalCents.value));
+// "Entra no rateio": total − parte pessoal de quem pagou (a parte do parceiro entra e ele deve inteira).
+const sharedCents = computed(() => Math.max(0, totalCents.value - payerParts.value.personalCents));
 
 const preview = computed(() => {
-  const valid = totalCents.value > 0 && personalCents.value <= totalCents.value;
+  const valid = totalCents.value > 0 && partsFitTotal(payerParts.value, totalCents.value);
   if (!valid || !partnerUid.value) return { label: 'Ninguém deve nada por este gasto', amountCents: 0 };
   return debtView(
     {
       totalCents: totalCents.value,
-      personalCents: personalCents.value,
+      personalCents: payerParts.value.personalCents,
+      partnerOnlyCents: payerParts.value.partnerOnlyCents,
       payerUid: payerUid.value,
       payerSharePct: payerSharePct.value,
     },
@@ -678,6 +790,14 @@ const preview = computed(() => {
     firstNameOf,
   );
 });
+
+/** "inclui R$ X só de [nome]" / "inclui R$ X só seus": a parte só de quem não pagou, dentro da dívida. */
+const partnerOnlyText = computed(() => {
+  const cents = payerParts.value.partnerOnlyCents;
+  if (cents <= 0 || !partnersFit.value) return null;
+  return payerUid.value === myUid.value ? `inclui ${formatBRL(cents)} só de ${partnerFirstName.value}` : `inclui ${formatBRL(cents)} só seus`;
+});
+const partnersFit = computed(() => partsFitTotal(payerParts.value, totalCents.value));
 
 const competence = computed(() =>
   isIsoDate(date.value) ? resolveCompetence(date.value, closedMonths.value, today.value) : null,
@@ -731,12 +851,14 @@ const seriesSummary = computed(() => {
 
 // ---- Validação ----
 const errors = computed(() => {
-  const e: Partial<Record<'total' | 'description' | 'date' | 'personal' | 'firstMonth', string>> = {};
+  const e: Partial<Record<'total' | 'description' | 'date' | 'parts' | 'firstMonth', string>> = {};
   if (totalCents.value <= 0) e.total = 'Informe o valor.';
   if (description.value.trim() === '') e.description = 'Informe a descrição.';
   if (!isIsoDate(date.value)) e.date = 'Informe a data.';
   else if (date.value < minDate.value || date.value > maxDate.value) e.date = 'Data fora do período permitido.';
-  if (personalCents.value > totalCents.value) e.personal = 'Não pode ser maior que o total.';
+  if (showParts.value && !partsFitTotal({ mineCents: mineCents.value, partnerCents: partnerCents.value }, totalCents.value)) {
+    e.parts = `"Só minha" e "Só de ${partnerFirstName.value}" somadas passam do valor total.`;
+  }
   if (installmentOn.value) {
     const m = installmentFirstMonth.value;
     if (!/^\d{4}-\d{2}$/.test(m)) e.firstMonth = 'Informe o mês da primeira.';
@@ -786,12 +908,15 @@ async function save(): Promise<void> {
     description: description.value,
     note: note.value,
     totalCents: totalCents.value,
-    personalCents: personalCents.value,
+    // Relativas a quem pagou (a tela é relativa a quem lança).
+    personalCents: payerParts.value.personalCents,
+    partnerOnlyCents: payerParts.value.partnerOnlyCents,
     payerUid: payerUid.value,
     payerSharePct: payerSharePct.value,
     date: date.value,
     receipt: receiptChoice(),
     categoryId: categoryId.value,
+    itemMarks: marksToSave(),
   };
   // Itens lidos no aparelho: no mesmo lote do gasto, atômico (offline também), exatamente os mostrados.
   const deviceItems =
@@ -1034,6 +1159,59 @@ textarea.note-input {
 .stepper output {
   font-size: 14px;
   font-weight: 800;
+}
+
+/* Parcelamento | Divisão: duas colunas iguais; em telas abaixo de 300 px (área útil abaixo de 260 px),
+   uma embaixo da outra. O texto nunca é cortado: quebra em duas linhas dentro da caixa. */
+.plan-row {
+  container-type: inline-size;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plan-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container (max-width: 259px) {
+  .plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.plan-box {
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: var(--app-radius-control);
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plan-box .strong {
+  font-size: 14px;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+}
+
+.stepper.compact button {
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  border-radius: 6px;
+}
+
+.dark-card .row.sub {
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 /* Linhas de aviso do cartão escuro de resumo (não é a observação). */

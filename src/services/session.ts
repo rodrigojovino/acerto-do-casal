@@ -117,6 +117,12 @@ export function sessionReady(): Promise<void> {
 }
 
 /** Primeiro nome de um membro, para os textos da tela ("Bia te deve…"). */
+/** Primeiro nome do membro como está no grupo (também o de quem vê, sem trocar por "Você"): para as iniciais. */
+export function memberFirstName(uid: string | null | undefined): string {
+  const full = uid ? (currentGroup.value?.memberNames[uid] ?? '') : '';
+  return full.trim().split(/\s+/)[0] || '?';
+}
+
 export function firstNameOf(uid: string | null | undefined): string {
   if (!uid) return '';
   if (uid === currentUser.value?.uid) return 'Você';

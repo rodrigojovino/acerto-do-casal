@@ -227,6 +227,10 @@
           :items="noteItems"
           :issuer="expense?.receipt.type === 'nfce' ? (expense.receipt.nfceData?.issuerName ?? noteItems.issuerName) : undefined"
           :device="isDeviceItems(noteItems)"
+          :marks="noteMarks.marks"
+          :marks-warning="noteMarks.warning"
+          :partner-name="partnerFirstName"
+          :initials="initials"
           @close="itemsOpen = false"
         />
       </ion-modal>
@@ -280,7 +284,8 @@ import { closedMonths } from '@/services/months';
 import { formatCnpj, readNfceOnDevice, retryNfceOnServer } from '@/services/nfce';
 import { UF_BY_CODE, parseAccessKey } from '../../functions/src/nfce';
 import { pendingPhotoIds } from '@/services/photoQueue';
-import { firstNameOf, group, partnerFirstName, partnerUid, user } from '@/services/session';
+import { firstNameOf, group, memberFirstName, partnerFirstName, partnerUid, user } from '@/services/session';
+import { coupleInitials, marksMatch, readMarks, type ViewerMark } from '@/domain/itemMarks';
 
 const route = useRoute();
 const router = useRouter();
@@ -542,6 +547,30 @@ const itemsNotSaved = computed(() => {
   const r = expense.value?.receipt;
   if (r?.type !== 'nfce' || nfceItemsByKey.value.has(r.nfceKey)) return null;
   return rejectedItems.value.find((x) => x.groupId === group.value?.id && x.key === r.nfceKey) ?? null;
+});
+
+/** Iniciais do casal (a mesma pessoa tem a mesma inicial para quem vê). */
+const initials = computed(() => {
+  const [mine, partner] = coupleInitials(memberFirstName(myUid.value), memberFirstName(partnerUid.value));
+  return { mine, partner };
+});
+
+/**
+ * Marcações dos itens (v0.9.2), relativas a quem vê: as do gasto ou, numa
+ * série, as da parcela 1. Se os itens gravados mudaram (os oficiais
+ * substituíram os lidos no aparelho), não mostra as marcações e avisa.
+ */
+const noteMarks = computed<{ marks: ViewerMark[] | null; warning: string | null }>(() => {
+  const e = expense.value;
+  const items = noteItems.value;
+  if (!e || !items) return { marks: null, warning: null };
+  const first = e.installment ? seriesParcels.value.find((p) => p.installment?.index === 1) : e;
+  const stored = first?.itemMarks ?? e.itemMarks;
+  if (!stored) return { marks: null, warning: null };
+  if (!marksMatch(stored, items)) {
+    return { marks: null, warning: 'As marcações dos itens foram feitas em itens que não correspondem a estes (a nota foi atualizada). Os valores "só meu / só de" do gasto continuam como foram lançados.' };
+  }
+  return { marks: readMarks(stored.m, myUid.value, e.payerUid), warning: null };
 });
 
 /** Itens lidos no aparelho (sem conferência da SEFAZ), para o título e o detalhe. */
