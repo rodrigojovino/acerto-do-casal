@@ -336,7 +336,7 @@ describe('nova consulta da NFC-e ("Tentar conferir de novo") pelo app: recusada'
     });
   }
 
-  it('o app não volta mais a conferência para pendente: a nova tentativa é só pela Function retryNfce (com o limite de 15 minutos)', async () => {
+  it('o app não volta mais a conferência para pendente: a nova tentativa é só pela Function retryNfce (com o limite de 1 minuto)', async () => {
     await seedOne(failed);
     await assertFails(db(A).doc(expPath('nota')).update(retry));
   });

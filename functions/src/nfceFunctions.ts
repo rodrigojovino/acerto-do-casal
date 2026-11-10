@@ -1,10 +1,11 @@
 import './options.js';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { FieldValue, Timestamp, getFirestore, type DocumentReference } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore, type DocumentData, type DocumentReference } from 'firebase-admin/firestore';
 import { logger } from 'firebase-functions';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { NfceError, fetchNfce, parseNfceQr, readNfcePage, type NfceItems, type NfceResult } from './nfce.js';
+import { CACHE_TTL_MS, RUNNING_STALE_MS, cacheDecision, waitDeadline, type CacheState, type CachedResult } from './nfceCache.js';
 import { retryWindow } from './nfceRetry.js';
 
 if (getApps().length === 0) initializeApp();
@@ -16,7 +17,7 @@ const db = getFirestore();
  * cada nota tem no máximo duas consultas no total (uma no formulário, pelo
  * servidor ou pelo aparelho, e uma aqui, só se o formulário não tentou), e
  * nada se repete sozinho. A nova tentativa manual ("Tentar conferir de novo")
- * é limitada a uma a cada 15 minutos por nota, contada aqui no servidor.
+ * é limitada a uma por minuto por nota, contada aqui no servidor.
  */
 
 // ---- Chave de configuração: `config/nfce.sefazEnabled` (sem o documento: ligada) ----
@@ -33,11 +34,16 @@ async function sefazEnabled(): Promise<boolean> {
   return value;
 }
 
+const emulator = () => process.env.FUNCTIONS_EMULATOR === 'true';
+
 /**
  * Página da nota: a da SEFAZ-SP ou, no emulador, uma página fictícia gravada
- * pelos testes em `emulatorFixtures/sefaz_{chave}` (sem rede). A conferência e
- * os itens saem da mesma página. Registra no log o tipo de cada falha (sem
- * dados da nota), para diagnóstico.
+ * pelos testes em `emulatorFixtures/sefaz_{chave}` (sem rede; sem a página, o
+ * emulador falha como "sem resposta" e nunca consulta a SEFAZ de verdade). No
+ * emulador, cada consulta é contada em `emulatorFixtures/sefazCalls_{chave}` e
+ * a página pode demorar (`delayMs`), para os testes de leituras simultâneas.
+ * A conferência e os itens saem da mesma página. Registra no log o tipo de
+ * cada falha (sem dados da nota), para diagnóstico.
  */
 async function consultSefaz(
   url: string,
@@ -47,12 +53,20 @@ async function consultSefaz(
   const started = Date.now();
   try {
     let page: { result: NfceResult; items: NfceItems | null };
-    if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    // URL inválida ou de fora de SP: recusada antes de qualquer rede (também no emulador).
+    if (!parseNfceQr(url).spUrl) throw new NfceError('not_sp', 'A conferência automática é só para notas de SP.');
+    if (emulator()) {
+      await db.doc(`emulatorFixtures/sefazCalls_${key}`).set({ count: FieldValue.increment(1) }, { merge: true });
       const fixture = await db.doc(`emulatorFixtures/sefaz_${key}`).get();
-      page = fixture.exists ? readNfcePage(url, fixture.get('html') as string) : readNfcePage(url, (await fetchNfce(url)).html);
+      const delayMs = Number(fixture.get('delayMs') ?? 0);
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      if (fixture.exists) page = readNfcePage(url, fixture.get('html') as string);
+      else if (process.env.SEFAZ_EMULATOR_NETWORK === 'true') page = readNfcePage(url, (await fetchNfce(url)).html);
+      else throw new NfceError('network', 'Sem página fictícia da nota no emulador.');
     } else {
       page = readNfcePage(url, (await fetchNfce(url)).html);
     }
+    if (page.result.key !== key) throw new NfceError('mismatch', 'A chave da nota não confere.');
     logger.info('consulta da SEFAZ', { origin, ok: true, ms: Date.now() - started });
     return page;
   } catch (err) {
@@ -67,31 +81,139 @@ async function consultSefaz(
   }
 }
 
-// ---- Resultado conferido pelo servidor no formulário (`nfceCache/{chave}`, só Functions) ----
-const CACHE_DAYS = 7;
+// ---- Uma consulta por nota (`nfceCache/{chave}`, só Functions) ----
+// Quem chega primeiro toma o marcador "em consulta" numa transação; quem chega
+// durante a consulta espera o resultado dela (até o marcador ficar abandonado,
+// 40 s) em vez de consultar. O resultado conferido fica 30 dias.
 
 function cacheRef(key: string): DocumentReference {
   return db.doc(`nfceCache/${key}`);
 }
 
-/** Guarda o que o servidor conferiu no formulário, para o gatilho não consultar de novo (apagado por TTL). */
-async function saveCache(key: string, result: NfceResult, items: NfceItems | null): Promise<void> {
-  await cacheRef(key)
-    .set({
-      result: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date },
-      items,
-      fetchedAt: FieldValue.serverTimestamp(),
-      expireAt: Timestamp.fromMillis(Date.now() + CACHE_DAYS * 24 * 60 * 60 * 1000),
-    })
-    .catch((err) => logger.warn('Resultado da nota não guardado', { err: String(err) }));
+type CacheSnapshot = CacheState & { items?: NfceItems | null };
+
+function toCacheState(data: DocumentData | undefined): CacheSnapshot | null {
+  if (!data) return null;
+  const ms = (t: unknown) => (t instanceof Timestamp ? t.toMillis() : undefined);
+  return {
+    state: data.state as CacheState['state'],
+    startedAt: ms(data.startedAt),
+    expireAt: ms(data.expireAt),
+    result: (data.result as CachedResult | undefined) ?? null,
+    items: (data.items as NfceItems | null | undefined) ?? null,
+  };
 }
 
-async function readCache(key: string): Promise<{ result: NfceReceipt['nfceData']; items: NfceItems | null } | null> {
-  const doc = await cacheRef(key).get();
-  if (!doc.exists) return null;
-  const expireAt = doc.get('expireAt') as Timestamp | undefined;
-  if (expireAt && expireAt.toMillis() < Date.now()) return null;
-  return { result: doc.get('result') as NfceReceipt['nfceData'], items: (doc.get('items') as NfceItems | null) ?? null };
+/** Lê o registro da nota (sem tomar nada). */
+async function peekCache(key: string): Promise<CacheSnapshot | null> {
+  return toCacheState((await cacheRef(key).get()).data());
+}
+
+/**
+ * Numa transação: resultado válido ('cached'), outra consulta em andamento
+ * ('wait') ou a vez desta chamada ('consult', com o marcador já gravado).
+ */
+async function takeTurn(key: string): Promise<{ decision: 'cached' | 'wait' | 'consult'; doc: CacheSnapshot | null }> {
+  return db.runTransaction(async (tx) => {
+    const doc = toCacheState((await tx.get(cacheRef(key))).data());
+    const decision = cacheDecision(doc, Date.now());
+    if (decision === 'consult') {
+      tx.set(cacheRef(key), {
+        state: 'running',
+        startedAt: Timestamp.now(),
+        expireAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS),
+      });
+    }
+    return { decision, doc };
+  });
+}
+
+/** Espera a consulta em andamento terminar (ou o marcador ficar abandonado, ou `maxWaitMs`). */
+async function awaitResult(key: string, first: CacheSnapshot, maxWaitMs: number): Promise<CacheSnapshot | null> {
+  const until = Math.min(waitDeadline(first, Date.now()), Date.now() + maxWaitMs);
+  let doc: CacheSnapshot | null = first;
+  while (Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 1000));
+    doc = await peekCache(key);
+    if (cacheDecision(doc, Date.now()) !== 'wait') return doc;
+  }
+  return doc;
+}
+
+/**
+ * Grava o resultado da consulta. Conferida: tenta duas vezes e devolve se
+ * gravou (a `resolveNfce` só responde "ok" com o resultado guardado, para o
+ * gatilho encontrá-lo). Falha: uma vez, sem insistir.
+ */
+async function storeResult(key: string, page: { result: NfceResult; items: NfceItems | null } | null): Promise<boolean> {
+  const data = page
+    ? {
+        state: 'ok',
+        result: { issuerName: page.result.issuerName, totalCents: page.result.totalCents, date: page.result.date },
+        items: page.items,
+        fetchedAt: FieldValue.serverTimestamp(),
+        expireAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS),
+      }
+    : { state: 'failed', fetchedAt: FieldValue.serverTimestamp(), expireAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS) };
+  for (let attempt = 1; attempt <= (page ? 2 : 1); attempt++) {
+    try {
+      // Testes: simula a falha ao gravar o resultado.
+      if (emulator() && (await db.doc(`emulatorFixtures/sefaz_${key}`).get()).get('failCacheWrites') === true) {
+        throw new Error('gravação do resultado recusada (teste)');
+      }
+      await cacheRef(key).set(data);
+      return true;
+    } catch (err) {
+      logger.warn('Resultado da nota não guardado', { attempt, err: String(err) });
+    }
+  }
+  return false;
+}
+
+interface Consulted {
+  result: CachedResult;
+  items: NfceItems | null;
+  /** Veio do registro (sem consulta à SEFAZ). */
+  fromCache: boolean;
+  /** O resultado ficou guardado para o gatilho. */
+  stored: boolean;
+}
+
+/**
+ * A nota pelo registro ou, na vez desta chamada, uma consulta à SEFAZ (uma
+ * por nota, mesmo com chamadas simultâneas). Quem espera outra consulta e ela
+ * falha recebe a falha dela, sem consultar de novo.
+ */
+async function consultOnce(
+  url: string,
+  key: string,
+  origin: 'resolveNfce' | 'checkNfce' | 'retryNfce',
+  maxWaitMs: number,
+): Promise<Consulted> {
+  let turn = await takeTurn(key);
+  if (turn.decision === 'wait' && turn.doc) {
+    const after = await awaitResult(key, turn.doc, maxWaitMs);
+    if (cacheDecision(after, Date.now()) === 'cached' && after?.result) {
+      return { result: after.result, items: after.items ?? null, fromCache: true, stored: true };
+    }
+    if (after?.state === 'failed') throw new NfceError('blocked', 'A consulta desta nota feita agora há pouco não deu certo.');
+    // Ainda em andamento (esgotou `maxWaitMs`) ou abandonado no meio da espera.
+    turn = await takeTurn(key);
+    if (turn.decision !== 'consult') throw new NfceError('network', 'A consulta desta nota ainda está em andamento.');
+  }
+  if (turn.decision === 'cached' && turn.doc?.result) {
+    return { result: turn.doc.result, items: turn.doc.items ?? null, fromCache: true, stored: true };
+  }
+  let page: { result: NfceResult; items: NfceItems | null };
+  try {
+    page = await consultSefaz(url, key, origin);
+  } catch (err) {
+    await storeResult(key, null);
+    throw err;
+  }
+  const stored = await storeResult(key, page);
+  const { issuerName, totalCents, date } = page.result;
+  return { result: { issuerName, totalCents, date }, items: page.items, fromCache: false, stored };
 }
 
 /** `approval.byUid` quando quem confirma é a conferência da nota, não uma pessoa. */
@@ -99,18 +221,26 @@ export const NFCE_APPROVER = 'nfce';
 
 /**
  * Pré-preenchimento: o app manda a URL do QR (online) e recebe valor, data e
- * emitente; uma tentativa. Deu certo: guarda o resultado conferido (com os
- * itens) para o gatilho gravar "conferida" sem consultar de novo.
+ * emitente. Nota já conferida (o mesmo QR lido de novo): o resultado guardado,
+ * sem consultar. Senão, uma tentativa (ou a espera de outra em andamento para a
+ * mesma nota). Só responde "ok" depois de guardar o resultado (com os itens),
+ * para o gatilho gravar "conferida" sem consultar de novo; sem conseguir
+ * guardar, responde falha (o app segue para a leitura no aparelho ou o plano B).
+ * Os itens da resposta são os guardados: o formulário mostra exatamente os que
+ * o gatilho vai gravar.
  */
-export const resolveNfce = onCall({ timeoutSeconds: 30 }, async (request): Promise<NfceResult> => {
+export const resolveNfce = onCall({ timeoutSeconds: 30 }, async (request): Promise<NfceResult & { items: NfceItems | null }> => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Entre com sua conta Google primeiro.');
   const url = typeof request.data?.url === 'string' ? request.data.url : '';
   try {
-    if (!(await sefazEnabled())) throw new NfceError('blocked', 'A consulta automática da SEFAZ está desligada.');
     const key = parseNfceQr(url).key;
-    const { result, items } = await consultSefaz(url, key, 'resolveNfce');
-    await saveCache(key, result, items);
-    return result;
+    const answer = (r: CachedResult, items: NfceItems | null | undefined) => ({ key, issuerCnpj: key.slice(6, 20), ...r, items: items ?? null });
+    const cached = await peekCache(key);
+    if (cacheDecision(cached, Date.now()) === 'cached' && cached?.result) return answer(cached.result, cached.items);
+    if (!(await sefazEnabled())) throw new NfceError('blocked', 'A consulta automática da SEFAZ está desligada.');
+    const consulted = await consultOnce(url, key, 'resolveNfce', 20_000);
+    if (!consulted.stored) throw new NfceError('network', 'A nota foi lida, mas o resultado não ficou guardado.');
+    return answer(consulted.result, consulted.items);
   } catch (err) {
     if (err instanceof NfceError) {
       const code = err.reason === 'network' || err.reason === 'blocked' ? 'unavailable' : 'failed-precondition';
@@ -192,6 +322,8 @@ async function saveItems(groupId: string, key: string, items: NfceItems | null, 
  * `nfceStatus: 'pending'` (a parcela 1, numa série):
  * - resultado já conferido pelo servidor no formulário (`nfceCache`): grava
  *   `ok`, os dados e os itens, sem consultar de novo;
+ * - consulta do formulário ainda em andamento (marcador com menos de 40 s):
+ *   espera o resultado dela, sem consultar;
  * - senão (lançado offline, ou versão web sem a leitura pelo aparelho): uma
  *   consulta; grava `ok` ou `failed`. Nunca repete sozinho;
  * - consulta desligada (`config/nfce.sefazEnabled: false`): `unchecked`, sem rede.
@@ -212,19 +344,20 @@ export const checkNfce = onDocumentWritten(
 
     let update: NfceUpdate;
     let items: NfceItems | null = null;
-    const cached = await readCache(receipt.nfceKey);
-    if (cached?.result) {
+    const cached = await peekCache(receipt.nfceKey);
+    const decision = cacheDecision(cached, Date.now());
+    if (decision === 'cached' && cached?.result) {
       update = { nfceStatus: 'ok', nfceData: cached.result };
-      items = cached.items;
-    } else if (!(await sefazEnabled())) {
+      items = cached.items ?? null;
+    } else if (decision !== 'wait' && !(await sefazEnabled())) {
       update = { nfceStatus: 'unchecked' };
     } else {
       try {
         if (!receipt.nfceUrl) throw new NfceError('not_sp', 'Nota sem URL de consulta.');
-        const { result, items: read } = await consultSefaz(receipt.nfceUrl, receipt.nfceKey, 'checkNfce');
-        if (result.key !== receipt.nfceKey) throw new NfceError('mismatch', 'A chave da nota não confere.');
-        items = read;
-        update = { nfceStatus: 'ok', nfceData: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date } };
+        // Espera a consulta do formulário em andamento até o marcador ficar abandonado (40 s).
+        const consulted = await consultOnce(receipt.nfceUrl, receipt.nfceKey, 'checkNfce', RUNNING_STALE_MS);
+        items = consulted.items;
+        update = { nfceStatus: 'ok', nfceData: consulted.result };
       } catch (err) {
         update = { nfceStatus: 'failed', nfceError: err instanceof NfceError ? err.reason : 'unknown' };
       }
@@ -237,14 +370,16 @@ export const checkNfce = onDocumentWritten(
 
 /**
  * "Tentar conferir de novo" (Detalhe, quem lançou): uma consulta pelo servidor
- * para uma NFC-e de SP ainda não conferida, no máximo uma a cada 15 minutos
+ * para uma NFC-e de SP ainda não conferida, no máximo uma por minuto
  * por nota (contada aqui, numa transação: vale para toques rápidos e para
- * outro aparelho). Deu certo: grava `ok`, os dados e os itens oficiais.
+ * outro aparelho). Antes de tudo, o resultado já guardado da nota (lida pelo
+ * servidor no formulário): grava `ok` e os itens sem consultar e sem gastar a
+ * tentativa. Deu certo: grava `ok`, os dados e os itens oficiais.
  * Falhou: devolve o motivo e quando tentar de novo (no Android, o app oferece
  * abrir a nota no aparelho, uma vez). Nunca em mês fechado.
  */
 export const retryNfce = onCall(
-  { timeoutSeconds: 30 },
+  { timeoutSeconds: 60 },
   async (request): Promise<{ ok: boolean; reason?: string; retryAt: number }> => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Entre com sua conta Google primeiro.');
@@ -268,7 +403,21 @@ export const retryNfce = onCall(
       throw new HttpsError('failed-precondition', 'Este gasto é de um mês fechado.');
     }
 
-    // Limite: uma tentativa a cada 15 minutos por nota, numa transação.
+    const installment = expense.get('installment') as { seriesId: string } | undefined;
+    const owner = installment ? db.doc(`groups/${groupId}/expenses/${installment.seriesId}`) : expense.ref;
+    const apply = async (consulted: { result: CachedResult; items: NfceItems | null }) => {
+      await applyResult(groupId, owner, receipt.nfceKey, installment?.seriesId ?? null, { nfceStatus: 'ok', nfceData: consulted.result }, false);
+      await saveItems(groupId, receipt.nfceKey, consulted.items, 'retryNfce');
+    };
+
+    // Resultado já guardado (a nota foi lida pelo servidor no formulário): sem consulta e sem gastar a tentativa.
+    const cached = await peekCache(receipt.nfceKey);
+    if (cacheDecision(cached, Date.now()) === 'cached' && cached?.result) {
+      await apply({ result: cached.result, items: cached.items ?? null });
+      return { ok: true, retryAt: 0 };
+    }
+
+    // Limite: uma tentativa por minuto por nota, numa transação.
     const limitRef = db.doc(`groups/${groupId}/nfceRetry/${receipt.nfceKey}`);
     const window = await db.runTransaction(async (tx) => {
       const last = (await tx.get(limitRef)).get('lastAt') as Timestamp | undefined;
@@ -281,14 +430,8 @@ export const retryNfce = onCall(
     }
 
     if (!(await sefazEnabled())) return { ok: false, reason: 'disabled', retryAt: window.retryAt };
-    const installment = expense.get('installment') as { seriesId: string } | undefined;
-    const owner = installment ? db.doc(`groups/${groupId}/expenses/${installment.seriesId}`) : expense.ref;
     try {
-      const { result, items } = await consultSefaz(receipt.nfceUrl, receipt.nfceKey, 'retryNfce');
-      if (result.key !== receipt.nfceKey) throw new NfceError('mismatch', 'A chave da nota não confere.');
-      const update: NfceUpdate = { nfceStatus: 'ok', nfceData: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date } };
-      await applyResult(groupId, owner, receipt.nfceKey, installment?.seriesId ?? null, update, false);
-      await saveItems(groupId, receipt.nfceKey, items, 'retryNfce');
+      await apply(await consultOnce(receipt.nfceUrl, receipt.nfceKey, 'retryNfce', 20_000));
       return { ok: true, retryAt: window.retryAt };
     } catch (err) {
       return { ok: false, reason: err instanceof NfceError ? err.reason : 'unknown', retryAt: window.retryAt };

@@ -5,7 +5,7 @@ import { SEFAZ_SP_CANONICAL, checkDigit } from '../../functions/src/nfce';
 import { clearAuth, closeApps, createTestEnv, signInAs, type TestUser } from './setup';
 
 // "Tentar conferir de novo" (Function retryNfce): uma consulta pelo servidor,
-// no máximo uma a cada 15 minutos por nota, contada no servidor. Sem rede: as
+// no máximo uma por minuto por nota, contada no servidor. Sem rede: as
 // páginas da SEFAZ são fictícias (emulatorFixtures/sefaz_{chave}).
 
 const GROUP = 'group-retry';
@@ -106,13 +106,13 @@ describe('retryNfce', () => {
     await seed(`groups/${GROUP}/expenses/e1`, expense(KEY, 'unchecked'));
     const r = await a.call<{ ok: boolean; retryAt: number }>('retryNfce', { groupId: GROUP, expenseId: 'e1' });
     expect(r.ok).toBe(true);
-    expect(r.retryAt).toBeGreaterThan(Date.now() + 14 * 60_000);
+    expect(r.retryAt).toBeGreaterThan(Date.now() + 50_000);
     const d = await read(`groups/${GROUP}/expenses/e1`);
     expect(d?.receipt).toMatchObject({ nfceStatus: 'ok', nfceData: { issuerName: 'LOJA TESTE LTDA', totalCents: 5548, date: '2026-10-05' } });
     expect(await read(`groups/${GROUP}/nfceItems/${KEY}`)).toMatchObject({ source: 'retryNfce', totalCents: 5548 });
   }, 60_000);
 
-  it('uma tentativa a cada 15 minutos por nota: a segunda, logo depois, é recusada', async () => {
+  it('uma tentativa por minuto por nota: a segunda, logo depois, é recusada', async () => {
     await seed(`groups/${GROUP}/expenses/e2`, expense(KEY_BLOCKED, 'failed'));
     const first = await a.call<{ ok: boolean; reason?: string }>('retryNfce', { groupId: GROUP, expenseId: 'e2' });
     expect(first).toMatchObject({ ok: false, reason: 'blocked' });
@@ -130,9 +130,9 @@ describe('retryNfce', () => {
     expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
   }, 60_000);
 
-  it('passados os 15 minutos, libera de novo', async () => {
+  it('passado 1 minuto, libera de novo', async () => {
     await seed(`groups/${GROUP}/expenses/e4`, expense(KEY, 'failed'));
-    await seed(`groups/${GROUP}/nfceRetry/${KEY}`, { lastAt: new Date(Date.now() - 16 * 60_000), byUid: a.uid });
+    await seed(`groups/${GROUP}/nfceRetry/${KEY}`, { lastAt: new Date(Date.now() - 61_000), byUid: a.uid });
     expect((await a.call<{ ok: boolean }>('retryNfce', { groupId: GROUP, expenseId: 'e4' })).ok).toBe(true);
   }, 60_000);
 
