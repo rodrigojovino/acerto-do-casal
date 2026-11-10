@@ -310,6 +310,24 @@ service cloud.firestore {
           && first.get('categoryId', null) == data.get('categoryId', null);
       }
 
+      // Parte só do outro membro (v0.9.2), opcional (ausente = 0): inteiro >= 0 e,
+      // com a parte pessoal, nunca mais que o total.
+      function validParts(data) {
+        let partner = data.get('partnerOnlyCents', 0);
+        return data.personalCents is int
+          && data.personalCents >= 0
+          && partner is int
+          && partner >= 0
+          && data.personalCents + partner <= data.totalCents;
+      }
+
+      // Marcações dos itens da NFC-e (itemMarks: { m, sig }): informativas (a conta
+      // usa só os totais) e SEM validação de formato aqui, para caber no limite de
+      // 1000 expressões no lote mais pesado (48 parcelas com nota, itens e partes:
+      // medido na v0.9.2, a validação deixava folga de só 4). Só quem lança grava
+      // (isAuthorWrite); o outro membro não muda (isReviewWrite); numa série, a
+      // edição não muda; o app monta o formato (src/services/expenseData.ts).
+
       // Observação opcional, até 300 caracteres (vazia: o campo não existe).
       function validNote(data) {
         return !data.keys().hasAny(['note'])
@@ -324,9 +342,7 @@ service cloud.firestore {
           && data.description.size() <= 80
           && data.totalCents is int
           && data.totalCents > 0
-          && data.personalCents is int
-          && data.personalCents >= 0
-          && data.personalCents <= data.totalCents
+          && validParts(data)
           && data.payerSharePct is int
           && data.payerSharePct >= 0
           && data.payerSharePct <= 100
@@ -357,10 +373,12 @@ service cloud.firestore {
       // - editar um pendente: continua pendente, exceto ao anexar comprovante
       //   (o gasto nunca foi aprovado), que o confirma.
       // Nunca grava aprovação nem recusa.
-      // Divisão diferente de 50/50 vai sempre para aprovação do outro membro,
-      // mesmo com comprovante (criação, anexar comprovante, valor do variável).
+      // Divisão diferente de 50/50 e parte só do outro membro (v0.9.2) vão
+      // sempre para aprovação do outro membro, mesmo com comprovante (criação,
+      // anexar comprovante, valor do variável).
       function authorStatus(data, isNew) {
         return !isNew && resource.data.status in ['confirmed', 'returned'] || data.receipt.type == 'none' || data.payerSharePct != 50
+            || data.get('partnerOnlyCents', 0) > 0
           ? 'pending_approval'
           : 'confirmed';
       }
@@ -452,7 +470,7 @@ service cloud.firestore {
       }
 
       function isAuthorWrite(isNew) {
-        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note', 'everConfirmed', 'categoryId']))
+        return request.resource.data.keys().hasOnly(expenseKeys().concat(['recurringId', 'installment', 'note', 'everConfirmed', 'categoryId', 'partnerOnlyCents', 'itemMarks']))
           // Editar apaga o pedido de exclusão (aberto ou recusado); criar não tem pedido.
           && !request.resource.data.keys().hasAny(['deletionRequest'])
           && (isNew ? newEverConfirmed() : keepsEverConfirmed())
@@ -464,7 +482,7 @@ service cloud.firestore {
                   && (
                     !isInstallment(resource.data)
                     || !request.resource.data.diff(resource.data).affectedKeys()
-                         .hasAny(['totalCents', 'personalCents', 'date', 'competence'])
+                         .hasAny(['totalCents', 'personalCents', 'partnerOnlyCents', 'itemMarks', 'date', 'competence'])
                   ))
           && request.resource.data.status == authorStatus(request.resource.data, isNew)
           && request.resource.data.updatedAt == request.time;

@@ -24,13 +24,29 @@ export interface ExpenseInput {
   /** Observação opcional (até MAX_NOTE caracteres); vazia = sem observação. */
   note?: string;
   totalCents: Cents;
+  /** Parte só de quem pagou (relativa a quem pagou; a tela converte com src/domain/parts.ts). */
   personalCents: Cents;
+  /** Parte só do outro membro (v0.9.2); 0 ou ausente = sem o campo no documento. */
+  partnerOnlyCents?: Cents;
   payerUid: string;
   payerSharePct: number;
   date: IsoDate;
   receipt: ReceiptChoice;
   /** Categoria (`groups/{g}/categories/{id}`); ausente = "Sem categoria". */
   categoryId?: string;
+  /** Marcações dos itens da NFC-e (informativas; numa série, só na parcela 1). */
+  itemMarks?: ItemMarks;
+}
+
+/**
+ * Marcações dos itens da NFC-e, relativas a QUEM PAGOU: uma letra por item, na
+ * ordem da nota ('s' dividido, 'p' só de quem pagou, 'o' só do outro membro), e
+ * a assinatura das descrições e valores (para conferir se ainda correspondem aos
+ * itens gravados). Só informativas: a conta usa os totais.
+ */
+export interface ItemMarks {
+  m: string;
+  sig: string;
 }
 
 /** Comprovante escolhido no formulário. */
@@ -137,6 +153,18 @@ function noteField<D>(note: string | undefined, removeField?: D) {
   return removeField === undefined ? {} : { note: removeField };
 }
 
+/** Parte do parceiro gravada só quando maior que zero; zero na edição tira o campo. */
+function partnerOnlyField<D>(cents: Cents | undefined, removeField?: D) {
+  if (cents && cents > 0) return { partnerOnlyCents: cents };
+  return removeField === undefined ? {} : { partnerOnlyCents: removeField };
+}
+
+/** Marcações dos itens; sem elas, o campo não existe (na edição, sai do documento). */
+function itemMarksField<D>(marks: ItemMarks | undefined, removeField?: D) {
+  if (marks) return { itemMarks: { m: marks.m, sig: marks.sig } };
+  return removeField === undefined ? {} : { itemMarks: removeField };
+}
+
 /** Categoria gravada; sem categoria, o campo não existe (na edição, sai do documento). */
 function categoryField<D>(categoryId: string | undefined, removeField?: D) {
   if (categoryId) return { categoryId };
@@ -163,10 +191,13 @@ export function authorStatus(
   receipt: ReceiptChoice,
   currentStatus?: ExpenseStatus,
   payerSharePct = EVEN_SPLIT_PCT,
+  partnerOnlyCents: Cents = 0,
 ): 'pending_approval' | 'confirmed' {
   if (currentStatus === 'confirmed' || currentStatus === 'returned') return 'pending_approval';
   // Divisão diferente de 50/50 vai para aprovação, mesmo com comprovante.
   if (payerSharePct !== EVEN_SPLIT_PCT) return 'pending_approval';
+  // Parte só do outro membro também (v0.9.2), mesmo com comprovante.
+  if (partnerOnlyCents > 0) return 'pending_approval';
   return receipt.type === 'none' ? 'pending_approval' : 'confirmed';
 }
 
@@ -183,11 +214,13 @@ function everConfirmedField(status: ExpenseStatus, already = false) {
 
 /** Gasto novo: pendente sem comprovante; confirmado com foto ou QR. */
 export function newExpenseData<T>(input: ExpenseInput, uid: string, competence: Competence, ids: ExpenseIds, now: T) {
-  const status = authorStatus(input.receipt, undefined, input.payerSharePct);
+  const status = authorStatus(input.receipt, undefined, input.payerSharePct, input.partnerOnlyCents);
   return {
     ...fields(input, competence),
+    ...partnerOnlyField(input.partnerOnlyCents),
     ...noteField(input.note),
     ...categoryField(input.categoryId),
+    ...itemMarksField(input.itemMarks),
     receipt: receiptData(input.receipt, ids),
     status,
     ...everConfirmedField(status),
@@ -211,11 +244,13 @@ export function expenseUpdateData<T, D>(
   now: T,
   removeField: D,
 ) {
-  const status = authorStatus(input.receipt, current.status, input.payerSharePct);
+  const status = authorStatus(input.receipt, current.status, input.payerSharePct, input.partnerOnlyCents);
   return {
     ...fields(input, competence),
+    ...partnerOnlyField(input.partnerOnlyCents, removeField),
     ...noteField(input.note, removeField),
     ...categoryField(input.categoryId, removeField),
+    ...itemMarksField(input.itemMarks, removeField),
     receipt: receiptData(input.receipt, ids, current.receipt),
     status,
     ...everConfirmedField(status, current.everConfirmed),
@@ -328,8 +363,9 @@ export interface InstallmentChoice {
 /**
  * Série nova: um documento por parcela (id da parcela 1 = id da série), com o
  * mesmo comprovante da compra (a foto fica no caminho da série) e o mesmo
- * status pela regra do comprovante. `input.totalCents` e `personalCents` são os
- * da compra inteira.
+ * status pela regra do comprovante. `input.totalCents`, `personalCents` e
+ * `partnerOnlyCents` são os da compra inteira (as partes vão para as parcelas
+ * pelo arredondamento acumulado). As marcações dos itens ficam só na parcela 1.
  */
 export function newInstallmentSeriesData<T>(
   input: ExpenseInput,
@@ -339,10 +375,11 @@ export function newInstallmentSeriesData<T>(
   now: T,
 ) {
   const receipt = receiptData(input.receipt, { groupId: ids.groupId, expenseId: ids.seriesId });
-  const status = authorStatus(input.receipt, undefined, input.payerSharePct);
+  const status = authorStatus(input.receipt, undefined, input.payerSharePct, input.partnerOnlyCents);
   return planInstallments({
     totalCents: input.totalCents,
     personalCents: input.personalCents,
+    partnerOnlyCents: input.partnerOnlyCents ?? 0,
     count: choice.count,
     firstMonth: choice.firstMonth,
     purchaseDate: input.date,
@@ -354,6 +391,8 @@ export function newInstallmentSeriesData<T>(
       ...categoryField(input.categoryId),
       totalCents: p.totalCents,
       personalCents: p.personalCents,
+      ...partnerOnlyField(p.partnerOnlyCents),
+      ...(p.index === 1 ? itemMarksField(input.itemMarks) : {}),
       payerUid: input.payerUid,
       payerSharePct: input.payerSharePct,
       date: p.date,
@@ -392,12 +431,13 @@ export interface SeriesEditInput {
  */
 export function installmentUpdateData<T, D>(
   input: SeriesEditInput,
-  current: { receipt: StoredReceipt; status: ExpenseStatus; everConfirmed?: boolean },
+  current: { receipt: StoredReceipt; status: ExpenseStatus; everConfirmed?: boolean; partnerOnlyCents?: Cents },
   ids: { groupId: string; seriesId: string },
   now: T,
   removeField: D,
 ) {
-  const status = authorStatus(input.receipt, current.status, input.payerSharePct);
+  // As partes da compra não mudam na edição da série; a do parceiro, se houver, mantém a aprovação obrigatória.
+  const status = authorStatus(input.receipt, current.status, input.payerSharePct, current.partnerOnlyCents);
   return {
     description: input.description.trim(),
     ...noteField(input.note, removeField),

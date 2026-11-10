@@ -35,6 +35,7 @@ import {
   validationData,
   type ExpenseInput,
   type InstallmentChoice,
+  type ItemMarks,
   type ReceiptChoice,
   type SeriesEditInput,
   type StoredReceipt,
@@ -84,6 +85,8 @@ export interface Expense extends SettlementExpense {
   note?: string;
   /** Categoria (ausente = "Sem categoria"); numa série, a mesma em todas as parcelas. */
   categoryId?: string;
+  /** Marcações dos itens da NFC-e (informativas; numa série, só na parcela 1). */
+  itemMarks?: ItemMarks;
   /** Já foi confirmado uma vez (marca permanente): só sai pelo pedido de exclusão. */
   everConfirmed?: boolean;
   /** Pedido de exclusão de quem lançou: aberto (o outro aprova ou recusa) ou recusado. */
@@ -167,6 +170,8 @@ function toExpense(snap: DocumentSnapshot): Expense {
     description: data.description,
     totalCents: data.totalCents,
     personalCents: data.personalCents,
+    partnerOnlyCents: data.partnerOnlyCents ?? 0,
+    itemMarks: data.itemMarks,
     payerUid: data.payerUid,
     payerSharePct: data.payerSharePct,
     date: data.date,

@@ -27,6 +27,7 @@ export interface PlannedInstallment {
   count: number;
   totalCents: Cents;
   personalCents: Cents;
+  partnerOnlyCents: Cents;
   competence: Competence;
   /** Dia da compra no mês da parcela (29 a 31 viram o último dia em meses curtos). */
   date: IsoDate;
@@ -45,6 +46,7 @@ export function installmentExpenseId(seriesId: string, index: number): string {
 export function planInstallments(input: {
   totalCents: Cents;
   personalCents: Cents;
+  partnerOnlyCents?: Cents;
   count: number;
   firstMonth: Competence;
   purchaseDate: IsoDate;
@@ -58,6 +60,7 @@ export function planInstallments(input: {
   return splitInstallments({
     totalCents: input.totalCents,
     personalCents: input.personalCents,
+    partnerOnlyCents: input.partnerOnlyCents ?? 0,
     count,
     firstCompetence: input.firstMonth,
   }).map((p) => ({ ...p, date: dueDate(p.competence, day) }));

@@ -106,3 +106,56 @@ describe('NFC-e de SP: estado depois das tentativas do formulário', () => {
     expect(receiptData({ type: 'nfce', nfceKey: KEY, entry: 'qr', sefaz: 'pending' }, ids)).toMatchObject({ nfceStatus: 'unchecked' });
   });
 });
+
+describe('parte do parceiro e marcações dos itens (v0.9.2)', () => {
+  const base = {
+    description: 'Mercado',
+    totalCents: 10000,
+    personalCents: 1000,
+    payerUid: 'a',
+    payerSharePct: 50,
+    date: '2026-11-05',
+    receipt: { type: 'nfce' as const, nfceKey: KEY, entry: 'typed' as const },
+  };
+
+  it('com comprovante e 50/50, a parte do parceiro manda para aprovação', () => {
+    expect(newExpenseData(base, 'a', '2026-11', ids, 'T').status).toBe('confirmed');
+    const withPartner = newExpenseData({ ...base, partnerOnlyCents: 2000 }, 'a', '2026-11', ids, 'T');
+    expect(withPartner).toMatchObject({ status: 'pending_approval', partnerOnlyCents: 2000 });
+    expect(withPartner).not.toHaveProperty('everConfirmed');
+  });
+
+  it('sem parte do parceiro, o campo não existe; na edição, zerar tira o campo', () => {
+    expect(newExpenseData(base, 'a', '2026-11', ids, 'T')).not.toHaveProperty('partnerOnlyCents');
+    const edit = expenseUpdateData({ ...base, partnerOnlyCents: 0 }, '2026-11', ids, { receipt: { type: 'none' }, status: 'pending_approval' }, 'T', 'DEL');
+    expect(edit.partnerOnlyCents).toBe('DEL');
+    expect(edit.itemMarks).toBe('DEL');
+  });
+
+  it('série: as partes vão para as parcelas (somas exatas) e as marcações só na parcela 1', () => {
+    const marks = { m: 'sps', sig: '0a1b2c3d' };
+    const parcels = newInstallmentSeriesData(
+      { ...base, totalCents: 100000, personalCents: 1001, partnerOnlyCents: 2999, itemMarks: marks },
+      { count: 3, firstMonth: '2026-11' },
+      'a',
+      { groupId: 'g', seriesId: 's' },
+      'T',
+    );
+    const sum = (k: 'personalCents' | 'partnerOnlyCents') => parcels.reduce((s, p) => s + ((p.data as unknown as Record<string, number | undefined>)[k] ?? 0), 0);
+    expect(sum('personalCents')).toBe(1001);
+    expect(sum('partnerOnlyCents')).toBe(2999);
+    expect(parcels.every((p) => p.data.status === 'pending_approval')).toBe(true);
+    expect(parcels.map((p) => 'itemMarks' in p.data)).toEqual([true, false, false]);
+  });
+
+  it('edição da série com parte do parceiro: anexar comprovante não confirma', () => {
+    const data = installmentUpdateData(
+      { description: 'X', payerUid: 'a', payerSharePct: 50, receipt: { type: 'nfce', nfceKey: KEY, entry: 'typed' } },
+      { receipt: { type: 'none' }, status: 'pending_approval', partnerOnlyCents: 500 },
+      { groupId: 'g', seriesId: 's' },
+      'T',
+      'DEL',
+    );
+    expect(data.status).toBe('pending_approval');
+  });
+});
