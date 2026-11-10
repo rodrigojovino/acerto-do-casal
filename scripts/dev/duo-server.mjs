@@ -60,7 +60,7 @@ export const PEOPLE = {
 };
 const R = PEOPLE.rodrigo.uid;
 const Q = PEOPLE.queila.uid;
-const GROUP = 'grupo-duo';
+const GROUP = 'grupoDuo01'; // só letras e números: as Functions de fechamento conferem o id (ID_RE)
 
 function spToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
