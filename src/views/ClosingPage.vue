@@ -68,6 +68,22 @@
               <p v-else class="hint">Aguardando {{ partnerFirstName }} registrar o pagamento. Quem paga é quem registra.</p>
             </section>
 
+            <!-- Confirmação do comprovante do PIX: nada é enviado antes de "Registrar". -->
+            <ion-modal :is-open="pixState.kind !== 'idle' && !!pix" @did-dismiss="closePix">
+              <PixConfirmSheet
+                v-if="pix && pixState.kind !== 'idle'"
+                :photo-url="pix.url"
+                :amount-cents="pixState.amountCents"
+                :to-name="pixToName"
+                :changed-from="pixState.kind === 'confirming' ? pixState.changedFrom : undefined"
+                :busy="pixState.kind === 'sending'"
+                :error="pixError"
+                @register="confirmPix"
+                @change="changePix"
+                @close="closePix"
+              />
+            </ion-modal>
+
             <p v-if="!isOnline" class="alert-warn" role="status">Sem conexão: fechar e registrar o pagamento exigem internet.</p>
             <p v-if="reasons.includes('future')" class="hint">{{ title }} ainda não começou: mês futuro não pode ser fechado.</p>
             <p v-if="actionError" class="alert-error" role="alert">{{ actionError }}</p>
@@ -84,7 +100,9 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonPage, actionSheetController, alertController } from '@ionic/vue';
+import { IonContent, IonModal, IonPage, actionSheetController, alertController } from '@ionic/vue';
+import PixConfirmSheet from '@/components/PixConfirmSheet.vue';
+import { PIX_IDLE, mayUpload, pixStep, type PixEvent, type PixState } from '@/domain/pixFlow';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { closeBlockers, closeReasons, monthBreakdown, remainingTransfer, type Blocker } from '@/domain/closing';
@@ -99,6 +117,7 @@ import {
   newPaymentId,
   registerPayment,
   uploadPixPhoto,
+  AmountChangedError,
   watchMonth,
   type MonthDoc,
   type MonthPayment,
@@ -240,6 +259,67 @@ async function run(action: () => Promise<unknown>): Promise<boolean> {
   }
 }
 
+// ---- PIX: escolher a foto → confirmar na prévia → enviar e registrar (src/domain/pixFlow.ts) ----
+const pixState = ref<PixState>(PIX_IDLE);
+/** Foto escolhida (só no aparelho até "Registrar") e o id do pagamento (o nome da foto no Storage). */
+const pix = ref<{ blob: Blob; url: string; paymentId: string } | null>(null);
+const pixError = ref<string | null>(null);
+const pixToName = computed(() => (remaining.value ? firstNameOf(remaining.value.toUid) : partnerFirstName.value));
+
+function pixGo(event: PixEvent): void {
+  pixState.value = pixStep(pixState.value, event);
+}
+
+function dropPixPhoto(): void {
+  if (pix.value) URL.revokeObjectURL(pix.value.url);
+  pix.value = null;
+}
+
+function closePix(): void {
+  if (pixState.value.kind === 'sending') return;
+  pixGo({ type: 'close' });
+  dropPixPhoto();
+  pixError.value = null;
+}
+
+/** "Trocar foto": descarta a escolhida (nada foi enviado) e abre a escolha de novo. */
+async function changePix(): Promise<void> {
+  pixGo({ type: 'change' });
+  dropPixPhoto();
+  pixError.value = null;
+  await payPix();
+}
+
+/** "Registrar": envia a foto (uma vez) e registra com o valor confirmado; valor mudou → confirmar de novo, com a mesma foto. */
+async function confirmPix(): Promise<void> {
+  const g = group.value;
+  const chosen = pix.value;
+  if (!g || !chosen || pixState.value.kind !== 'confirming') return;
+  pixError.value = null;
+  pixGo({ type: 'register' });
+  const state = pixState.value as PixState;
+  if (state.kind !== 'sending') return;
+  uploading.value = remaining.value ? { ...remaining.value } : null;
+  try {
+    if (mayUpload(state)) {
+      await uploadPixPhoto(g.id, month, chosen.paymentId, chosen.blob);
+      pixGo({ type: 'uploaded' });
+    }
+    await registerPayment(g.id, month, 'pix', { paymentId: chosen.paymentId, expectedCents: state.amountCents });
+    pixGo({ type: 'done' });
+    dropPixPhoto();
+  } catch (err) {
+    if (err instanceof AmountChangedError) {
+      pixGo({ type: 'amountChanged', amountCents: err.remaining.amountCents });
+    } else {
+      pixGo({ type: 'failed' });
+      pixError.value = err instanceof Error && !('code' in err) ? err.message : closingErrorMessage(err);
+    }
+  } finally {
+    uploading.value = null;
+  }
+}
+
 async function payPix(): Promise<void> {
   const sheet = await actionSheetController.create({
     header: 'Comprovante do PIX',
@@ -255,15 +335,11 @@ async function payPix(): Promise<void> {
   await run(async () => {
     const photo = await pickReceiptPhoto(data);
     const r = remaining.value;
-    if (!photo || !group.value || !r) return;
-    uploading.value = { ...r };
-    try {
-      const paymentId = newPaymentId();
-      await uploadPixPhoto(group.value.id, month, paymentId, photo.data);
-      await registerPayment(group.value.id, month, 'pix', { paymentId, expectedCents: r.amountCents });
-    } finally {
-      uploading.value = null;
-    }
+    if (!photo || !r) return;
+    // Só a prévia: a foto fica no aparelho até "Registrar".
+    dropPixPhoto();
+    pix.value = { blob: photo.data, url: URL.createObjectURL(photo.data), paymentId: newPaymentId() };
+    pixGo({ type: 'photo', amountCents: r.amountCents });
   });
 }
 
