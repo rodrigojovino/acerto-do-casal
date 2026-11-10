@@ -1,8 +1,9 @@
 import { doc, getDocFromCache, getDocFromServer } from 'firebase/firestore';
 import { createStore, del, entries, set } from 'idb-keyval';
-import { readonly, ref, watch } from 'vue';
+import { computed, shallowRef, watch } from 'vue';
 import { launchState } from '@/domain/launches';
 import type { ExpenseInput, InstallmentChoice } from './expenseData';
+import type { DeviceItemsRead } from './nfceItemsData';
 import { db } from './firebase';
 import { serverUsedByOther } from './fiscalKeys';
 import { group } from './session';
@@ -26,6 +27,8 @@ export interface GuardedLaunch {
   installment?: InstallmentChoice;
   /** Cópia da foto do comprovante (a fila de fotos descarta a do gasto recusado). */
   photo?: Blob;
+  /** Itens da NFC-e lidos no aparelho, gravados no mesmo lote (relançar grava de novo, sem a SEFAZ). */
+  deviceItems?: DeviceItemsRead;
   savedAt: number;
 }
 
@@ -47,9 +50,9 @@ export interface RejectedLaunch extends GuardedLaunch {
   duplicateOf?: DuplicateOf;
 }
 
-const rejected = ref<RejectedLaunch[]>([]);
+const rejected = shallowRef<RejectedLaunch[]>([]);
 /** Lançamentos recusados pelas regras na sincronização (deste aparelho). */
-export const rejectedLaunches = readonly(rejected);
+export const rejectedLaunches = computed<readonly RejectedLaunch[]>(() => rejected.value);
 
 /** Guarda o lançamento até a confirmação do servidor. */
 export function rememberLaunch(launch: Omit<GuardedLaunch, 'savedAt'>): void {

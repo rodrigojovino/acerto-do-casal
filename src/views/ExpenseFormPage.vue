@@ -123,9 +123,25 @@
             <button class="link" type="button" @click="openDuplicate">Ver o gasto</button>
           </div>
           <p v-else-if="nfceMessage" class="nfce-msg" :class="nfceMessage.kind" role="status">{{ nfceMessage.text }}</p>
+          <div v-if="!duplicate && itemsNow.kind !== 'none'" class="items-state" :class="itemsNow.kind">
+            <p class="items-text" role="status" aria-live="polite">{{ itemsText }}</p>
+            <button v-if="itemsNow.kind === 'loaded'" class="btn outline items-see" type="button" @click="itemsOpen = true">
+              Ver itens
+            </button>
+            <p v-if="itemsDiff" class="items-diff" role="alert">{{ itemsDiff }}</p>
+          </div>
           <button v-if="!duplicate && spReceiptUrl" class="link see-note" type="button" @click="openNotaInBrowser(spReceiptUrl)">
             Ver a nota na SEFAZ
           </button>
+          <ion-modal :is-open="itemsOpen && itemsNow.kind === 'loaded'" @did-dismiss="itemsOpen = false">
+            <NfceItemsSheet
+              v-if="itemsNow.kind === 'loaded'"
+              :items="itemsNow.items"
+              :issuer="itemsIssuer"
+              :device="itemsNow.source === 'device'"
+              @close="itemsOpen = false"
+            />
+          </ion-modal>
 
           <!-- Depois do comprovante, em linha compacta: abre os campos só quando marcada -->
           <div v-if="!isEdit" class="card installments" :class="{ open: installmentOn }">
@@ -179,7 +195,16 @@
 </template>
 
 <script setup lang="ts">
-import { IonContent, IonPage, onIonViewDidEnter, onIonViewWillEnter } from '@ionic/vue';
+import { IonContent, IonModal, IonPage, onIonViewDidEnter, onIonViewWillEnter } from '@ionic/vue';
+import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
+import {
+  bestItemsRead,
+  itemsDiffText,
+  itemsState,
+  itemsStatusText,
+  type ItemsMissingReason,
+  type ItemsRead,
+} from '@/domain/nfceItemsState';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import ReceiptPicker, { type ReceiptState } from '@/components/ReceiptPicker.vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -221,8 +246,8 @@ import { seriesTargets } from '@/services/series';
 import { MAX_NOTE } from '@/domain/notifications';
 import { fiscalDocName, formatCnpj, lookupCnpjName, lookupNfce, readNfceOnDevice, type NfcePrefill, type ScannedNfce } from '@/services/nfce';
 import { notaWebViewAvailable, openNotaInBrowser } from '@/services/notaWebView';
-import { saveDeviceItems } from '@/services/nfceItems';
-import { NFCE_BUDGET_MS, remainingMs, shouldTryDevice, spReceiptStatus, type NfceOutcome } from '@/domain/nfceFlow';
+import { itemsToSave } from '@/services/nfceItemsData';
+import { NFCE_BUDGET_MS, mergeOutcome, remainingMs, shouldTryDevice, spReceiptStatus, type NfceOutcome } from '@/domain/nfceFlow';
 import type { NfceItems } from '../../functions/src/nfce';
 import { debtView, duplicateNoteText } from '@/services/expenseView';
 import { usedByOther } from '@/services/fiscalKeys';
@@ -265,10 +290,49 @@ const showErrors = ref(false);
 const receipt = ref<ReceiptState>({ type: 'none' });
 const dateTouched = ref(false);
 const nfceMessage = ref<{ kind: 'info' | 'ok' | 'warn'; text: string } | null>(null);
-/** Tentativas feitas por chave (servidor, aparelho), para o estado gravado na nota. */
+/** Tentativas feitas por chave (servidor, aparelho), somadas entre leituras, para o estado gravado na nota. */
 const nfceOutcomes = new Map<string, NfceOutcome>();
-/** Itens lidos no aparelho por chave, gravados depois de salvar o gasto. */
-const deviceReads = new Map<string, { items: NfceItems; page: NfcePrefill }>();
+/** Nota conferida pelo servidor, por chave: ler o mesmo QR de novo não consulta outra vez. */
+const serverReads = new Map<string, NfcePrefill>();
+/** Nota lida no aparelho por chave (com os itens, se a página os trouxe), gravada no mesmo lote do gasto. */
+const deviceReads = new Map<string, { items: NfceItems | null; page: NfcePrefill }>();
+/** Melhor leitura dos itens por chave (a mesma regra das tentativas: uma falha depois não apaga). */
+const itemsReads = ref<Record<string, ItemsRead>>({});
+/** Motivo da última falha por chave, enquanto nenhuma leitura trouxe a nota. */
+const itemsFailures = ref<Record<string, ItemsMissingReason>>({});
+const itemsOpen = ref(false);
+
+function noteItemsRead(key: string, read: ItemsRead): void {
+  const best = bestItemsRead(itemsReads.value[key], read);
+  if (best) itemsReads.value = { ...itemsReads.value, [key]: best };
+}
+function noteItemsFailure(key: string, reason: ItemsMissingReason): void {
+  itemsFailures.value = { ...itemsFailures.value, [key]: reason };
+}
+
+/**
+ * Estado dos itens da NFC-e de SP escolhida agora: o que a tela mostra é o que
+ * o Salvar grava (`itemsToSave`, a partir deste mesmo estado).
+ */
+const itemsNow = computed(() => {
+  const r = receipt.value;
+  if (r.type !== 'nfce' || !r.spUrl) return { kind: 'none' } as const;
+  return itemsState({
+    loading: nfceWaitKey.value === r.nfceKey,
+    read: itemsReads.value[r.nfceKey],
+    failure: itemsFailures.value[r.nfceKey],
+    expenseTotalCents: totalCents.value,
+  });
+});
+const itemsText = computed(() => itemsStatusText(itemsNow.value, formatBRL));
+const itemsDiff = computed(() => itemsDiffText(itemsNow.value, formatBRL));
+/** Página da leitura mostrada (emitente e data), para o título da lista e para gravar os itens do aparelho. */
+function itemsPage(key: string): NfcePrefill | undefined {
+  const state = itemsNow.value;
+  if (state.kind !== 'loaded') return undefined;
+  return state.source === 'device' ? deviceReads.get(key)?.page : serverReads.get(key);
+}
+const itemsIssuer = computed(() => (receipt.value.type === 'nfce' ? itemsPage(receipt.value.nfceKey)?.issuerName : undefined));
 /** URL oficial da NFC-e de SP escolhida agora ("Ver a nota na SEFAZ"). */
 const spReceiptUrl = computed(() => (receipt.value.type === 'nfce' ? receipt.value.spUrl : null));
 const picker = ref<InstanceType<typeof ReceiptPicker> | null>(null);
@@ -314,7 +378,11 @@ onIonViewWillEnter(() => {
   dateTouched.value = false;
   nfceMessage.value = null;
   nfceOutcomes.clear();
+  serverReads.clear();
   deviceReads.clear();
+  itemsReads.value = {};
+  itemsFailures.value = {};
+  itemsOpen.value = false;
   installmentOn.value = false;
   installmentCount.value = MIN_INSTALLMENTS;
   installmentFirstMonth.value = monthOf(today.value);
@@ -423,9 +491,18 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   // Até duas tentativas, cada uma uma vez só, no mesmo limite de 10 s do Salvar:
   // 1. pelo servidor (conferida pela SEFAZ); 2. se falhar, no aparelho (WebView
   // visível, "lida no aparelho"); 3. se falhar também, plano B na hora.
+  // Leituras seguidas da mesma nota: um sucesso anterior nunca é apagado por uma falha depois.
+  const previous = nfceOutcomes.get(scanned.key);
   const outcome: NfceOutcome = { server: 'skipped', device: 'skipped' };
-  nfceOutcomes.set(scanned.key, outcome);
+  nfceOutcomes.set(scanned.key, mergeOutcome(previous, outcome));
+  const earlier = serverReads.get(scanned.key);
+  if (earlier) {
+    // Já conferida pelo servidor nesta tela: os mesmos dados, sem nova consulta.
+    showNota(scanned, { data: earlier }, false);
+    return;
+  }
   if (!navigator.onLine) {
+    noteItemsFailure(scanned.key, 'offline');
     nfceMessage.value = { kind: 'warn', text: 'Sem conexão: digite o valor. A nota será conferida quando a conexão voltar.' };
     await fillIssuerName(scanned, provisional);
     return;
@@ -433,22 +510,40 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   const deadline = Date.now() + NFCE_BUDGET_MS;
   nfceWaitKey.value = scanned.key;
   nfceMessage.value = { kind: 'info', text: 'Consultando a nota na SEFAZ…' };
-  let result: { data: NfcePrefill } | { error: string } = await withTimeout(
-    lookupNfce(scanned.spUrl),
-    remainingMs(deadline, Date.now()),
-    { error: 'A SEFAZ não respondeu a tempo.' },
-  );
-  outcome.server = 'data' in result ? 'ok' : 'failed';
+  const server = await withTimeout(lookupNfce(scanned.spUrl), remainingMs(deadline, Date.now()), {
+    error: 'A SEFAZ não respondeu a tempo.',
+    reason: 'timeout' as ItemsMissingReason,
+  });
+  let result: { data: NfcePrefill } | { error: string } = server;
+  outcome.server = 'data' in server ? 'ok' : 'failed';
+  if ('data' in server) {
+    serverReads.set(scanned.key, server.data);
+    noteItemsRead(scanned.key, { source: 'server', items: server.items });
+  } else {
+    noteItemsFailure(scanned.key, server.reason);
+  }
   let fromDevice = false;
-  if (shouldTryDevice(outcome.server, notaWebViewAvailable(), remainingMs(deadline, Date.now()))) {
+  // Já lida no aparelho nesta tela: não abre a página de novo (vale a leitura anterior).
+  const deviceDone = deviceReads.has(scanned.key);
+  if (!deviceDone && shouldTryDevice(outcome.server, notaWebViewAvailable(), remainingMs(deadline, Date.now()))) {
     nfceMessage.value = { kind: 'info', text: 'O servidor não conseguiu consultar: abrindo a nota no aparelho…' };
     const device = await readNfceOnDevice(scanned.spUrl, remainingMs(deadline, Date.now()));
     outcome.device = 'data' in device ? 'ok' : 'failed';
     if ('data' in device) {
       result = { data: device.data };
       fromDevice = true;
-      if (device.items) deviceReads.set(scanned.key, { items: device.items, page: device.data });
+      deviceReads.set(scanned.key, { items: device.items, page: device.data });
+      noteItemsRead(scanned.key, { source: 'device', items: device.items });
+    } else {
+      noteItemsFailure(scanned.key, device.reason);
     }
+  }
+  nfceOutcomes.set(scanned.key, mergeOutcome(previous, outcome));
+  // Leitura no aparelho que deu certo antes, nesta tela, e agora falhou: vale a anterior.
+  const earlierDevice = deviceReads.get(scanned.key);
+  if ('error' in result && earlierDevice) {
+    result = { data: earlierDevice.page };
+    fromDevice = true;
   }
   if (nfceWaitKey.value === scanned.key) nfceWaitKey.value = null;
   // Outro comprovante escolhido enquanto consultava: ignora.
@@ -462,6 +557,12 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
     await fillIssuerName(scanned, provisional);
     return;
   }
+  showNota(scanned, result, fromDevice);
+}
+
+/** Preenche o formulário com a nota lida (pelo servidor ou no aparelho) e diz de onde veio e se os itens vieram. */
+function showNota(scanned: ScannedNfce, result: { data: NfcePrefill }, fromDevice: boolean): void {
+  if (receipt.value.type !== 'nfce' || receipt.value.nfceKey !== scanned.key) return;
   const nota = result.data;
   receipt.value = { ...receipt.value, label: `Nota de ${nota.issuerName}` };
   // Preenche só o que ainda não foi digitado; nunca sobrescreve. A descrição
@@ -477,7 +578,10 @@ async function onScanned(scanned: ScannedNfce): Promise<void> {
   nfceMessage.value =
     totalCents.value === nota.totalCents
       ? { kind: 'ok', text: `${how}ota de ${formatBRL(nota.totalCents)} em ${when}.` }
-      : { kind: 'warn', text: `${how}ota de ${formatBRL(nota.totalCents)}, diferente do valor digitado. ${partnerFirstName.value} verá o aviso e poderá contestar.` };
+      : {
+          kind: 'warn',
+          text: `${how}ota de ${formatBRL(nota.totalCents)}, diferente do valor digitado. ${partnerFirstName.value} verá o aviso e poderá contestar.`,
+        };
 }
 
 /**
@@ -689,20 +793,16 @@ async function save(): Promise<void> {
     receipt: receiptChoice(),
     categoryId: categoryId.value,
   };
-  // Itens lidos no aparelho (o servidor falhou): gravados depois do gasto, uma vez por nota.
-  const saveDevice = () => {
-    const r = receipt.value;
-    const read = r.type === 'nfce' ? deviceReads.get(r.nfceKey) : undefined;
-    if (r.type === 'nfce' && read && group.value) saveDeviceItems(group.value.id, r.nfceKey, read.items, read.page);
-  };
+  // Itens lidos no aparelho: no mesmo lote do gasto, atômico (offline também), exatamente os mostrados.
+  const deviceItems =
+    receipt.value.type === 'nfce' ? itemsToSave(receipt.value.nfceKey, itemsNow.value, itemsPage(receipt.value.nfceKey)) : undefined;
   // Foto nova: de recibo, ou da nota junto com a chave.
   const photo =
     receipt.value.type === 'photo' ? receipt.value.data : receipt.value.type === 'nfce' ? receipt.value.photo?.data : undefined;
   // Não espera o servidor: offline, a gravação (e a foto) sincronizam depois.
   if (editing?.installment) {
     const targets = seriesParcels.value.length > 0 ? seriesTargets(seriesParcels.value, 'edit', myUid.value, closedMonths.value) : [editing];
-    updateSeries(group.value.id, editing.installment.seriesId, targets, input, photo);
-    saveDevice();
+    updateSeries(group.value.id, editing.installment.seriesId, targets, input, photo, deviceItems);
     router.replace({ name: 'gasto', params: { id: editing.id } });
     return;
   }
@@ -713,15 +813,14 @@ async function save(): Promise<void> {
       { count: installmentCount.value, firstMonth: installmentFirstMonth.value },
       myUid.value,
       photo,
+      deviceItems,
     );
-    saveDevice();
     router.replace({ name: 'painel', query: { mes: result.competence } });
     return;
   }
   const result = editing
-    ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value, photo)
-    : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value, photo);
-  saveDevice();
+    ? updateExpense(group.value.id, editing, input, closedMonths.value, today.value, photo, deviceItems)
+    : createExpense(group.value.id, input, myUid.value, closedMonths.value, today.value, photo, deviceItems);
 
   router.replace(
     editing
@@ -813,6 +912,38 @@ textarea.note-input {
 
 .duplicate p {
   margin: 0;
+}
+
+.items-state {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+}
+
+.items-state.missing {
+  background: #fcebd9;
+  color: #8a3f00;
+  border-color: transparent;
+}
+
+.items-text,
+.items-diff {
+  margin: 0;
+}
+
+.items-diff {
+  color: var(--app-danger);
+  font-weight: 600;
+}
+
+.items-see {
+  height: 40px;
+  align-self: flex-start;
 }
 
 .nfce-msg {

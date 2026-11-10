@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, serverTimestamp, setDoc, type Unsubscribe } from 'firebase/firestore';
+import { collection, doc, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { computed, shallowRef, watch } from 'vue';
 import { formatBRL } from '@/domain/money';
 import { RETRY_COOLDOWN_MS } from '../../functions/src/nfceRetry';
@@ -43,22 +43,6 @@ watch(
 
 /** Itens por chave da nota (só das notas com itens lidos). */
 export const nfceItemsByKey = computed<ReadonlyMap<string, StoredNfceItems>>(() => byKey.value);
-
-/**
- * Grava os itens lidos no aparelho (uma vez por nota, por quem lançou o gasto
- * com a chave), fora do lote do gasto: se já houver itens (oficiais ou não),
- * as regras recusam só esta gravação, sem afetar o gasto.
- */
-export function saveDeviceItems(groupId: string, key: string, items: NfceItems, page: { issuerName: string; date: string }): void {
-  if (byKey.value.has(key)) return;
-  void setDoc(doc(db, 'groups', groupId, 'nfceItems', key), {
-    ...items,
-    issuerName: page.issuerName.slice(0, 120),
-    date: page.date,
-    fetchedAt: serverTimestamp(),
-    source: 'device',
-  }).catch(() => undefined);
-}
 
 const quantityFormat = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 4 });
 

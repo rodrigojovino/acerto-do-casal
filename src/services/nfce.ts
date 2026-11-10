@@ -14,6 +14,7 @@ import {
 } from '../../functions/src/nfce';
 import { notaWebViewAvailable, readNotaInApp } from './notaWebView';
 import type { KeyEntry } from './expenseData';
+import type { ItemsMissingReason } from '@/domain/nfceItemsState';
 import type { IsoDate } from '@/domain/calendar';
 import type { Cents } from '@/domain/settlement';
 import { functions } from './firebase';
@@ -124,23 +125,28 @@ export function formatCnpj(cnpj: string): string {
 /**
  * Só SP, online: consulta a SEFAZ (pela Function) para pré-preencher o formulário.
  * Offline ou com falha, devolve o motivo e o QR segue como comprovante (plano B).
+ * Com os itens guardados no servidor (os mesmos que o gatilho grava), para o
+ * formulário mostrar antes de salvar; `null` se a página não trouxe os itens.
  */
-export async function lookupNfce(spUrl: string): Promise<{ data: NfcePrefill } | { error: string }> {
-  if (!navigator.onLine) return { error: 'Sem conexão: digite o valor. A nota será conferida quando a conexão voltar.' };
+export async function lookupNfce(
+  spUrl: string,
+): Promise<{ data: NfcePrefill; items: NfceItems | null } | { error: string; reason: ItemsMissingReason }> {
+  if (!navigator.onLine) return { error: 'Sem conexão: digite o valor. A nota será conferida quando a conexão voltar.', reason: 'offline' };
   try {
-    const call = httpsCallable<{ url: string }, NfcePrefill & { key: string; issuerCnpj: string }>(
+    const call = httpsCallable<{ url: string }, NfcePrefill & { key: string; issuerCnpj: string; items?: NfceItems | null }>(
       functions,
       'resolveNfce',
       { timeout: 20_000 },
     );
     const { data } = await call({ url: spUrl });
-    return { data: { issuerName: data.issuerName, totalCents: data.totalCents, date: data.date } };
+    return { data: { issuerName: data.issuerName, totalCents: data.totalCents, date: data.date }, items: data.items ?? null };
   } catch (err) {
     const message =
       err instanceof FirebaseError && err.code !== 'functions/internal' && err.code !== 'functions/deadline-exceeded'
         ? err.message
         : 'A SEFAZ não respondeu.';
-    return { error: `${message} Digite o valor; a nota continua valendo como comprovante.` };
+    const reason: ItemsMissingReason = err instanceof FirebaseError && err.code === 'functions/deadline-exceeded' ? 'timeout' : 'blocked';
+    return { error: `${message} Digite o valor; a nota continua valendo como comprovante.`, reason };
   }
 }
 
@@ -154,24 +160,25 @@ export async function lookupNfce(spUrl: string): Promise<{ data: NfcePrefill } |
 export async function readNfceOnDevice(
   spUrl: string,
   timeoutMs: number,
-): Promise<{ data: NfcePrefill; items: NfceItems | null } | { error: string }> {
-  if (!notaWebViewAvailable() || !navigator.onLine) return { error: 'A leitura no aparelho não está disponível.' };
+): Promise<{ data: NfcePrefill; items: NfceItems | null } | { error: string; reason: ItemsMissingReason }> {
+  if (!navigator.onLine) return { error: 'Sem conexão.', reason: 'offline' };
+  if (!notaWebViewAvailable()) return { error: 'A leitura no aparelho não está disponível.', reason: 'blocked' };
   try {
     const { html } = await readNotaInApp(spUrl, timeoutMs);
-    if (!html) return { error: 'A página da nota não carregou a tempo.' };
+    if (!html) return { error: 'A página da nota não carregou a tempo.', reason: 'timeout' };
     const { result, items } = readNfcePage(spUrl, html);
     return { data: { issuerName: result.issuerName, totalCents: result.totalCents, date: result.date }, items };
   } catch (err) {
-    return { error: err instanceof NfceError ? err.message : 'Não foi possível ler a nota no aparelho.' };
+    return { error: err instanceof NfceError ? err.message : 'Não foi possível ler a nota no aparelho.', reason: 'blocked' };
   }
 }
 
-// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada 15 minutos por nota ----
+// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada minuto por nota ----
 
 export type RetryResult = { ok: true; retryAt: number } | { ok: false; retryAt: number; limited: boolean; message: string };
 
 /**
- * Pede ao servidor (`retryNfce`) uma nova conferência. O limite de 15 minutos
+ * Pede ao servidor (`retryNfce`) uma nova conferência. O limite de 1 minuto
  * por nota é contado lá; recusado pelo limite, devolve quando tentar.
  */
 export async function retryNfceOnServer(groupId: string, expenseId: string): Promise<RetryResult> {

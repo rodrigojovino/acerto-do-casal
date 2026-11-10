@@ -93,6 +93,10 @@
               <p v-if="retryLocked" class="hint">Tente de novo mais tarde (a partir das {{ retryTime }}).</p>
             </template>
             <p v-if="retryMessage" class="hint" role="status">{{ retryMessage }}</p>
+            <div v-if="itemsNotSaved" class="items-alert" role="alert">
+              <p>Os itens lidos da nota não foram gravados ({{ itemsNotSaved.items.items.length }}). Gravar de novo usa a leitura guardada, sem consultar a SEFAZ.</p>
+              <button type="button" class="link" @click="saveItemsAgain(itemsNotSaved)">Tentar gravar de novo</button>
+            </div>
             <button v-if="spUrl" type="button" class="link" @click="openNotaInBrowser(spUrl)">Ver a nota na SEFAZ</button>
             <button v-if="noteItems" type="button" class="btn outline items-btn" @click="itemsOpen = true">
               Ver itens da nota ({{ noteItems.items.length }})
@@ -266,7 +270,9 @@ import { NFCE_APPROVER, badgeFor, canContest, debtView, isAutoConfirmed, originL
 import TypeBadge from '@/components/TypeBadge.vue';
 import PhotoViewer from '@/components/PhotoViewer.vue';
 import NfceItemsSheet from '@/components/NfceItemsSheet.vue';
-import { isDeviceItems, nfceItemsByKey, saveDeviceItems, watchNfceRetry } from '@/services/nfceItems';
+import { isDeviceItems, nfceItemsByKey, watchNfceRetry } from '@/services/nfceItems';
+import { rejectedItems, saveItemsAgain, saveItemsAlone } from '@/services/itemsGuard';
+import { canWriteDeviceItems } from '@/services/nfceItemsData';
 import { notaWebViewAvailable, openNotaInBrowser } from '@/services/notaWebView';
 import { NFCE_BUDGET_MS } from '@/domain/nfceFlow';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -531,13 +537,20 @@ const noteItems = computed(() => {
   return r.nfceStatus === 'ok' || isDeviceItems(items) ? items : null;
 });
 
+/** Itens lidos no aparelho desta nota que o servidor não tem (recusados ou perdidos): aviso com "Tentar gravar de novo". */
+const itemsNotSaved = computed(() => {
+  const r = expense.value?.receipt;
+  if (r?.type !== 'nfce' || nfceItemsByKey.value.has(r.nfceKey)) return null;
+  return rejectedItems.value.find((x) => x.groupId === group.value?.id && x.key === r.nfceKey) ?? null;
+});
+
 /** Itens lidos no aparelho (sem conferência da SEFAZ), para o título e o detalhe. */
 const deviceItems = computed(() => (noteItems.value && isDeviceItems(noteItems.value) ? noteItems.value : null));
 
 /** URL oficial da NFC-e de SP ("Ver a nota na SEFAZ"). */
 const spUrl = computed(() => (expense.value?.receipt.type === 'nfce' ? (expense.value.receipt.nfceUrl ?? null) : null));
 
-// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada 15 minutos por nota ----
+// ---- "Tentar conferir de novo": uma tentativa pelo servidor a cada minuto por nota ----
 const canRetryNfce = computed(
   () =>
     isCreator.value &&
@@ -700,7 +713,7 @@ async function approveDel(): Promise<void> {
 
 /**
  * Uma tentativa pelo servidor; se falhar, no Android, oferece abrir a nota no
- * aparelho, uma vez, visível. Nada se repete sozinho; o limite de 15 minutos é
+ * aparelho, uma vez, visível. Nada se repete sozinho; o limite de 1 minuto é
  * contado no servidor.
  */
 async function retryNfce(): Promise<void> {
@@ -736,8 +749,13 @@ async function retryNfce(): Promise<void> {
     if (role !== 'confirm') return;
     const device = await readNfceOnDevice(url, NFCE_BUDGET_MS);
     if ('data' in device) {
-      if (device.items) saveDeviceItems(g.id, key, device.items, device.data);
-      retryMessage.value = `Nota lida no aparelho, sem conferência da SEFAZ: ${device.data.issuerName} · ${formatBRL(device.data.totalCents)}.`;
+      // Itens oficiais já gravados não são trocados pelos lidos no aparelho.
+      const existing = nfceItemsByKey.value.get(key);
+      if (device.items && canWriteDeviceItems(existing)) {
+        saveItemsAlone(g.id, { key, items: device.items, page: { issuerName: device.data.issuerName, date: device.data.date } }, e.id, e.description);
+      }
+      const items = device.items ? ` ${device.items.items.length} ${device.items.items.length === 1 ? 'item lido' : 'itens lidos'}.` : ' Os itens não puderam ser lidos.';
+      retryMessage.value = `Nota lida no aparelho, sem conferência da SEFAZ: ${device.data.issuerName} · ${formatBRL(device.data.totalCents)}.${items}`;
     } else {
       retryMessage.value = 'A SEFAZ não liberou a consulta. Use "Ver a nota na SEFAZ" para conferir.';
     }
@@ -832,6 +850,23 @@ function goBack(): void {
   margin-top: 8px;
   height: 44px;
   width: 100%;
+}
+
+.items-alert {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-control);
+  background: var(--app-danger-bg);
+  color: var(--app-danger);
+}
+
+.items-alert p {
+  margin: 0 0 4px;
+}
+
+.items-alert .link {
+  color: inherit;
+  font-weight: 700;
 }
 
 .series {

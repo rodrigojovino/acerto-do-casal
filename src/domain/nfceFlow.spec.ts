@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICE_MIN_MS, NFCE_BUDGET_MS, remainingMs, shouldTryDevice, spReceiptStatus } from './nfceFlow';
+import { DEVICE_MIN_MS, NFCE_BUDGET_MS, mergeOutcome, remainingMs, shouldTryDevice, spReceiptStatus } from './nfceFlow';
+
+describe('leituras seguidas da mesma nota (o QR lido de novo)', () => {
+  it('servidor ok antes e barrado depois: continua ok, e a nota vai para o gatilho com o resultado guardado', () => {
+    const merged = mergeOutcome({ server: 'ok', device: 'skipped' }, { server: 'failed', device: 'failed' });
+    expect(merged).toEqual({ server: 'ok', device: 'failed' });
+    expect(spReceiptStatus(merged)).toBe('pending');
+  });
+
+  it('aparelho ok antes e falha depois: continua lida no aparelho', () => {
+    expect(mergeOutcome({ server: 'failed', device: 'ok' }, { server: 'failed', device: 'failed' })).toEqual({ server: 'failed', device: 'ok' });
+  });
+
+  it('primeira leitura: o resultado dela', () => {
+    expect(mergeOutcome(undefined, { server: 'failed', device: 'skipped' })).toEqual({ server: 'failed', device: 'skipped' });
+  });
+
+  it('offline depois de uma tentativa: a tentativa anterior vale', () => {
+    expect(mergeOutcome({ server: 'failed', device: 'failed' }, { server: 'skipped', device: 'skipped' })).toEqual({ server: 'failed', device: 'failed' });
+  });
+});
 
 describe('estado gravado na NFC-e de SP (no máximo duas consultas por nota)', () => {
   it('servidor deu certo: pending (o gatilho usa o resultado guardado, sem rede)', () => {

@@ -33,6 +33,18 @@ export function shouldTryDevice(serverResult: AttemptResult, hasWebView: boolean
 }
 
 /**
+ * Junta as tentativas de leituras seguidas da mesma nota no formulário (o QR
+ * lido de novo): um sucesso anterior nunca é apagado por uma falha depois. Sem
+ * isso, uma leitura pelo servidor que deu certo seguida de outra barrada
+ * gravava a nota como "sem conferência" e os itens já lidos se perdiam.
+ */
+export function mergeOutcome(prev: NfceOutcome | undefined, next: NfceOutcome): NfceOutcome {
+  const best = (a: AttemptResult | undefined, b: AttemptResult): AttemptResult =>
+    a === 'ok' || b === 'ok' ? 'ok' : a === 'failed' || b === 'failed' ? 'failed' : 'skipped';
+  return { server: best(prev?.server, next.server), device: best(prev?.device, next.device) };
+}
+
+/**
  * Estado gravado na NFC-e de SP, que diz ao gatilho do servidor (`checkNfce`)
  * se ainda pode consultar (no máximo duas consultas por nota):
  * - servidor deu certo: 'pending' (o gatilho usa o resultado guardado, sem rede);

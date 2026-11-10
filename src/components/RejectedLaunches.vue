@@ -1,5 +1,5 @@
 <template>
-  <ul v-if="rejectedLaunches.length > 0" class="rejected" role="alert">
+  <ul v-if="rejectedLaunches.length > 0 || itemsAlone.length > 0" class="rejected" role="alert">
     <li v-for="launch in rejectedLaunches" :key="launch.expenseId" class="item">
       <p class="strong">Não foi salvo: {{ launch.kind === 'series' ? 'compra parcelada ' : '' }}{{ expenseLabel(launch.input) }}</p>
       <p class="hint">{{ reason(launch) }}</p>
@@ -7,6 +7,17 @@
         <button class="btn outline" type="button" @click="discard(launch)">Descartar</button>
         <button v-if="launch.duplicateOf" class="btn primary" type="button" @click="openDuplicate(launch)">Ver o gasto</button>
         <button v-else-if="launch.kind === 'single'" class="btn primary" type="button" @click="relaunch(launch)">Lançar no mês aberto</button>
+      </div>
+    </li>
+    <li v-for="record in itemsAlone" :key="record.key" class="item">
+      <p class="strong">Os itens lidos da nota não foram gravados: {{ record.label }}</p>
+      <p class="hint">
+        {{ record.items.items.length }} {{ record.items.items.length === 1 ? 'item lido' : 'itens lidos' }} no aparelho. Gravar de novo usa a
+        leitura guardada, sem consultar a SEFAZ.
+      </p>
+      <div class="actions">
+        <button class="btn outline" type="button" @click="discardItems(record)">Descartar</button>
+        <button class="btn primary" type="button" @click="saveItemsAgain(record)">Tentar gravar de novo</button>
       </div>
     </li>
   </ul>
@@ -18,10 +29,20 @@ import { monthName, monthOf, todayInSaoPaulo } from '@/domain/calendar';
 import { createExpense } from '@/services/expenses';
 import { duplicateNoteText, expenseLabel } from '@/services/expenseView';
 import { forgetLaunch, rejectedLaunches, type RejectedLaunch } from '@/services/launchGuard';
+import { forgetItems, rejectedItems, saveItemsAgain, type GuardedItems } from '@/services/itemsGuard';
+import { computed } from 'vue';
 import { closedMonths } from '@/services/months';
 import { firstNameOf, group, user } from '@/services/session';
 
 const router = useRouter();
+
+/**
+ * Itens lidos no aparelho que o servidor não tem. Os do lançamento recusado
+ * aparecem só no aviso dele: relançar grava os itens junto.
+ */
+const itemsAlone = computed(() =>
+  rejectedItems.value.filter((r) => !rejectedLaunches.value.some((l) => l.groupId === r.groupId && l.expenseId === r.expenseId)),
+);
 
 /**
  * Lançamentos recusados na sincronização (o mês fechou enquanto estavam
@@ -48,12 +69,18 @@ async function relaunch(launch: RejectedLaunch): Promise<void> {
   const uid = user.value?.uid;
   if (!group.value || !uid) return;
   // Mesmos dados; a competência sai do mês aberto (a data fica a original).
-  createExpense(group.value.id, launch.input, uid, closedMonths.value, todayInSaoPaulo(), launch.photo);
+  // Os itens lidos no aparelho vão de novo no mesmo lote (sem consultar a SEFAZ).
+  createExpense(group.value.id, launch.input, uid, closedMonths.value, todayInSaoPaulo(), launch.photo, launch.deviceItems);
   await forgetLaunch(launch.groupId, launch.expenseId);
 }
 
 function discard(launch: RejectedLaunch): void {
   void forgetLaunch(launch.groupId, launch.expenseId);
+  if (launch.deviceItems) void forgetItems(launch.groupId, launch.deviceItems.key);
+}
+
+function discardItems(record: GuardedItems): void {
+  void forgetItems(record.groupId, record.key);
 }
 
 /** Abre o gasto que tem a nota; o aviso continua até ser descartado. */
